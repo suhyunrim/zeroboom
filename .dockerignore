@@ -1,0 +1,6 @@
+LICENSE
+README.md
+doc
+Dockerfile
+.*
+src/client
