@@ -11,7 +11,8 @@ LOL Community Management Bot Service for Whipping Cream
 cp .env_defaults .env
 
 npm install
-npm run-script start
+npx sequelize db:migrate
+npm start
 ```
 
 ### Prerequisites
