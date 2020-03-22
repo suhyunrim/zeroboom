@@ -2,10 +2,12 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import methodOverride from 'method-override';
 
+import { logMiddleWare } from './logger';
 import routes from '../api';
 import config from '../config';
 
 export default (app) => {
+  app.use(logMiddleWare);
   /**
    * Health Check endpoints
    * @TODO Explain why they are here

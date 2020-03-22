@@ -1,11 +1,15 @@
-const fs = require('fs');
-const path = require('path');
-const Sequelize = require('sequelize');
-const config = require('../../config/db');
+import fs from 'fs';
+import path from 'path';
+import Sequelize from 'sequelize';
+
+import config from '../../config/db';
+import { logger } from '../../loaders/logger';
 
 const db = {};
 const sequelize = new Sequelize(config[process.env.NODE_ENV]);
 const basename = path.basename(__filename);
+
+sequelize.options.logging = logger.debug.bind(logger);
 
 fs.readdirSync(__dirname)
   .filter((file) => {

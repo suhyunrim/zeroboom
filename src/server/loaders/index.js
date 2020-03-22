@@ -1,6 +1,6 @@
 import expressLoader from './express';
 import sequelizeLoader from './sequelize';
-import logger from './logger';
+import { logger } from './logger';
 
 export default async (app) => {
   await sequelizeLoader();
