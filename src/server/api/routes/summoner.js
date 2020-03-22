@@ -1,27 +1,27 @@
-const moment = require('moment');
-const { Router } = require('express');
-// const middlewares = require('../middlewares');
-const models = require('../../db/models');
-const riotAPIService = require('../../services/riot-api');
+// import moment from 'moment';
+import { Router } from 'express';
+// import middlewares from '../middlewares';
+import models from '../../db/models';
+import riotAPIService from '../../services/riot-api';
 
 const route = Router();
 
-module.exports = (app) => {
-    app.use('/summoners', route);
+export default (app) => {
+  app.use('/summoners', route);
 
-    route.get('/name/:name', async (req, res) => {
-        const { name } = req.params;
+  route.get('/name/:name', async (req, res) => {
+    const { name } = req.params;
 
-        // find existed Data
-        let result = await models.summoner.findOne({ where: { name } });
+    // find existed Data
+    let result = await models.summoner.findOne({ where: { name } });
 
-        // if not exists
-        if (!result) {
-            result = await riotAPIService.getSummonerByName(name);
-        }
+    // if not exists
+    if (!result) {
+      result = await riotAPIService.getSummonerByName(name);
+    }
 
-        // const term = moment().diff(moment(result.updatedAt), 'days')
+    // const term = moment().diff(moment(result.updatedAt), 'days')
 
-        return res.json({ result }).status(200);
-    });
+    return res.json({ result }).status(200);
+  });
 };

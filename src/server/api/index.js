@@ -1,12 +1,10 @@
-const { Router } = require('express');
-const user = require ('./routes/user');
-const summoner = require ('./routes/summoner');
+import { Router } from 'express';
+import summoner from './routes/summoner';
 
 // guaranteed to get dependencies
-module.exports = () => {
-	const app = Router();
-	user(app);
-	summoner(app);
+export default () => {
+  const app = Router();
+  summoner(app);
 
-	return app
-}
+  return app;
+};

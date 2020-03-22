@@ -1,8 +1,8 @@
-const expressLoader = require('./express');
-const sequelizeLoader = require('./sequelize');
-const logger = require('./logger');
+import expressLoader from './express';
+import sequelizeLoader from './sequelize';
+import logger from './logger';
 
-module.exports = async (app) => {
+export default async (app) => {
   await sequelizeLoader();
   logger.info('✌️ DB loaded and connected!');
 

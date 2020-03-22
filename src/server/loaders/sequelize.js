@@ -1,5 +1,5 @@
-const { sequelize } = require('../db/models');
+import { sequelize } from '../db/models';
 
-module.exports = async () => {
-    await sequelize.sync();
-}
+export default async () => {
+  await sequelize.sync();
+};

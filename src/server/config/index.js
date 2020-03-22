@@ -19,7 +19,7 @@ module.exports = {
     database: process.env.DATABASE_NAME,
     host: process.env.DATABASE_HOST || 'localhost',
     port: process.env.DATABASE_PORT || 3306,
-    dialect: "mysql",
+    dialect: 'mysql',
     operatorsAliases: 0,
   },
   api: {

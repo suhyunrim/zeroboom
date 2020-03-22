@@ -1,9 +1,11 @@
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const routes = require('../api');
-const config = require('../config');
+import bodyParser from 'body-parser';
+import cors from 'cors';
+import methodOverride from 'method-override';
 
-module.exports = (app) => {
+import routes from '../api';
+import config from '../config';
+
+export default (app) => {
   /**
    * Health Check endpoints
    * @TODO Explain why they are here
@@ -27,21 +29,21 @@ module.exports = (app) => {
   // Some sauce that always add since 2014
   // "Lets you use HTTP verbs such as PUT or DELETE in places where the client doesn't support it."
   // Maybe not needed anymore ?
-  app.use(require('method-override')());
+  app.use(methodOverride());
 
   // Middleware that transforms the raw string of req.body into json
   app.use(bodyParser.json());
   // Load API routes
   app.use(config.api.prefix, routes());
 
-  /// catch 404 and forward to error handler
+  // catch 404 and forward to error handler
   app.use((req, res, next) => {
     const err = new Error('Not Found');
-    err['status'] = 404;
+    err.status = 404;
     next(err);
   });
 
-  /// error handlers
+  // error handlers
   app.use((err, req, res, next) => {
     /**
      * Handle 401 thrown by express-jwt library
@@ -54,6 +56,7 @@ module.exports = (app) => {
     }
     return next(err);
   });
+
   app.use((err, req, res, next) => {
     res.status(err.status || 500);
     res.json({
