@@ -1,19 +1,19 @@
-const express = require('express');
-// const config = require('./config');
+const app = require('express')();
+const loader = require('./loaders');
+const { port } = require('./config');
 const logger = require('./loaders/logger');
 
 async function startServer() {
-  const app = express();
+  await loader(app);
 
-  app.listen(3000, err => {
+  app.listen(port, err => {
     if (err) {
       logger.error(err);
       process.exit(1);
-      return;
     }
     logger.info(`
       ################################################
-      Hello, Camille! Server listening on port: ${3000}
+      Hello, Camille! Server listening on port: ${port}
       ################################################
     `);
   });
