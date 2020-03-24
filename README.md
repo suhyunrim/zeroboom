@@ -7,8 +7,12 @@ LOL Community Management Bot Service for Whipping Cream
 ~~These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.~~
 
 ```text
+# Copy .env & configure it
+cp .env_defaults .env
+
 npm install
-npm run-script start
+npx sequelize db:migrate
+npm start
 ```
 
 ### Prerequisites
