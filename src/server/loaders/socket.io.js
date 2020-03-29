@@ -8,7 +8,6 @@ export default (app) => {
   io.on('connection', (socket) => {
     logger.info('a user connected');
     // socket.broadcast.emit('hi');
-    socket.on('connected', 'hi');
     socket.on('disconnect', () => {
       logger.info('user disconnected');
     });
