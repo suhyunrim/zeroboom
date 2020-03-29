@@ -31,7 +31,7 @@ export default (app) => {
     async (req, res) => {
       const { name } = req.params;
 
-      // 검색 시 대소문자 및 띄어쓰기를 고려 안하게 해야 함.
+      // TODO: 검색 시 대소문자 및 띄어쓰기를 고려 안하게 해야 함.
       const found = await models.summoner.findOne({ where: { name } });
 
       // no data
@@ -39,13 +39,13 @@ export default (app) => {
         try {
           const result = await getSummonerByName(name);
 
-          // 닉변한 케이스에서 riotId 가 겹치는 경우 update로 처리해야 함
+          // TODO: 닉변한 케이스에서 riotId 가 겹치는 경우 update로 처리해야 함
           const created = await models.summoner.create({
             riotId: result.id,
             accountId: result.accountId,
             puuid: result.puuid,
             name: result.name,
-            rofileIconId: result.rofileIconId,
+            profileIconId: result.profileIconId,
             revisionDate: result.revisionDate,
             summonerLevel: result.summonerLevel,
           });
@@ -66,7 +66,7 @@ export default (app) => {
             accountId: result.accountId,
             puuid: result.puuid,
             name: result.name,
-            rofileIconId: result.rofileIconId,
+            profileIconId: result.profileIconId,
             revisionDate: result.revisionDate,
             summonerLevel: result.summonerLevel,
           });
