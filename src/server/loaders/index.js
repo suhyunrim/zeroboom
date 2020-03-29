@@ -1,5 +1,6 @@
 import expressLoader from './express';
 import sequelizeLoader from './sequelize';
+import socketioLoader from './socket.io';
 import { logger } from './logger';
 
 export default async (app) => {
@@ -8,4 +9,9 @@ export default async (app) => {
 
   await expressLoader(app);
   logger.info('✌️ Express loaded');
+
+  const server = await socketioLoader(app);
+  logger.info('✌️ Socket.IO loaded');
+
+  return server;
 };

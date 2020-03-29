@@ -5,9 +5,9 @@ import { logger } from './loaders/logger';
 
 async function startServer() {
   const app = express();
-  await loader(app);
+  const server = await loader(app);
 
-  app.listen(port, (err) => {
+  server.listen(port, (err) => {
     if (err) {
       logger.error(err);
       process.exit(1);
