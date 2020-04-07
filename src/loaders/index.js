@@ -1,9 +1,9 @@
-import expressLoader from './express';
-import sequelizeLoader from './sequelize';
-import socketioLoader from './socket.io';
-import { logger } from './logger';
+const expressLoader = require('./express');
+const sequelizeLoader = require('./sequelize');
+const socketioLoader = require('./socket.io');
+const { logger } = require('./logger');
 
-export default async (app) => {
+module.exports = async (app) => {
   await sequelizeLoader();
   logger.info('✌️ DB loaded and connected!');
 

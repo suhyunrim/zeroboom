@@ -1,9 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-import Sequelize from 'sequelize';
+const fs = require('fs');
+const path = require('path');
+const Sequelize = require('sequelize');
 
-import config from '../../config/db';
-import { logger } from '../../loaders/logger';
+const config = require('../../config/db');
+const { logger } = require('../../loaders/logger');
 
 const db = {};
 const sequelize = new Sequelize(config[process.env.NODE_ENV]);

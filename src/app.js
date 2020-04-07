@@ -1,9 +1,9 @@
-import express from 'express';
-import loader from './loaders';
-import { port } from './config';
-import { logger } from './loaders/logger';
+const express = require('express');
+const loader = require('./loaders');
+const { port } = require('./config');
+const { logger } = require('./loaders/logger');
 
-async function startServer() {
+const startServer = async () => {
   const app = express();
   const server = await loader(app);
 
@@ -18,6 +18,6 @@ async function startServer() {
       ################################################
     `);
   });
-}
+};
 
 startServer();

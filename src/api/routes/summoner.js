@@ -1,10 +1,10 @@
-import moment from 'moment';
-import { Router } from 'express';
-import { celebrate, Joi, Segments } from 'celebrate';
-// import middlewares from '../middlewares';
-import models from '../../db/models';
-import { getSummonerByName } from '../../services/riot-api';
-import { logger } from '../../loaders/logger';
+const moment = require('moment');
+const { Router } = require('express');
+const { celebrate, Joi, Segments } = require('celebrate');
+// const middlewares = require('../middlewares');
+const models = require('../../db/models');
+const { getSummonerByName } = require('../../services/riot-api');
+const { logger } = require('../../loaders/logger');
 
 const route = Router();
 
@@ -18,7 +18,7 @@ const expirationCheck = (time, duration = { unit: 'days', number: 1 }) => {
   return expiredAt.diff(moment()) <= 0;
 };
 
-export default (app) => {
+module.exports = (app) => {
   app.use('/summoners', route);
 
   route.get(

@@ -1,10 +1,10 @@
-import winston from 'winston';
-import morgan from 'morgan';
-import chalk from 'chalk';
-import moment from 'moment';
-import fs from 'fs';
+const winston = require('winston');
+const morgan = require('morgan');
+const chalk = require('chalk');
+const moment = require('moment');
+const fs = require('fs');
 
-import config from '../config';
+const config = require('../config');
 
 const logDir = `${__dirname}/../../logs`;
 
@@ -102,4 +102,4 @@ const logMiddleWare = morgan(
   { stream },
 );
 
-export { logger, stream, logMiddleWare };
+module.exports = { logger, stream, logMiddleWare };

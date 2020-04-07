@@ -1,8 +1,8 @@
-import http from 'http';
-import socketio from 'socket.io';
-import { logger } from './logger';
+const http = require('http');
+const socketio = require('socket.io');
+const { logger } = require('./logger');
 
-export default (app) => {
+module.exports = (app) => {
   const io = socketio();
 
   io.on('connection', (socket) => {

@@ -1,10 +1,10 @@
-// import moment from 'moment';
-import { Router } from 'express';
-// import middlewares from '../middlewares';
+// const moment = require('moment');
+const { Router } = require('express');
+// const middlewares = require('../middlewares');
 
 const route = Router();
 
-export default (app) => {
+module.exports = (app) => {
   app.use('/chats', route);
 
   route.get('/', async (req, res) => {
