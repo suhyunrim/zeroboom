@@ -36,7 +36,7 @@
     "moment": "^2.24.0",
     "morgan": "^1.9.1",
     "mysql2": "^2.1.0",
-    "sample-node-package": "git+https://git@github.com/WhippingCream/sample-node-package.git",
+    "sample-node-package": "git+https://git@github.com/WhippingCream/sample-node-package.git#54f65cbefe5079b5ed006c1eb2c152eada3e40c8",
     "sequelize": "^5.21.5",
     "sequelize-cli": "^5.5.1",
     "socket.io": "^2.3.0",

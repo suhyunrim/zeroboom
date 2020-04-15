@@ -1,7 +1,7 @@
 const riotAPI = require('sample-node-package');
 
 const getSummonerByName = async (summonerName) => {
-  const result = await riotAPI.summoner.getByName(summonerName)();
+  const result = await riotAPI.v4.summoner.getByName(summonerName)();
 
   if (result.status !== 200)
     throw new Error(
@@ -14,7 +14,7 @@ const getSummonerByName = async (summonerName) => {
 exports.getSummonerByName = getSummonerByName;
 
 const getEntriesBySummonerId = async (summonerId) => {
-  const result = await riotAPI.league.getEntriesBySummonerId(summonerId)();
+  const result = await riotAPI.v4.league.getEntriesBySummonerId(summonerId)();
 
   return result;
 };
