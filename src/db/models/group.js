@@ -5,10 +5,11 @@ module.exports = (sequelize, DataTypes) => {
       id: {
         type: DataTypes.INTEGER,
         autoIncrement: true,
-        primaryKey: true
+        primaryKey: true,
       },
       groupName: {
         type: DataTypes.STRING,
+        primaryKey: true,
       },
       revisionDate: {
         type: DataTypes.DATE,

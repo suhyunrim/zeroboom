@@ -4,6 +4,7 @@ module.exports = (sequelize, DataTypes) => {
     {
       riotId: {
         type: DataTypes.STRING,
+        primaryKey: true,
       },
       accountId: {
         type: DataTypes.STRING,

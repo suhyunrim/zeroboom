@@ -3,6 +3,7 @@ const summoner = require('./routes/summoner');
 const chat = require('./routes/chat');
 const group = require('./routes/group')
 const user = require('./routes/user')
+const match = require('./routes/match')
 
 // guaranteed to get dependencies
 module.exports = () => {
@@ -11,6 +12,7 @@ module.exports = () => {
   chat(app);
   group(app);
   user(app);
+  match(app);
 
   return app;
 };

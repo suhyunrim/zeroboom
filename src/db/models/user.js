@@ -5,15 +5,20 @@ module.exports = (sequelize, DataTypes) => {
       id: {
         type: DataTypes.INTEGER,
         autoIncrement: true,
-        primaryKey: true
+        primaryKey: true,
       },
       riotId: {
         type: DataTypes.STRING,
+        primaryKey: true,
       },
       groupId: {
         type: DataTypes.INTEGER,
+        primaryKey: true,
       },
-      rating: {
+      defaultRating: {
+        type: DataTypes.INTEGER,
+      },
+      additionalRating: {
         type: DataTypes.INTEGER,
       },
       revisionDate: {

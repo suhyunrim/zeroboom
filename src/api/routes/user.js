@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
 
 const summonerController = require('../../controller/summoner');
@@ -9,11 +10,11 @@ module.exports = (app) => {
   app.use('/user', route);
 
   route.post('/register', async (req, res) => {
-    const groupName = req.body.groupName;
+    const { groupName, summonerName } = req.body;
+
     if (!groupName)
       return res.json({ result: "invalid group name" });
     
-    const summonerName = req.body.summonerName;
     if (!summonerName)
       return res.json({ result: "invalid summoner name" });
 
@@ -27,11 +28,16 @@ module.exports = (app) => {
 
     const summoner = summonerResult.result;
 
-    await models.user.create({
+    try {
+      await models.user.create({
         riotId: summoner.riotId,
         groupId: group.id,
         rating: 500,
       });
+    } catch (e) {
+      logger.error(e.stack);
+        return res.json({ result: e.message }).status(501);
+    }
 
     return res.json({ result: "succeed" }).status(200);
   });
