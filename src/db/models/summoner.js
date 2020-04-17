@@ -15,6 +15,15 @@ module.exports = (sequelize, DataTypes) => {
       name: {
         type: DataTypes.STRING,
       },
+      rankTier: {
+        type: DataTypes.STRING,
+      },
+      rankWin: {
+        type: DataTypes.INTEGER,
+      },
+      rankLose: {
+        type: DataTypes.INTEGER,
+      },
       profileIconId: {
         type: DataTypes.INTEGER,
       },

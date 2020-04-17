@@ -11,9 +11,18 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         primaryKey: true,
       },
+      accountId: {
+        type: DataTypes.STRING,
+      },
       groupId: {
         type: DataTypes.INTEGER,
         primaryKey: true,
+      },
+      win: {
+        type: DataTypes.INTEGER,
+      },
+      lose: {
+        type: DataTypes.INTEGER,
       },
       defaultRating: {
         type: DataTypes.INTEGER,
