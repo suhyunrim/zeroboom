@@ -6,8 +6,31 @@ const summonerController = require('../../controller/summoner');
 
 const route = Router();
 
-const tierNames = {'IRON': 400, 'BRONZE': 400, 'SILVER': 400, 'GOLD': 500, 'PLATINUM': 500, 'DIAMOND': 600, 'UNRANKED': 500};
+const tierNames = {'IRON': 400, 'BRONZE': 400, 'SILVER': 400, 'GOLD': 500, 'PLATINUM': 600, 'DIAMOND': 700, 'UNRANKED': 500};
 const tierSteps = ['IV', 'III', 'II', 'I'];
+
+const convertAbbreviationTier = (tier) => {
+  if (tier.length > 2)
+    return tier;
+
+  let result = '';
+  const firstLetter = tier.charAt(0).toUpperCase();
+  for (const tierName of Object.keys(tierNames))
+  {
+    if (firstLetter.startsWith(tierName.charAt(0)))
+    {
+      result = tierName;
+      break;
+    }
+  }
+
+  result += ' ';
+
+  const secondLetter = Number(tier.charAt(1));
+  result += tierSteps[tierSteps.length - secondLetter];
+
+  return result;
+}
 
 const isValidTier = (tier) => {
   const split = tier.split(' ');
@@ -17,13 +40,14 @@ const isValidTier = (tier) => {
 }
 
 const getRating = (tier) => {
-  if (isValidTier(tier))
+  if (!isValidTier(tier))
     return 400;
 
   const split = tier.split(' ');
-  const tierName = split[0].toLowerCase();
+  const tierName = split[0].toUpperCase();
   const rating = tierNames[tierName];
-  const tierMultiplier = tierSteps.findIndex(split[1]) + 1;
+  const tierStep = split[1].toUpperCase();
+  const tierMultiplier = tierSteps.indexOf(tierStep);
   return rating + tierMultiplier * 25;
 };
 
@@ -31,7 +55,8 @@ module.exports = (app) => {
   app.use('/user', route);
 
   route.post('/register', async (req, res) => {
-    const { groupName, summonerName, tier } = req.body;
+    const { groupName, summonerName, tokenId } = req.body;
+    let { tier } = req.body;
 
     if (!groupName)
       return res.json({ result: 'invalid group name' });
@@ -42,6 +67,9 @@ module.exports = (app) => {
     const group = await models.group.findOne({ where: { groupName } });
     if (!group)
       return res.json({ result: 'group is not exist' });
+
+    if (tier)
+      tier = convertAbbreviationTier(tier);
 
     if (tier && !isValidTier(tier))
       return res.json({ result: 'invalid tier' });
@@ -54,11 +82,19 @@ module.exports = (app) => {
     if (!tier && (summoner.rankTier == 'UNRANKED' || (summoner.rankWin + summoner.rankLose) < 100))
       return res.json({ result: 'enter the tier explicitly'})
 
+    const accountId = await summonerController.getAccountIdByName(tokenId, summonerName);
+    if (!accountId)
+      return res.json({ result: 'invalid token id' });
+      
+    models.summoner.update( { accountId: accountId }, { where: { name:summonerName } });
+
     try {
       await models.user.create({
         riotId: summoner.riotId,
+        accountId: accountId,
+        encryptedAccountId: summoner.encryptedAccountId,
         groupId: group.id,
-        rating: getRating(tier ? tier : summoner.rankTier)
+        defaultRating: getRating(tier ? tier : summoner.rankTier)
       });
     } catch (e) {
       logger.error(e.stack);

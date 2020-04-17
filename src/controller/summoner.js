@@ -1,6 +1,6 @@
 const moment = require('moment');
 const models = require('../db/models');
-const { getSummonerByName, getRankDataBySummonerId } = require('../services/riot-api');
+const { getSummonerByName, getRankDataBySummonerId, getSummonerByName_V1 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
 const expirationCheck = (time, duration = { unit: 'days', number: 1 }) => {
@@ -20,10 +20,10 @@ const generateSummonerData = async (name) => {
 
   return {
     riotId: summonerResult.id,
-    accountId: summonerResult.accountId,
+    encryptedAccountId: summonerResult.accountId,
     puuid: summonerResult.puuid,
     name: summonerResult.name,
-    tier: soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED',
+    rankTier: soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED',
     rankWin: soloRankData ? soloRankData.wins : 0,
     rankLose: soloRankData ? soloRankData.losses : 0,
     profileIconId: summonerResult.profileIconId,
@@ -64,3 +64,20 @@ module.exports.getSummonerByName = async (name) => {
 
   return { result: found, status: 200 };
 };
+
+module.exports.getAccountIdByName = async (tokenId, name) => {
+  const found = await models.summoner.findOne({ where: { name } });
+
+  if (found && found.accountId) {
+    return found.accountId;
+  }
+
+  try {
+    const summonerV1Result = await getSummonerByName_V1(tokenId, name);
+    return summonerV1Result.accountId;
+  } catch (e) {
+    logger.error(e.stack);
+  }
+
+  return;
+}

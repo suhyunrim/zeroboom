@@ -9,6 +9,9 @@ module.exports = (sequelize, DataTypes) => {
       accountId: {
         type: DataTypes.STRING,
       },
+      encryptedAccountId: {
+        type: DataTypes.STRING,
+      },
       puuid: {
         type: DataTypes.STRING,
       },
