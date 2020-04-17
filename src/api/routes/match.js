@@ -5,6 +5,9 @@ const { Op } = require("sequelize");
 const models = require('../../db/models');
 const { getSummonerByName_V1, getCustomGameHistory, getMatchData } = require('../../services/riot-api');
 
+const elo = require('arpad');
+const ratingCalculator = new elo(50);
+
 const route = Router();
 
 module.exports = (app) => {
@@ -105,10 +108,13 @@ module.exports = (app) => {
           }
         });
 
-        user.win = 0;
-        user.lose = 0;
-        user.additionalRating = 0;
-        user.accountId = accountId;
+        if (user)
+        {
+          user.win = 0;
+          user.lose = 0;
+          user.additionalRating = 0;
+          user.accountId = accountId;
+        }
       }
            
       if (!user)
@@ -134,16 +140,22 @@ module.exports = (app) => {
       return ret;
     };
 
-    const apply = (team, isWon) => {
+    const apply = (team, isWon, ratingDelta) => {
       team.forEach((elem) => {
         if (isWon)
           elem.win++;
         else
           elem.lose++;
 
+        elem.additionalRating += ratingDelta;
         users[elem.accountId] = elem;
       });
     };
+
+    const reducer = (total, user) => {
+      total += user.defaultRating + user.additionalRating;
+      return total;
+    }
 
     for (const match of matches)
     {
@@ -155,8 +167,23 @@ module.exports = (app) => {
 
       match.update( { groupId: group.id } );
 
-      apply(team1, match.winTeam == 1);
-      apply(team2, match.winTeam == 2);
+      const team1Rating = team1.reduce(reducer, 0) / 5;
+      const team2Rating = team2.reduce(reducer, 0) / 5;
+
+      let team1Delta, team2Delta = 0;
+      if (match.winTeam == 1)
+      {
+        team1Delta = ratingCalculator.newRatingIfWon(team1Rating, team2Rating) - team1Rating;
+        team2Delta = ratingCalculator.newRatingIfLost(team2Rating, team1Rating) - team2Rating;
+      }
+      else
+      {
+        team1Delta = ratingCalculator.newRatingIfLost(team1Rating, team2Rating) - team1Rating;
+        team2Delta = ratingCalculator.newRatingIfWon(team2Rating, team1Rating) - team2Rating;
+      }
+
+      apply(team1, match.winTeam == 1, team1Delta);
+      apply(team2, match.winTeam == 2, team2Delta);
     }
 
     Object.entries(users).forEach(([k, v]) => v.update(v.dataValues));
