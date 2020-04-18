@@ -6,7 +6,7 @@ const models = require('../../db/models');
 const { getSummonerByName_V1, getCustomGameHistory, getMatchData } = require('../../services/riot-api');
 
 const elo = require('arpad');
-const ratingCalculator = new elo(50);
+const ratingCalculator = new elo();
 
 const route = Router();
 
