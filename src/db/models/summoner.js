@@ -9,11 +9,23 @@ module.exports = (sequelize, DataTypes) => {
       accountId: {
         type: DataTypes.STRING,
       },
+      encryptedAccountId: {
+        type: DataTypes.STRING,
+      },
       puuid: {
         type: DataTypes.STRING,
       },
       name: {
         type: DataTypes.STRING,
+      },
+      rankTier: {
+        type: DataTypes.STRING,
+      },
+      rankWin: {
+        type: DataTypes.INTEGER,
+      },
+      rankLose: {
+        type: DataTypes.INTEGER,
       },
       profileIconId: {
         type: DataTypes.INTEGER,

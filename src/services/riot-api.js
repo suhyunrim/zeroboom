@@ -1,3 +1,5 @@
+const { logger } = require('../loaders/logger');
+
 const riotAPI = require('sample-node-package');
 
 /// V4
@@ -14,13 +16,18 @@ const getSummonerByName = async (summonerName) => {
 
 exports.getSummonerByName = getSummonerByName;
 
-const getEntriesBySummonerId = async (summonerId) => {
+const getRankDataBySummonerId = async (summonerId) => {
   const result = await riotAPI.v4.league.getEntriesBySummonerId(summonerId)();
 
-  return result;
+  if (result.status !== 200)
+    throw new Error(
+      `riotAPI.v4.league.getEntriesBySummonerId(${summonerId}) => ${result.status}`,
+    );
+
+  return result.data;
 };
 
-exports.getEntriesBySummonerId = getEntriesBySummonerId;
+exports.getRankDataBySummonerId = getRankDataBySummonerId;
 
 
 /// V1
@@ -39,27 +46,37 @@ exports.getSummonerByName_V1 = getSummonerByName_V1;
 
 const getCustomGameHistory = async (tokenId, accountId, until) => {
   let customGames = [];
-  let beginIndex = 0
-  let isFinished = false;
-  //until = until ? until : Date.now() - 86400 * 30 * 3 * 1000;
-  until = until ? until : Date.now() - 86400 * 7 * 1000;
-  while (!isFinished)
-  {
-    const result = await riotAPI.v1.match.getMatchHistory(tokenId, accountId, beginIndex)();
-    result.data.games.games.forEach(element => {
-      if (element.gameCreation < until)
-      {
-        isFinished = true;
-        return;
-      }
+  
+  try {
+    let beginIndex = 0
+    let isFinished = false;
+    until = until ? until : Date.now() - 86400 * 30 * 3 * 1000;
+    while (!isFinished)
+    {
+      const result = await riotAPI.v1.match.getMatchHistory(tokenId, accountId, beginIndex)();
+      if (result.status != 200)
+        throw new Error(
+          `riotAPI.v1.match.getMatchHistory(${accountId}) => ${result.status}`,
+        );
 
-      if (element.gameMode == 'CLASSIC' && element.gameType == 'CUSTOM_GAME' && element.mapId == 11)
-      {
-        customGames.push(element.gameId);
-      }
-    });
+      result.data.games.games.forEach(element => {
+        if (element.gameCreation < until)
+        {
+          isFinished = true;
+          return;
+        }
 
-    beginIndex += 20;
+        if (element.gameMode == 'CLASSIC' && element.gameType == 'CUSTOM_GAME' && element.mapId == 11)
+        {
+          customGames.push(element.gameId);
+        }
+      });
+
+      beginIndex += 20;
+    }
+  } catch (e) {
+    logger.error(e.stack);
+    logger.error(`riotAPI.v1.match.getMatchHistory(${accountId})`);
   }
 
   return customGames;
@@ -68,33 +85,36 @@ const getCustomGameHistory = async (tokenId, accountId, until) => {
 exports.getCustomGameHistory = getCustomGameHistory
 
 const getMatchData = async (tokenId, gameId) => {
-  const result = await riotAPI.v1.match.getMatchData(tokenId, gameId)();
-
-  const data = result.data;
-  let matchData = {
-    gameId: data.gameId,
-    gameCreation: new Date(data.gameCreation),
-    winTeam: data.teams[0].win == 'Win' ? 1 : 2,
-    team1: [],
-    team2: []
-  }
-
-  data.participantIdentities.forEach((identity) => {
-    const participantData = data.participants.find(elem => elem.participantId == identity.participantId);
-    if (participantData)
-    {
-      if (participantData.teamId == 100)
-      {
-        matchData.team1.push(identity.player.accountId);
-      }
-      else
-      {
-        matchData.team2.push(identity.player.accountId);
-      }
+  try {
+    const result = await riotAPI.v1.match.getMatchData(tokenId, gameId)();
+    if (result.status != 200)
+      throw new Error(
+        `riotAPI.v1.match.getMatchData(${gameId}) => ${result.status}`,
+      );
+  
+    const data = result.data;
+    let matchData = {
+      gameId: data.gameId,
+      gameCreation: new Date(data.gameCreation),
+      winTeam: data.teams[0].win == 'Win' ? 1 : 2,
+      team1: [],
+      team2: []
     }
-  });
 
-  return matchData;
+    data.participantIdentities.forEach((identity) => {
+      const participantData = data.participants.find(elem => elem.participantId == identity.participantId);
+      if (participantData)
+      {
+        const team = participantData.teamId == 100 ? matchData.team1 : matchData.team2;
+        team.push([ identity.player.accountId, identity.player.summonerName ]);
+      }
+    });
+
+    return matchData;
+  } catch (e) {
+    logger.error(e.stack);
+    logger.error(`riotAPI.v1.match.getMatchData(${gameId})`);
+  }
 }
 
 exports.getMatchData = getMatchData;
