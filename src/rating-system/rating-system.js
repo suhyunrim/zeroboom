@@ -1,9 +1,9 @@
-const logger = require('../loaders/logger');
+const { logger } = require('../loaders/logger');
 
 exports.getWinRate = (team1, team2) => {
 	if(team1.length != 5 || team2.length != 5)
 	{		
-		logger.error("inavalid team length");
+		logger.error("[rating-system.getWinRate]inavalid team length");
 		return;
 	}
 
@@ -22,7 +22,18 @@ exports.getWinRate = (team1, team2) => {
 	return ELO_getWinRate(ratingAvg1, ratingAvg2);
 }
 
-exports.getWinScore = (winRate) => {
+exports.getWinScore = (winTeam, loseTeam) => {
+	if(winTeam.length != 5 || loseTeam.length != 5)
+	{		
+		logger.error("[rating-system.getWinScroe]inavalid team length");
+		return;
+	}
+
+	var winTeamExpectedRate = this.getWinRate(winTeam, loseTeam);
+	return ELO_getMatchScore(winTeamExpectedRate);
+}	
+
+exports.getWinScoreByWinRate = (winRate) => {
 	return ELO_getMatchScore(winRate);
 }
 
