@@ -29,7 +29,7 @@ module.exports = (app) => {
     const matches = await getCustomGameHistory(tokenId, summoner.accountId);
     for (let gameId of matches)
     {
-      if (models.match.findOne( { where: { gameId: gameId } } ))
+      if (await models.match.findOne({ where: { gameId: gameId } }))
         continue;
 
       const matchData = await getMatchData(tokenId, gameId);
@@ -37,10 +37,7 @@ module.exports = (app) => {
         continue;
 
       try {
-        await models.match.create({
-          where: {
-            gameId: matchData.gameId,
-          }, defaults: matchData});
+        await models.match.create(matchData);
       } catch (e) {
         logger.error(e.stack);
         return res.json({ result: e.message }).status(501);
@@ -78,7 +75,10 @@ module.exports = (app) => {
 
     const getUser = async (accountId, name) => {
       if (unknownSummoners[accountId])
+      {
+        unknownSummoners[accountId] = name;
         return;
+      }
 
       let summoner = summoners[accountId];
       if (!summoner)
