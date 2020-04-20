@@ -68,10 +68,11 @@ module.exports = (app) => {
 
     matches.sort((a, b) => a.gameCreation > b.gameCreation);
 
-    let summoners = {}
-    let users = {}
-    let unknownSummoners = {}
-    let unknownUsers = {}
+    let summoners = {};
+    let users = {};
+    let unknownSummoners = {};
+    let unknownUsers = {};
+    let expectationGroup = {};
 
     const getUser = async (accountId, name) => {
       if (unknownSummoners[accountId])
@@ -157,13 +158,51 @@ module.exports = (app) => {
       return total;
     }
 
+    const groupBy = (list, keyGetter) => {
+      const map = new Map();
+      list.forEach((item) => {
+           const key = keyGetter(item);
+           const collection = map.get(key);
+           if (!collection) {
+               map.set(key, [item]);
+           } else {
+               collection.push(item);
+           }
+      });
+      return map;
+  }
+
     for (const match of matches)
     {
       let team1 = await getTeam(match.team1);
       let team2 = await getTeam(match.team2);
 
-      if (team1.length + team2.length < 10)
+      if (team1.length + team2.length < 7)
         continue;
+      else if (team1.length + team2.length < 10)
+      {
+        const existUserArray = team1.concat(team2);
+        const usersByGroupId = groupBy(existUserArray, elem => elem.groupId);
+        for (let pair of usersByGroupId)
+        {
+          const groupIds = pair[1];
+          if (groupIds.length >= 6)
+          {
+            const expectationGroupId = existUserArray[0].groupId;
+              if (!expectationGroup[expectationGroupId])
+                expectationGroup[expectationGroupId] = {};
+
+            const riotTeamData = match.team1.concat(match.team2);
+            riotTeamData.forEach(elem => {
+              if (existUserArray.findIndex(user => user.accountId == elem[0]) == -1)
+              {
+                expectationGroup[expectationGroupId][elem[0]] = elem[1];
+              }
+            });
+          }
+        }
+        continue;
+      }
 
       match.update( { groupId: group.id } );
 
@@ -188,12 +227,13 @@ module.exports = (app) => {
 
     Object.entries(users).forEach(([k, v]) => v.update(v.dataValues));
 
-    if (Object.keys(unknownSummoners).length > 0 || Object.keys(unknownUsers).length > 0)
+    if (Object.keys(unknownSummoners).length > 0 || Object.keys(unknownUsers).length > 0 || Object.keys(expectationGroup).length > 0)
     {
       return res.json({
         result: 'unknown users are exist',
         unknownSummoners: JSON.stringify(unknownSummoners),
         unknownUsers: JSON.stringify(unknownUsers),
+        expectationGroup: JSON.stringify(expectationGroup),
       });
     }
 
