@@ -8,6 +8,8 @@ const { getSummonerByName_V1, getCustomGameHistory, getMatchData } = require('..
 const elo = require('arpad');
 const ratingCalculator = new elo();
 
+const controller = require('../../controller/match');
+
 const route = Router();
 
 module.exports = (app) => {
@@ -15,36 +17,8 @@ module.exports = (app) => {
 
   route.post('/register', async (req, res) => {
     const { tokenId, summonerName } = req.body;
-
-    if (!tokenId)
-      return res.json({ result: "invalid token id" });
-    
-    if (!summonerName)
-      return res.json({ result: "invalid summoner name" });
-
-    const summoner = await getSummonerByName_V1(tokenId, summonerName);
-    if (!summoner)
-      return res.json({ result: "invalid summoner" });
-
-    const matches = await getCustomGameHistory(tokenId, summoner.accountId);
-    for (let gameId of matches)
-    {
-      if (await models.match.findOne({ where: { gameId: gameId } }))
-        continue;
-
-      const matchData = await getMatchData(tokenId, gameId);
-      if (!matchData)
-        continue;
-
-      try {
-        await models.match.create(matchData);
-      } catch (e) {
-        logger.error(e.stack);
-        return res.json({ result: e.message }).status(501);
-      }
-    }
-
-    return res.json({ result: "succeed" }).status(200);
+    const result = await controller.registerMatch(tokenId, summonerName);
+    return res.json(result).status(result.statusCode);
   });
 
   route.post('/calculate', async (req, res) => {
