@@ -7,6 +7,7 @@ const path = require('path');
 
 const indexRouter = require('./routes/index');
 const loginRouter = require('./routes/token');
+const friendlyGameRouter  = require('./routes/friendly-game');
 
 const startServer = async () => {
   const app = express();
@@ -19,6 +20,7 @@ const startServer = async () => {
 
   app.use('/', indexRouter);
   app.use('/token', loginRouter)
+  app.use('/friendly-game', friendlyGameRouter);
 
   const server = await loader(app);
 

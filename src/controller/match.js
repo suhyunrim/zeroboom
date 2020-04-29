@@ -1,6 +1,9 @@
 const models = require('../db/models');
+const elo = require('arpad');
 const { getSummonerByName_V1, getCustomGameHistory, getMatchData } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
+
+const ratingCalculator = new elo();
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
     if (!tokenId)
@@ -32,4 +35,31 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
     }
 
     return { result: "succeed", statusCode: 200 };
+};
+
+module.exports.predictWinRate = async (groupName, team1, team2) => {
+  const group = await models.group.findOne({ where: { groupName: groupName } });
+
+  const getRating = async (summonerName) => {
+    const summoner = await models.summoner.findOne({ where: { name: summonerName } });
+    const user = await models.user.findOne({
+      where: {
+        groupId: group.id,
+        riotId: summoner.riotId
+      }})
+    return user.defaultRating + user.additionalRating;
+  }
+
+  let team1Rating = 0;
+  for (const summonerName of team1)
+    team1Rating += await getRating(summonerName);
+  team1Rating /= 5;
+
+  let team2Rating = 0;
+  for (const summonerName of team2)
+    team2Rating += await getRating(summonerName);
+  team2Rating /= 5;
+
+  const winRate = ratingCalculator.expectedScore(team1Rating, team2Rating);
+  return { result: winRate, statusCode: 200 };
 };
