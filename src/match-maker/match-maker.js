@@ -1,4 +1,5 @@
 const { logger } = require('../loaders/logger');
+const ratingSystem = require('../rating-system/rating-system');
 
 class User {
 	constructor(id, rating) {
@@ -23,6 +24,7 @@ class Match {
 		}
 
 		this.diff = Math.abs(this.team1Rating - this.team2Rating);
+		this.winRate = ratingSystem.getWinRate(this.team1.map(elem => elem.rating), this.team2.map(elem => elem.rating));
 	}
 }
 

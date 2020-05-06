@@ -4,6 +4,7 @@ const { getSummonerByName_V1, getCustomGameHistory, getMatchData } = require('..
 const { logger } = require('../loaders/logger');
 
 const ratingCalculator = new elo();
+const matchMaker = require('../match-maker/match-maker');
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
     if (!tokenId)
@@ -62,4 +63,58 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
 
   const winRate = ratingCalculator.expectedScore(team1Rating, team2Rating);
   return { result: winRate, statusCode: 200 };
+};
+
+module.exports.generateMatch = async (groupName, team1Names, team2Names, userPool) => {
+  const group = await models.group.findOne({ where: { groupName: groupName } });
+
+  let summoners = {};
+
+  const getUser = async (summonerName) => {
+    const summoner = await models.summoner.findOne({ where: { name: summonerName } });
+    if (!summoners[summoner.riotId])
+      summoners[summoner.riotId] = summoner;
+
+    return user = await models.user.findOne({
+      where: {
+        groupId: group.id,
+        riotId: summoner.riotId
+      }});
+  }
+
+  const applyTeam = async (teamArray, summonerNames) => {
+    for (const name of summonerNames)
+    {
+      const user = await getUser(name);
+      teamArray.push(new matchMaker.User(user.riotId, user.defaultRating + user.additionalRating));
+    }
+  }
+
+  let preOrganizationTeam1 = [];
+  await applyTeam(preOrganizationTeam1, team1Names);
+
+  let preOrganizationTeam2 = [];
+  await applyTeam(preOrganizationTeam2, team2Names);
+
+  let makerUserPool = [];
+  await applyTeam(makerUserPool, userPool);
+
+  const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, 5);
+  if (matchingGames == null)
+  {
+    logger.error("invalid params");
+    return;
+  }
+
+  let result = [];
+  for (const match of matchingGames)
+  {
+    result.push({
+      team1:match.team1.map(elem => summoners[elem.id].name),
+      team2:match.team2.map(elem => summoners[elem.id].name),
+      team1WinRate:match.winRate
+    });
+  }
+
+  return { result: result, statusCode: 200};
 };

@@ -14,4 +14,19 @@ router.post('/predict-winrate', async function (req, res, next) {
   return res.json(result).status(result.statusCode);
 });
 
+router.get('/generate-match', function(req, res, next) {
+  res.render('friendly-game/generate-match.html');
+});
+
+router.post('/generate-match', async function (req, res, next) {
+  const { groupName, team1, team2, userPool } = req.body;
+  
+  const team1Array = team1 != '' ? team1.split(',') : [];
+  const team2Array = team2 != '' ? team2.split(',') : [];
+  const userPoolArray = userPool != '' ? userPool.split(',') : [];
+
+  const result = await matchController.generateMatch(groupName, team1Array, team2Array, userPoolArray);
+  return res.json(result).status(result.statusCode);
+});
+
 module.exports = router;

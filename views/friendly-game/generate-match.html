@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Project Camille</title>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8" />
+
+    <!-- <script src="../../static/js/includeHTML.js"></script> -->
+    <!--<link rel="stylesheet" href="../../public/css/login.css"> -->
+    <link rel="stylesheet" href="/css/login.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+</head>
+<body>
+<!-- <header include-html="/layout/header.html"></header> -->
+
+<div id="container">
+  <div id="loginer">
+    <div id="form">
+      <form action="/friendly-game/generate-match" method="post">
+        <fieldset>
+            <legend>group name</legend>
+            <input type="text" class="input" name="groupName" placeholder="그룹 이름"></input><br><br>
+            <legend>user pool</legend>
+            <input type="text" class="input" name="userPool" placeholder="userPool"></input><br>
+            <legend>team1</legend>
+            <input type="text" class="input" name="team1" placeholder="team1"></input><br>
+            <legend>team2</legend>
+            <input type="text" class="input" name="team2" placeholder="team2"></input><br>
+        </fieldset>
+        <button type="submit" class="btn btn-success">Predict</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- <footer include-html="/layout/footer.html"></footer> -->
+<script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+<!-- <script>
+    includeHTML();
+</script> -->
+</body>
+</html>
