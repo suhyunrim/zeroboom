@@ -1,6 +1,6 @@
 const { logger } = require('../loaders/logger');
 
-const riotAPI = require('sample-node-package');
+const riotAPI = require('tristana');
 
 /// V4
 const getSummonerByName = async (summonerName) => {
