@@ -3,7 +3,7 @@ const { logger } = require('../loaders/logger');
 class User {
 	setFromUserModel(userModel) {
 		this.id = userModel.riotId;
-		this.rating = userModel.defaultRating + userModel.additionalRation;
+		this.rating = userModel.defaultRating + userModel.additionalRating;
 	}
 
 	set(id, rating) {
