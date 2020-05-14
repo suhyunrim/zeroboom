@@ -1,34 +1,6 @@
 const { logger } = require('../loaders/logger');
 const ratingSystem = require('../rating-system/rating-system');
-
-class User {
-	constructor(id, rating) {
-		this.id = id;
-		this.rating = rating;
-	}
-}
-
-exports.User = User;
-
-class Match {
-	constructor(team1, team2) {
-		this.team1 = team1;
-		this.team2 = team2;
-
-		this.team1Rating = 0;
-		this.team2Rating = 0;
-		for(var i = 0; i < 5; i++)
-		{
-			this.team1Rating += this.team1[i].rating;
-			this.team2Rating += this.team2[i].rating;
-		}
-
-		this.diff = Math.abs(this.team1Rating - this.team2Rating);
-		this.winRate = ratingSystem.getWinRate(this.team1.map(elem => elem.rating), this.team2.map(elem => elem.rating));
-	}
-}
-
-exports.Match = Match;
+const Match = require('../entity/match.js').Match;
 
 const matchMake = (preOrganizationTeam1, preOrganizationTeam2, userPool, count) => {
 	if(preOrganizationTeam1.length + preOrganizationTeam2.length + userPool.length != 10)

@@ -5,6 +5,7 @@ const { logger } = require('../loaders/logger');
 
 const ratingCalculator = new elo();
 const matchMaker = require('../match-maker/match-maker');
+const User = require('../entity/user').User;
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
     if (!tokenId)
@@ -70,12 +71,12 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
 
   let summoners = {};
 
-  const getUser = async (summonerName) => {
+  const getUserModel = async (summonerName) => {
     const summoner = await models.summoner.findOne({ where: { name: summonerName } });
     if (!summoners[summoner.riotId])
       summoners[summoner.riotId] = summoner;
 
-    return user = await models.user.findOne({
+    return userModel = await models.user.findOne({
       where: {
         groupId: group.id,
         riotId: summoner.riotId
@@ -85,8 +86,10 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
   const applyTeam = async (teamArray, summonerNames) => {
     for (const name of summonerNames)
     {
-      const user = await getUser(name);
-      teamArray.push(new matchMaker.User(user.riotId, user.defaultRating + user.additionalRating));
+      const userModel = await getUserModel(name);
+      let user = new User();
+      user.setFromUserModel(userModel);
+      teamArray.push(user);
     }
   }
 

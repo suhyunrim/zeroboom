@@ -12,8 +12,8 @@ exports.getWinRate = (team1, team2) => {
 
 	for(var i = 0; i < 5; i++)
 	{
-		ratingAvg1 += team1[i];
-		ratingAvg2 += team2[i];
+		ratingAvg1 += team1[i].rating;
+		ratingAvg2 += team2[i].rating;
 	}
 
 	ratingAvg1 /= 5;

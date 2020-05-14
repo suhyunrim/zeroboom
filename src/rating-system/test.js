@@ -1,8 +1,21 @@
 const { logger } = require('../loaders/logger');
 const ratingSystem = require('./rating-system.js');
+const User = require('../entity/user.js').User;
 
-var team1 = [120, 130, 140, 150, 160];
-var team2 = [170, 180, 190, 200, 210];
+var team1 = new Array();
+var team2 = new Array();
+
+for(var i = 0; i < 5; i++)
+{
+	var user1 = new User();
+	var user2 = new User();
+
+	user1.set(i, 120 + i * 10);
+	user2.set(i + 5, 170 + i * 10);
+
+	team1.push(user1);
+	team2.push(user2);
+}
 
 var team1WinRate = ratingSystem.getWinRate(team1, team2);
 logger.info('team1WinRate:'.concat(team1WinRate)); // 0.428537...
