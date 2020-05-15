@@ -28,7 +28,7 @@ for(var i = 0; i < matchCount; i++)
 
 // pre organization team, ex) Boom, Moon duo
 logger.info("=============== preOrganizationTeam match =================");
-var jungler1 = new User(11, 1100);
+var jungler1 = new User();
 jungler1.set(11, 1100);
 var jungler2 = new User();
 jungler2.set(12, 800);

@@ -1,4 +1,8 @@
 const { logger } = require('../loaders/logger');
+const reducer = (total, user) => {
+	total += user.rating;
+	return total;
+};
 
 exports.getWinRate = (team1, team2) => {
 	if(team1.length != 5 || team2.length != 5)
@@ -7,17 +11,8 @@ exports.getWinRate = (team1, team2) => {
 		return;
 	}
 
-	var ratingAvg1 = 0.0;
-	var ratingAvg2 = 0.0;
-
-	for(var i = 0; i < 5; i++)
-	{
-		ratingAvg1 += team1[i].rating;
-		ratingAvg2 += team2[i].rating;
-	}
-
-	ratingAvg1 /= 5;
-	ratingAvg2 /= 5;
+	var ratingAvg1 = team1.reduce(reducer, 0.0) / 5;
+	var ratingAvg2 = team2.reduce(reducer, 0.0) / 5;
 
 	return ELO_getWinRate(ratingAvg1, ratingAvg2);
 }
