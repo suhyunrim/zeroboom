@@ -47,16 +47,3 @@ const matchMake = (preOrganizationTeam1, preOrganizationTeam2, userPool, count) 
 }
 
 exports.matchMake = matchMake;
-
-const foo = (param1) => {
-	if(param1 == 0)
-	{
-		return [0, 1];
-	}
-
-	var ret = new Array();
-	ret = ret.concat(foo(0));
-	return ret;
-}
-
-exports.foo = foo;
