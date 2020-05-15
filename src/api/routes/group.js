@@ -18,7 +18,7 @@ module.exports = (app) => {
   });
 
   route.get('/ranking', async (req, res) => {
-    const { groupName } = req.body;
+    const { groupName } = req.query;
 
     if (!groupName)
       return res.json({ result: 'invalid group name' });
@@ -38,9 +38,10 @@ module.exports = (app) => {
       return obj;
     }, {});
 
-    let result = users.map((elem) => {
+    let result = users.map((elem, index) => {
       return {
         riotId: elem.riotId,
+        ranking: index + 1,
         rating: elem.defaultRating + elem.additionalRating,
         win: elem.win,
         lose: elem.lose,
