@@ -20,7 +20,7 @@ module.exports = async (app, message) => {
 
 	let output;
 	if (cmd) {
-		output = cmd.run(message, params);
+		output = await cmd.run(message, params);
 	}
 
 	if(output)

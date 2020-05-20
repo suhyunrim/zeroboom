@@ -1,8 +1,7 @@
-const matchController = require('../../controller/match');
+const matchController = require('../controller/match');
 
-exports.run = (message, args) => {
+exports.run = async (message, args) => {
 	const result = await matchController.generateMatch('휘핑크림', [], [], args);
-
 	return JSON.stringify(result);
 }
 
