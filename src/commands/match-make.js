@@ -27,6 +27,7 @@ exports.run = async (message, args) => {
 				ret += `${match.team1[j]} vs ${match.team2[j]}\n`;
 			}
 			ret += "```";
+			i++;
 		}
 	}
 	return ret;
