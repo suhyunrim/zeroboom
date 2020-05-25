@@ -73,6 +73,10 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
 
   const getUserModel = async (summonerName) => {
     const summoner = await models.summoner.findOne({ where: { name: summonerName } });
+    if(!summoner) {
+      return;
+    }
+
     if (!summoners[summoner.riotId])
       summoners[summoner.riotId] = summoner;
 
@@ -87,6 +91,9 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
     for (const name of summonerNames)
     {
       const userModel = await getUserModel(name);
+      if(!userModel) {
+        return;
+      }
       let user = new User();
       user.setFromUserModel(userModel);
       teamArray.push(user);
