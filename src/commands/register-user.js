@@ -1,0 +1,22 @@
+const { registerUser } = require('../services/user');
+
+exports.run = async (message, args) => {
+	if(args.length != 2)
+	{
+		return 'invalid args';	
+	}
+
+	var ret = await registerUser('휘핑크림', args[0], args[1]);
+	return ret.result; 
+}
+
+exports.conf = {
+	enabled: true,
+	aliases: ['유저등록', 'ru'],
+};
+
+exports.help = {
+	name: 'register-user',
+	description: 'register user.',
+	usage: 'register-user groupName summonerName tier'
+};
