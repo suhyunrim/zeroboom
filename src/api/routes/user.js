@@ -9,7 +9,7 @@ module.exports = (app) => {
     const { groupName, summonerName, tokenId } = req.body;
     let { tier } = req.body;
 
-    var ret = await registerUser(groupName, sumonerName, tier);
+    var ret = await registerUser(groupName, sumonerName, tier, tokenId);
     return res.json({ result: ret.result }).status(ret.status);
   });
 };

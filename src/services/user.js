@@ -49,7 +49,7 @@ const getRating = (tier) => {
   return rating + tierMultiplier * 25;
 };
 
-const registerUser = async (groupName, summonerName, tier) => {
+const registerUser = async (groupName, summonerName, tier, tokenId) => {
     if (!groupName)
       return { result: 'invalid group name', status: 501 };
     
@@ -75,7 +75,7 @@ const registerUser = async (groupName, summonerName, tier) => {
     if (!tier && (summoner.rankTier == 'UNRANKED' || (summoner.rankWin + summoner.rankLose) < 100))
       return { result: 'enter the tier explicitly', status: 501 };
 
-    const accountId = await summonerController.getAccountIdByName(summonerName);
+    const accountId = await summonerController.getAccountIdByName(summonerName, tokenId);
     if (!accountId)
       return { result: 'invalid summoner name', status: 501 };
       
