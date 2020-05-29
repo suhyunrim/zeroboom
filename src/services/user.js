@@ -56,7 +56,6 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
     if (!summonerName)
       return { result: 'invalid summoner name', status: 501 };
 
-	logger.info('test');
     const group = await models.group.findOne({ where: { groupName } });
     if (!group)
       return { result: 'group is not exist', status: 501 };
