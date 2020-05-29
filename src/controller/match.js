@@ -74,6 +74,7 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
   const getUserModel = async (summonerName) => {
     const summoner = await models.summoner.findOne({ where: { name: summonerName } });
     if(!summoner) {
+      logger.error(`db error ${summonerName} not found`);
       return;
     }
 
@@ -92,6 +93,7 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
     {
       const userModel = await getUserModel(name);
       if(!userModel) {
+        logger.error(`db error ${name} not found`);
         return;
       }
       let user = new User();
@@ -109,7 +111,7 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
   let makerUserPool = [];
   await applyTeam(makerUserPool, userPool);
 
-  const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, 5);
+  const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, 6);
   if (matchingGames == null)
   {
     logger.error("invalid params");

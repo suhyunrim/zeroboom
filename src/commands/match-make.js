@@ -21,11 +21,12 @@ exports.run = async (message, args) => {
 		for(var match of result.result)
 		{
 			ret += `${i}번째 매칭\n`;
-			ret += "```1팀 vs 2팀\n";
+			ret += "```1팀vs 2팀\n";
 			for(var j = 0; j < 5; j++)
 			{
 				ret += `${match.team1[j]} vs ${match.team2[j]}\n`;
 			}
+			ret += `${match.team1WinRate} vs ${1 - match.team1WinRate}`
 			ret += "```";
 			i++;
 		}
