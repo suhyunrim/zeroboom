@@ -4,7 +4,30 @@ exports.run = async (message, args) => {
 	args = args.join(" ");
 	args = args.split(",");
 
-	var result = await matchController.generateMatch('휘핑크림', [], [], args);
+	var userPool = new Array();
+	var team1 = new Array();
+	var team2 = new Array();
+
+	args.forEach(function(user){
+		var userInfo = user.split("@");
+		if(userInfo.length == 1)
+		{
+			userPool.push(userInfo[0]);
+			return;
+		}
+
+		if(userInfo[1] == 1)
+		{
+			team1.push(userInfo[0]);
+		}
+
+		if(userInfo[1] == 2)
+		{
+			team2.push(userInfo[0]);
+		}
+	});
+
+	var result = await matchController.generateMatch('휘핑크림', team1, team2, userPool);
 	var ret = "";
 	if(!result)
 	{
