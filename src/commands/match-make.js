@@ -1,4 +1,5 @@
 const matchController = require('../controller/match');
+const Table = require('../discord/ui-framework/table.js').Table;
 
 exports.run = async (message, args) => {
 	args = args.join(" ");
@@ -27,7 +28,7 @@ exports.run = async (message, args) => {
 		}
 	});
 
-	var result = await matchController.generateMatch('휘핑크림', team1, team2, userPool);
+	var result = await matchController.generateMatch('휘핑크림', team1, team2, userPool, 6);
 	var ret = "";
 	if(!result)
 	{
@@ -43,14 +44,15 @@ exports.run = async (message, args) => {
 		var i = 1;
 		for(var match of result.result)
 		{
+
 			ret += `${i}번째 매칭\n`;
-			ret += "```1팀vs 2팀\n";
+			ret += `${match.team1WinRate} vs ${1 - match.team1WinRate}`
+			var table = new Table(["1팀", "2팀"]);
 			for(var j = 0; j < 5; j++)
 			{
-				ret += `${match.team1[j]} vs ${match.team2[j]}\n`;
+				table.AddRow([String(match.team1[j]), String(match.team2[j])]);
 			}
-			ret += `${match.team1WinRate} vs ${1 - match.team1WinRate}`
-			ret += "```";
+			ret += table.Print();
 			i++;
 		}
 	}

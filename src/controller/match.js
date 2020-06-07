@@ -68,7 +68,7 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
 		return { result: winRate, statusCode: 200 };
 };
 
-module.exports.generateMatch = async (groupName, team1Names, team2Names, userPool) => {
+module.exports.generateMatch = async (groupName, team1Names, team2Names, userPool, matchCount) => {
 		const group = await models.group.findOne({ where: { groupName: groupName } });
 
 		let summoners = {};
@@ -113,7 +113,7 @@ module.exports.generateMatch = async (groupName, team1Names, team2Names, userPoo
 		let makerUserPool = [];
 		await applyTeam(makerUserPool, userPool);
 
-		const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, 6);
+		const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, matchCount);
 		if (matchingGames == null)
 		{
 				logger.error("invalid params");
