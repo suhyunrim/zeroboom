@@ -1,13 +1,13 @@
 const { registerUser } = require('../services/user');
 
 exports.run = async (message, args) => {
-	if(args.length != 3)
+	if(args.length != 2)
 	{
 		return 'invalid args';	
 	}
 	var summonerName = args[0];
 	var tier = args[1];
-	var tokenId = args[2];
+	var tokenId = process.env.RIOT_TOKEN_ID; 
 
 	var ret = await registerUser('휘핑크림', summonerName, tier, tokenId);
 	return ret.result; 
