@@ -1,5 +1,5 @@
 const matchController = require('../controller/match');
-const Table = require('../discord/ui-framework/table.js').Table;
+const matchingFormattor = require('../discord/embed-messages/matching-results');
 
 exports.run = async (message, args) => {
 	args = args.join(" ");
@@ -29,34 +29,8 @@ exports.run = async (message, args) => {
 	});
 
 	var result = await matchController.generateMatch('휘핑크림', team1, team2, userPool, 6);
-	var ret = "";
-	if(!result)
-	{
-		ret += "잘못된 소환사 아이디가 포함되어있습니다. 띄어쓰기및 대소문자를 정확하게 입력해주세요.\n";
-		for(var arg of args)
-		{
-			ret += `${arg}\n`;
-		}
-	}
-	else
-	{
-		ret += `${result.result.length}개의 매칭을 찾았어요!\n`;
-		var i = 1;
-		for(var match of result.result)
-		{
 
-			ret += `${i}번째 매칭\n`;
-			ret += `${match.team1WinRate} vs ${1 - match.team1WinRate}`
-			var table = new Table(["1팀", "2팀"]);
-			for(var j = 0; j < 5; j++)
-			{
-				table.AddRow([String(match.team1[j]), String(match.team2[j])]);
-			}
-			ret += table.Print();
-			i++;
-		}
-	}
-	return ret;
+	return result ? matchingFormattor(result.result) : `잘못된 소환사 아이디가 포함되어있습니다. 띄어쓰기및 대소문자를 정확하게 입력해주세요.\n${args}`;
 }
 
 exports.conf = {
