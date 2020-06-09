@@ -6,6 +6,7 @@ COPY . .
 
 # Install app dependencies
 ENV NPM_CONFIG_LOGLEVEL warn
+RUN export VERSION_INFO="$(git log --decorate --oneline -1)"
 RUN yarn
 
 EXPOSE 3000
