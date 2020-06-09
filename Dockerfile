@@ -5,8 +5,9 @@ LABEL maintainer="8eatles <8eatles@naver.com>"
 COPY . .
 
 # Install app dependencies
-ENV NPM_CONFIG_LOGLEVEL warn
 RUN export VERSION_INFO="$(git log --decorate --oneline -1)"
+ENV VERSION_INFO $VERSION_INFO
+ENV NPM_CONFIG_LOGLEVEL warn
 RUN yarn
 
 EXPOSE 3000
