@@ -34,17 +34,20 @@ const generateSummonerData = async (name) => {
 
 module.exports.getSummonerByName = async (name) => {
   // TODO: 검색 시 대소문자 및 띄어쓰기를 고려 안하게 해야 함.
-  const found = await models.summoner.findOne({ where: { name } });
+  let found = await models.summoner.findOne({ where: { name } });
 
   // no data
   if (!found) {
     try {
       const summonerData = await generateSummonerData(name);
-      
-      // TODO: 닉변한 케이스에서 riotId 가 겹치는 경우 update로 처리해야 함
-      const created = await models.summoner.create(summonerData);
 
-      return { result: created, status: 200 };
+      found = await models.summoner.findOne({ where: { riotId: summonerData.riotId }});
+      if (!found) {
+        const created = await models.summoner.create(summonerData);
+        return { result: created, status: 200 };
+      }
+
+      await found.update({name : summonerData.name});
     } catch (e) {
       logger.error(e.stack);
       return { result: found || e.message, status: 501 };
