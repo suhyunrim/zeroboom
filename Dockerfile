@@ -5,8 +5,7 @@ LABEL maintainer="8eatles <8eatles@naver.com>"
 COPY . .
 
 # Install app dependencies
-RUN env version_info="$(git log --decorate --oneline -1)"
-ENV VERSION_INFO $version_info
+RUN echo "export VERSION_INFO='$(git log --decorate --oneline -1)'" >> /root/.bashrc
 ENV NPM_CONFIG_LOGLEVEL warn
 RUN yarn
 
