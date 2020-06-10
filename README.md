@@ -67,11 +67,59 @@ Give an example
 
 ## Versioning
 
-~~We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/your/project/tags).~~
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/WhippingCream/camille/tags).
+
+### Major Version Up
+
+메이저 버전을 업데이트 (ex 0.2.6 -> 1.0.0)
+
+```bash
+# 1. package.json의 버전 업데이트 및 git commit
+# 2. 새 버전으로 git tag
+npm version major
+
+# 3. Commit push
+git push
+
+# 4. Tag push
+git push origin --tags
+```
+
+### Minor Version Up
+
+마이너 버전을 업데이트 (ex 0.2.6 -> 0.3.0)
+
+```bash
+# 1. package.json의 버전 업데이트 및 git commit
+# 2. 새 버전으로 git tag
+npm version minor
+
+# 3. Commit push
+git push
+
+# 4. Tag push
+git push origin --tags
+```
+
+### Patch
+
+빌드 버전을 업데이트 (ex 0.2.6 -> 0.2.7)
+
+```bash
+# 1. package.json의 버전 업데이트 및 git commit
+# 2. 새 버전으로 git tag
+npm version patch
+
+# 3. Commit push
+git push
+
+# 4. Tag push
+git push origin --tags
+```
 
 ## Authors
 
-~~* **Billie Thompson** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)~~
+~~**Billie Thompson** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)~~
 
 ~~See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.~~
 
