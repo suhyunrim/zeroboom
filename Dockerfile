@@ -5,7 +5,8 @@ LABEL maintainer="8eatles <8eatles@naver.com>"
 COPY . .
 
 # Install app dependencies
-RUN echo "$(git log --decorate --oneline -1)" >> version_info.txt
+
+RUN sed s/%VERSION%/"$(echo $(git log --decorate --oneline -1)|sed -r 's/([\$\.\*\/\[\\^])/\\\1/g'|sed 's/[]]/\[]]/g')"/ package.json > package.json
 ENV NPM_CONFIG_LOGLEVEL warn
 RUN yarn
 

@@ -1,11 +1,6 @@
-var fs = require('fs');
-
 exports.run = async (message, args) => {
-	var ret = "";
-	await fs.readFile('/version_info.txt', 'uft8', function(err, data) {
-		ret += data;
-	});
-	return ret;
+	var pjson = require('./package.json');
+	return pjson.version;
 }
 
 exports.conf = {
