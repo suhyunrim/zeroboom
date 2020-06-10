@@ -1,5 +1,11 @@
-exports.run = (message, args) => {
-	return process.env.VERSION_INFO;
+var fs = require('fs');
+
+exports.run = async (message, args) => {
+	var ret = "";
+	await fs.readFile('version_info.txt', 'uft8', function(err, data) {
+		ret += data;
+	});
+	return ret;
 }
 
 exports.conf = {

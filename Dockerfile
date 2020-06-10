@@ -5,10 +5,10 @@ LABEL maintainer="8eatles <8eatles@naver.com>"
 COPY . .
 
 # Install app dependencies
-RUN echo "export VERSION_INFO='$(git log --decorate --oneline -1)'" >> /root/.bashrc
+RUN echo "$(git log --decorate --oneline -1)" >> version_info.txt
 ENV NPM_CONFIG_LOGLEVEL warn
 RUN yarn
 
 EXPOSE 3000
 
-CMD [ "bin/bash", "-c", "yarn start" ]
+CMD [ "yarn", "start" ]
