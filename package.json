@@ -1,6 +1,6 @@
 {
   "name": "camille",
-  "version": "%VERSION%",
+  "version": "0.2.6",
   "description": "LOL Community Management Bot",
   "main": "src/server",
   "directories": {

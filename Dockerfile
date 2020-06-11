@@ -6,7 +6,7 @@ COPY . .
 
 # Install app dependencies
 
-RUN sed s/%VERSION%/"$(echo $(git log --decorate --oneline -1)|sed -r 's/([\$\.\*\/\[\\^])/\\\1/g'|sed 's/[]]/\[]]/g')"/ package.json > package.json
+RUN sed -i s/%VERSION%/"$(echo $(git log --decorate --oneline -1)|sed -r 's/([\$\.\*\/\[\\^])/\\\1/g'|sed 's/[]]/\[]]/g')"/ src/commands/version.js
 ENV NPM_CONFIG_LOGLEVEL warn
 RUN yarn
 

@@ -1,6 +1,6 @@
 exports.run = async (message, args) => {
-	var pjson = require('./package.json');
-	return pjson.version;
+	var detailVerionInfo = "%VERSION%";
+	return pdetailVerionInfo;
 }
 
 exports.conf = {
