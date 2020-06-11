@@ -1,6 +1,6 @@
 exports.run = async (message, args) => {
 	var detailVerionInfo = "%VERSION%";
-	return pdetailVerionInfo;
+	return detailVerionInfo;
 }
 
 exports.conf = {
