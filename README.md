@@ -53,13 +53,13 @@ Give an example
 
 ## Built With
 
-* [Docker](https://www.docker.com/get-started)
-* [Express](https://expressjs.com/en/starter/installing.html)
+- [Docker](https://www.docker.com/get-started)
+- [Express](https://expressjs.com/en/starter/installing.html)
 
 ## Chat Integration
 
-* [KakaoTalk](https://github.com/DarkTornado/KakaoTalkBot) - by Dark Tornado
-* [Discord](https://github.com/discordjs/discord.js)
+- [KakaoTalk](https://github.com/DarkTornado/KakaoTalkBot) - by Dark Tornado
+- [Discord](https://github.com/discordjs/discord.js)
 
 ## Contributing
 
@@ -78,10 +78,7 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 # 2. 새 버전으로 git tag
 npm version major
 
-# 3. Commit push
-git push
-
-# 4. Tag push
+# 3. Tag push
 git push origin --tags
 ```
 
@@ -94,10 +91,7 @@ git push origin --tags
 # 2. 새 버전으로 git tag
 npm version minor
 
-# 3. Commit push
-git push
-
-# 4. Tag push
+# 3. Tag push
 git push origin --tags
 ```
 
@@ -110,16 +104,13 @@ git push origin --tags
 # 2. 새 버전으로 git tag
 npm version patch
 
-# 3. Commit push
-git push
-
-# 4. Tag push
+# 3. Tag push
 git push origin --tags
 ```
 
 ## Authors
 
-~~**Billie Thompson** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)~~
+~~**Billie Thompson** - _Initial work_ - [PurpleBooth](https://github.com/PurpleBooth)~~
 
 ~~See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.~~
 
@@ -129,6 +120,6 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
-* ~~Hat tip to anyone whose code was used~~
-* ~~Inspiration~~
-* ~~etc~~
+- ~~Hat tip to anyone whose code was used~~
+- ~~Inspiration~~
+- ~~etc~~
