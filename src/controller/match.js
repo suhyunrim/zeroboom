@@ -1,6 +1,8 @@
 const models = require('../db/models');
 const { Op } = require('sequelize');
 
+const summonerController = require('../controller/summoner');
+
 const elo = require('arpad');
 const {
   getSummonerByName_V1,
@@ -81,22 +83,19 @@ module.exports.generateMatch = async (
   let summoners = {};
 
   const getUserModel = async (summonerName) => {
-    const summoner = await models.summoner.findOne({
-      where: {
-        simplifiedName: summonerName.toLowerCase().replace(' ', ''),
-      },
-    });
-    if (!summoner) {
+    const { result } = await summonerController.getSummonerByName(summonerName);
+
+    if (!result) {
       logger.error(`db error ${summonerName} not found`);
       return;
     }
 
-    if (!summoners[summoner.riotId]) summoners[summoner.riotId] = summoner;
+    if (!summoners[result.riotId]) summoners[result.riotId] = result;
 
     return (userModel = await models.user.findOne({
       where: {
         groupId: group.id,
-        riotId: summoner.riotId,
+        riotId: result.riotId,
       },
     }));
   };

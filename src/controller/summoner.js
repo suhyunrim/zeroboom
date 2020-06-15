@@ -7,14 +7,10 @@ const {
 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
-const expirationCheck = (time, duration = { unit: 'days', number: 1 }) => {
+const expirationCheck = (time) => {
   const timeMoment = moment.isMoment(time) ? time : moment(time);
-  const durationMoment = moment.isDuration(duration)
-    ? duration
-    : moment.duration(duration);
-  const expiredAt = timeMoment.add(durationMoment);
-
-  return expiredAt.diff(moment()) <= 0;
+  timeMoment.add(7, 'd');
+  return timeMoment.diff(moment()) <= 0;
 };
 
 const generateSummonerData = async (name) => {
@@ -49,8 +45,8 @@ module.exports.getSummonerByName = async (name) => {
     },
   });
 
-  // no data
   if (!found) {
+    // no data
     try {
       const summonerData = await generateSummonerData(name);
 
@@ -67,10 +63,8 @@ module.exports.getSummonerByName = async (name) => {
       logger.error(e.stack);
       return { result: found || e.message, status: 501 };
     }
-  }
-
-  // expired data
-  if (expirationCheck(found.updatedAt)) {
+  } else if (expirationCheck(found.updatedAt)) {
+    // expired data
     try {
       const summonerData = await generateSummonerData(name);
       found.update(summonerData);
