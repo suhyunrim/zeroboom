@@ -18,6 +18,9 @@ module.exports = (sequelize, DataTypes) => {
       name: {
         type: DataTypes.STRING,
       },
+      simplifiedName: {
+        type: DataTypes.STRING,
+      },
       rankTier: {
         type: DataTypes.STRING,
       },
