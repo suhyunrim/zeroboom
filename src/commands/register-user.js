@@ -1,10 +1,14 @@
 const { registerUser } = require('../services/user');
 
 exports.run = async (message, args) => {
+	args = args.join(" ");
+	args = args.split("@");
+
 	if(args.length != 2)
 	{
 		return 'invalid args';	
 	}
+
 	var summonerName = args[0];
 	var tier = args[1];
 	var tokenId = process.env.RIOT_TOKEN_ID; 
@@ -21,5 +25,5 @@ exports.conf = {
 exports.help = {
 	name: 'register-user',
 	description: 'register user.',
-	usage: 'register-user groupName summonerName tier'
+	usage: 'register-user summonerName@tier'
 };
