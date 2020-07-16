@@ -16,6 +16,9 @@ router.post('/login', async function(req, res, next) {
   const { id, password } = req.body;
   try {
     const loginCookies = await thresh.getLoginCookies(id, password);
+    if (!loginCookies)
+      return res.status(520);
+
     const loginResult = await loginController.login(loginCookies['PVPNET_ACCT_KR'], loginCookies['PVPNET_ID_KR'], loginCookies['id_token']);
     return res.json(loginResult.result).status(loginResult.statusCode);
   } catch (e) {
