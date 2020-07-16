@@ -3,56 +3,33 @@ const models = require('../../db/models');
 
 const route = Router();
 
+const controller = require('../../controller/group');
+
 module.exports = (app) => {
   app.use('/group', route);
 
   route.post('/register', async (req, res) => {
     const groupName = req.body.groupName;
+    if (!groupName) return res.json({ result: 'invalid group name' });
 
-    if (!groupName)
-      return res.json({ result: "invalid group name" });
+    const result = controller.registerGroup(groupName);
+    return res.json({ result: result.result }).status(result.status);
+  });
 
-    await models.group.findOrCreate({ where: { groupName } }).then((rows) => {
-      res.json({ result: rows[1] ? 'succeed' : 'already exist' });
-    });
+  route.post('/retrive-match', async (req, res) => {
+    const groupName = req.body.groupName;
+    if (!groupName) return res.json({ result: 'invalid group name' });
+
+    const result = controller.retriveMatches(groupName);
+    return res.json({ result: result.result }).status(result.status);
   });
 
   route.get('/ranking', async (req, res) => {
     const { groupName } = req.query;
 
-    if (!groupName)
-      return res.json({ result: 'invalid group name' });
+    if (!groupName) return res.json({ result: 'invalid group name' });
 
-    const group = await models.group.findOne({ where: { groupName } });
-    if (!group)
-      return res.json({ result: 'group is not exist'} );
-
-    let users = await models.user.findAll({ where: { groupId: group.id } });
-    users = users.filter(elem => elem.win + elem.lose >= 4);
-    users.sort((a, b) => (b.defaultRating + b.additionalRating) - (a.defaultRating + a.additionalRating));
-
-    const userIds = users.map((elem) => elem.riotId);
-    const summoners = await models.summoner.findAll({ where: { riotId: userIds } });
-    const summonerObj = summoners.reduce((obj, v) => {
-      obj[v.riotId] = v;
-      return obj;
-    }, {});
-
-    let result = users.map((elem, index) => {
-      return {
-        riotId: elem.riotId,
-        ranking: index + 1,
-        rating: elem.defaultRating + elem.additionalRating,
-        win: elem.win,
-        lose: elem.lose,
-        winRate: Math.ceil((elem.win / (elem.win + elem.lose)) * 100),
-      }
-    });
-
-    result.forEach((user) => {
-      user.name = summonerObj[user.riotId].name;
-    });
-
-    return res.json( { result: result });
-  })
+    const rankings = controller.getRanking(groupName);
+    return res.json({ result: rankings.result, status: rankings.status });
+  });
 };

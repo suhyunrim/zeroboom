@@ -38,7 +38,6 @@ const generateSummonerData = async (name) => {
 };
 
 module.exports.getSummonerByName = async (name) => {
-  // TODO: 검색 시 대소문자 및 띄어쓰기를 고려 안하게 해야 함.
   let found = await models.summoner.findOne({
     where: {
       simplifiedName: name.toLowerCase().replace(' ', ''),
@@ -46,7 +45,6 @@ module.exports.getSummonerByName = async (name) => {
   });
 
   if (!found) {
-    // no data
     try {
       const summonerData = await generateSummonerData(name);
 
@@ -59,12 +57,14 @@ module.exports.getSummonerByName = async (name) => {
       }
 
       await found.update({ name: summonerData.name });
+      models.token
+        .findOne({ where: { accountId: summonerData.accountId } })
+        .then((row) => row.update({ name: name }));
     } catch (e) {
       logger.error(e.stack);
       return { result: found || e.message, status: 501 };
     }
   } else if (expirationCheck(found.updatedAt)) {
-    // expired data
     try {
       const summonerData = await generateSummonerData(name);
       found.update(summonerData);
