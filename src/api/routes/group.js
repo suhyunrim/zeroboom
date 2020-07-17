@@ -12,7 +12,7 @@ module.exports = (app) => {
     const groupName = req.body.groupName;
     if (!groupName) return res.json({ result: 'invalid group name' });
 
-    const result = controller.registerGroup(groupName);
+    const result = await controller.registerGroup(groupName);
     return res.json({ result: result.result }).status(result.status);
   });
 
@@ -20,7 +20,7 @@ module.exports = (app) => {
     const groupName = req.body.groupName;
     if (!groupName) return res.json({ result: 'invalid group name' });
 
-    const result = controller.retriveMatches(groupName);
+    const result = await controller.retriveMatches(groupName);
     return res.json({ result: result.result }).status(result.status);
   });
 
@@ -29,7 +29,7 @@ module.exports = (app) => {
 
     if (!groupName) return res.json({ result: 'invalid group name' });
 
-    const rankings = controller.getRanking(groupName);
+    const rankings = await controller.getRanking(groupName);
     return res.json({ result: rankings.result, status: rankings.status });
   });
 };
