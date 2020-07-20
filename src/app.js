@@ -6,7 +6,7 @@ const { logger } = require('./loaders/logger');
 const path = require('path');
 
 const indexRouter = require('./routes/index');
-const loginRouter = require('./routes/token');
+const userRouter = require('./routes/user');
 const friendlyGameRouter  = require('./routes/friendly-game');
 
 const startServer = async () => {
@@ -19,7 +19,7 @@ const startServer = async () => {
   app.engine('html', require('ejs').renderFile)
 
   app.use('/', indexRouter);
-  app.use('/token', loginRouter)
+  app.use('/user', userRouter)
   app.use('/friendly-game', friendlyGameRouter);
 
   const server = await loader(app);
