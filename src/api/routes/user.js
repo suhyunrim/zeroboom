@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { registerUser } = require('../../services/user');
 const route = Router();
+const controller = require('../../controller/user');
 
 module.exports = (app) => {
   app.use('/user', route);
@@ -11,5 +12,51 @@ module.exports = (app) => {
 
     var ret = await registerUser(groupName, summonerName, tier, tokenId);
     return res.json({ result: ret.result }).status(ret.status);
+  });
+
+  route.post('/login', async function(req, res, next) {
+    const { id, password } = req.body;
+    try {
+      const loginCookies = await thresh.getLoginCookies(id, password);
+      if (!loginCookies) return res.status(520);
+
+      const decoededName = decodeURIComponent(loginCookies['PVPNET_ACCT_KR']);
+      const accountId = loginCookies['PVPNET_ID_KR'];
+      const token = loginCookies['id_token'];
+      const loginResult = await userController.login(
+        decoededName,
+        accountId,
+        token,
+      );
+      const groupList = await controller.getGroupList(accountId);
+      return res
+        .json({ loginResult, groupList })
+        .status(loginResult.statusCode);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
+  });
+
+  route.get('/getGroupList', async (req, res, next) => {
+    const { accountId } = req.query;
+    try {
+      const groupList = await controller.getGroupList(accountId);
+      return res.json(groupList.result).status(groupList.statusCode);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
+  });
+
+  route.get('/getInfo', async (req, res, next) => {
+    const { groupId, accountId } = req.query;
+    try {
+      const userInfo = await controller.getInfo(groupId, accountId);
+      return res.json(userInfo.result).status(groupList.statusCode);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
   });
 };
