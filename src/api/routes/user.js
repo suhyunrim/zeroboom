@@ -1,5 +1,7 @@
 const { Router } = require('express');
+const { logger } = require('../../loaders/logger');
 const { registerUser } = require('../../services/user');
+const thresh = require('thresh');
 const route = Router();
 const controller = require('../../controller/user');
 
@@ -23,7 +25,7 @@ module.exports = (app) => {
       const decoededName = decodeURIComponent(loginCookies['PVPNET_ACCT_KR']);
       const accountId = loginCookies['PVPNET_ID_KR'];
       const token = loginCookies['id_token'];
-      const loginResult = await userController.login(
+      const loginResult = await controller.login(
         decoededName,
         accountId,
         token,
@@ -53,7 +55,22 @@ module.exports = (app) => {
     const { groupId, accountId } = req.query;
     try {
       const userInfo = await controller.getInfo(groupId, accountId);
-      return res.json(userInfo.result).status(groupList.statusCode);
+      return res.json(userInfo.result).status(userInfo.statusCode);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
+  });
+
+  route.post('/calculateChampionScore', async (req, res, next) => {
+    const { groupId, accountId, tokenId } = req.body;
+    try {
+      const championScore = await controller.calculateChampionScore(
+        groupId,
+        accountId,
+        tokenId,
+      );
+      return res.json(championScore.result).status(championScore.statusCode);
     } catch (e) {
       logger.error(e);
       return res.status(500);

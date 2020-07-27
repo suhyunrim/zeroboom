@@ -65,10 +65,23 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
   for (const summonerName of team2)
     team2RatingMap[summonerName] = await getRating(summonerName);
 
-  const team1Rating = Object.values(team1RatingMap).reduce((total, current) => total + current) / 5;
-  const team2Rating = Object.values(team2RatingMap).reduce((total, current) => total + current) / 5;
+  const team1Rating =
+    Object.values(team1RatingMap).reduce((total, current) => total + current) /
+    5;
+  const team2Rating =
+    Object.values(team2RatingMap).reduce((total, current) => total + current) /
+    5;
   const winRate = ratingCalculator.expectedScore(team1Rating, team2Rating);
-  return { result: {winRate: winRate, team1: team1RatingMap, team2: team2RatingMap, team1Rating: team1Rating, team2Rating: team2Rating}, statusCode: 200 };
+  return {
+    result: {
+      winRate: winRate,
+      team1: team1RatingMap,
+      team2: team2RatingMap,
+      team1Rating: team1Rating,
+      team2Rating: team2Rating,
+    },
+    statusCode: 200,
+  };
 };
 
 module.exports.generateMatch = async (

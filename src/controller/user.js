@@ -1,5 +1,6 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
+const { getRawCustomeGames } = require('../services/riot-api');
 
 module.exports.login = async (name, accountId, token) => {
   let found = await models.token.findOne({
@@ -27,6 +28,65 @@ module.exports.login = async (name, accountId, token) => {
   }
 
   return { result: found, status: 200 };
+};
+
+module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
+  try {
+    const until = new Date(new Date().getFullYear(), 0);
+    const riotMatches = await getRawCustomeGames(tokenId, accountId, until);
+
+    const riotMatchIds = riotMatches.map((elem) => elem.gameId);
+    const availableMatchIds = await models.match
+      .findAll({
+        where: { groupId: groupId, gameId: riotMatchIds },
+        raw: true,
+      })
+      .map((elem) => parseInt(elem.gameId));
+
+    const filteredMatches = riotMatches.filter(
+      (riotMatch) =>
+        availableMatchIds.findIndex((gameId) => gameId === riotMatch.gameId) !==
+        -1,
+    );
+
+    let userChampionScores = {};
+    for (const matchRiotData of filteredMatches) {
+      const userData = matchRiotData.participants[0];
+      const championId = userData.championId;
+
+      let result = userChampionScores[championId];
+      if (!result) {
+        result = models.userChampionScore.build().get();
+      }
+
+      for (const key in userData.stats) {
+        if (!result.hasOwnProperty(key)) continue;
+
+        if (key == 'win') {
+          result[userData.stats.win ? 'win' : 'lose']++;
+          continue;
+        }
+
+        result[key] += userData.stats[key];
+      }
+      result.gameDuration += matchRiotData.gameDuration;
+
+      result.groupId = groupId;
+      result.accountId = accountId;
+      result.championId = championId;
+
+      userChampionScores[championId] = result;
+    }
+
+    for (const [_, championScore] of Object.entries(userChampionScores)) {
+      await models.userChampionScore.upsert(championScore);
+    }
+
+    return { result: userChampionScores, statusCode: 200 };
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, statusCode: 501 };
+  }
 };
 
 module.exports.getGroupList = async (accountId) => {
@@ -63,18 +123,27 @@ module.exports.getInfo = async (groupId, accountId) => {
   if (!accountId) return { result: 'invalid accountId', status: 501 };
 
   try {
-    let userInfo = await models.user.findOne({
+    const userInfo = await models.user.findOne({
       where: {
         groupId,
         accountId,
       },
+      raw: true,
     });
 
     if (!userInfo) {
       return { result: 'user is not exist', status: 501 };
     }
 
-    return { result: userInfo, status: 200 };
+    const championScore = await models.userChampionScore.findAll({
+      where: {
+        groupId,
+        accountId,
+      },
+      raw: true,
+    });
+
+    return { result: { userInfo, championScore }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
