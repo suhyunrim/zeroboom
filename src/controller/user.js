@@ -1,6 +1,7 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
 const { getRawCustomeGames } = require('../services/riot-api');
+const { getRatingTier } = require('../services/user');
 
 module.exports.login = async (name, accountId, token) => {
   let found = await models.token.findOne({
@@ -135,6 +136,19 @@ module.exports.getInfo = async (groupId, accountId) => {
       return { result: 'user is not exist', status: 501 };
     }
 
+    userInfo.ratingTier = getRatingTier(
+      userInfo.defaultRating + userInfo.additionalRating,
+    );
+
+    const summonerInfo = await models.summoner.findOne({
+      where: { accountId },
+      raw: true,
+    });
+
+    if (!summonerInfo) {
+      return { result: 'summoner is not exist', status: 501 };
+    }
+
     const championScore = await models.userChampionScore.findAll({
       where: {
         groupId,
@@ -143,7 +157,7 @@ module.exports.getInfo = async (groupId, accountId) => {
       raw: true,
     });
 
-    return { result: { userInfo, championScore }, status: 200 };
+    return { result: { userInfo, summonerInfo, championScore }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
