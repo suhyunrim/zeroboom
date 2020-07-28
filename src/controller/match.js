@@ -11,7 +11,7 @@ const {
 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
-const ratingCalculator = new elo();
+const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 
