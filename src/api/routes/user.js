@@ -46,6 +46,7 @@ module.exports = (app) => {
       const accountId = await tokenController.getAccountId(
         req.headers.riottokenid,
       );
+
       if (!accountId) {
         return res.status(500);
       }
@@ -59,8 +60,15 @@ module.exports = (app) => {
   });
 
   route.get('/getInfo', async (req, res, next) => {
-    const { groupId, accountId } = req.query;
+    const { groupId } = req.query;
     try {
+      const tokenId = req.headers.riottokenid;
+      const accountId = await tokenController.getAccountId(tokenId);
+
+      if (!accountId) {
+        return res.status(500);
+      }
+
       const userInfo = await userController.getInfo(groupId, accountId);
       return res.json(userInfo.result).status(userInfo.statusCode);
     } catch (e) {
