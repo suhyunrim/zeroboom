@@ -16,11 +16,11 @@ module.exports = (app) => {
     return res.json({ result: result.result }).status(result.status);
   });
 
-  route.post('/retrive-match', async (req, res) => {
+  route.post('/retrieve-match', async (req, res) => {
     const groupName = req.body.groupName;
     if (!groupName) return res.json({ result: 'invalid group name' });
 
-    const result = await controller.retriveMatches(groupName);
+    const result = await controller.retrieveMatches(groupName);
     return res.json({ result: result.result }).status(result.status);
   });
 

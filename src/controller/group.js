@@ -10,7 +10,7 @@ module.exports.registerGroup = async (groupName) => {
   return { result: result[1] ? 'succeed' : 'already exist', status: 200 };
 };
 
-module.exports.retriveMatches = async (groupName) => {
+module.exports.retrieveMatches = async (groupName) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
