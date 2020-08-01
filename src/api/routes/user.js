@@ -78,8 +78,15 @@ module.exports = (app) => {
   });
 
   route.post('/calculateChampionScore', async (req, res, next) => {
-    const { groupId, accountId, tokenId } = req.body;
+    const { groupId } = req.body;
     try {
+      const tokenId = req.headers.riottokenid;
+      const accountId = await tokenController.getAccountId(tokenId);
+
+      if (!accountId) {
+        return res.status(500);
+      }
+
       const championScore = await userController.calculateChampionScore(
         groupId,
         accountId,
