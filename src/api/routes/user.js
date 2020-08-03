@@ -6,6 +6,8 @@ const route = Router();
 const userController = require('../../controller/user');
 const tokenController = require('../../controller/token');
 
+const jwtDecode = require('jwt-decode');
+
 module.exports = (app) => {
   app.use('/user', route);
 
@@ -23,14 +25,11 @@ module.exports = (app) => {
       const loginCookies = await thresh.getLoginCookies(id, password);
       if (!loginCookies) return res.status(520);
 
-      const decoededName = decodeURIComponent(loginCookies['PVPNET_ACCT_KR']);
+      const jwtDecoded = jwtDecode(loginCookies['id_token']);
+      const name = jwtDecoded.acct.game_name;
       const accountId = loginCookies['PVPNET_ID_KR'];
       const token = loginCookies['id_token'];
-      const loginResult = await userController.login(
-        decoededName,
-        accountId,
-        token,
-      );
+      const loginResult = await userController.login(name, accountId, token);
       const groupList = await userController.getGroupList(accountId);
       return res
         .json({ loginResult: loginResult.result, groupList: groupList.result })
