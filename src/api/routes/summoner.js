@@ -13,9 +13,10 @@ module.exports = (app) => {
       [Segments.PARAMS]: Joi.object({
         name: Joi.string().required(),
       }),
-    }), async (req, res) => {
+    }),
+    async (req, res) => {
       const result = await controller.getSummonerByName(req.params.name);
-      res.json(result.result).status(result.status);
+      res.status(result.status).json(result.result);
     },
   );
 };

@@ -19,7 +19,7 @@ module.exports = (app) => {
     let { tier } = req.body;
 
     var ret = await registerUser(groupName, summonerName, tier, tokenId);
-    return res.json({ result: ret.result }).status(ret.status);
+    return res.status(ret.status).json({ result: ret.result });
   });
 
   route.post('/login', async function(req, res, next) {
@@ -35,8 +35,8 @@ module.exports = (app) => {
       const loginResult = await userController.login(name, accountId, token);
       const groupList = await userController.getGroupList(accountId);
       return res
-        .json({ loginResult: loginResult.result, groupList: groupList.result })
-        .status(loginResult.statusCode);
+        .status(loginResult.statusCode)
+        .json({ loginResult: loginResult.result, groupList: groupList.result });
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -54,7 +54,7 @@ module.exports = (app) => {
       }
 
       const groupList = await userController.getGroupList(accountId);
-      return res.json(groupList.result).status(groupList.statusCode);
+      return res.status(groupList.statusCode).json(groupList.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -72,7 +72,7 @@ module.exports = (app) => {
       }
 
       const userInfo = await userController.getInfo(groupId, accountId);
-      return res.json(userInfo.result).status(userInfo.statusCode);
+      return res.status(userInfo.statusCode).json(userInfo.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -96,7 +96,7 @@ module.exports = (app) => {
       );
 
       if (isRefreshing) {
-        return res.json({ result: 'already refreshing' }).status(501);
+        return res.status(501).json({ result: 'already refreshing' });
       }
 
       redis.hset(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey, '1');
@@ -109,7 +109,7 @@ module.exports = (app) => {
 
       redis.hdel(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey);
 
-      return res.json(championScore.result).status(championScore.statusCode);
+      return res.status(championScore.statusCode).json(championScore.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);

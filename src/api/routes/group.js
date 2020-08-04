@@ -14,32 +14,36 @@ module.exports = (app) => {
 
   route.post('/register', async (req, res) => {
     const groupName = req.body.groupName;
-    if (!groupName) return res.json({ result: 'invalid group name' });
+    if (!groupName)
+      return res.status(501).json({ result: 'invalid group name' });
 
     const result = await groupController.registerGroup(groupName);
-    return res.json({ result: result.result }).status(result.status);
+    return res.status(result.status).json({ result: result.result });
   });
 
   route.post('/retrieve-match', async (req, res) => {
     const groupName = req.body.groupName;
-    if (!groupName) return res.json({ result: 'invalid group name' });
+    if (!groupName)
+      return res.status(501).json({ result: 'invalid group name' });
 
     const result = await groupController.retrieveMatches(groupName);
-    return res.json({ result: result.result }).status(result.status);
+    return res.status(result.status).json({ result: result.result });
   });
 
   route.get('/ranking', async (req, res) => {
     const { groupName } = req.query;
 
-    if (!groupName) return res.json({ result: 'invalid group name' });
+    if (!groupName)
+      return res.status(501).json({ result: 'invalid group name' });
 
     const rankings = await groupController.getRanking(groupName);
-    return res.json({ result: rankings.result, status: rankings.status });
+    return res.status(rankings.status).json({ result: rankings.result });
   });
 
   route.post('/refresh-rating', async (req, res) => {
     const groupName = req.body.groupName;
-    if (!groupName) return res.json({ result: 'invalid group name' });
+    if (!groupName)
+      return res.status(501).json({ result: 'invalid group name' });
 
     const redisFieldKey = groupName;
     const isRefreshing = await redis.hgetAsync(
@@ -48,21 +52,21 @@ module.exports = (app) => {
     );
 
     if (isRefreshing) {
-      return res.json({ result: 'already refreshing' }).status(501);
+      return res.status(501).json({ result: 'already refreshing' });
     }
 
     redis.hset(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey, '1');
 
     const retrieveResult = await groupController.retrieveMatches(groupName);
     if (retrieveResult.status !== 200)
-      return res.json({ result: 'retrieve match failed' }).status(501);
+      return res.status(501).json({ result: 'retrieve match failed' });
 
     const calculateResult = await matchController.calculateRating(groupName);
     if (calculateResult.status !== 200)
-      return res.json({ result: 'calculate match failed' }).status(501);
+      return res.status(501).json({ result: 'calculate match failed' });
 
     redis.hdel(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey);
 
-    return res.json({ result: calculateResult.result }).status(200);
+    return res.json({ result: calculateResult.result });
   });
 };
