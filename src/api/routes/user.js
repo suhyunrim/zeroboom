@@ -6,6 +6,9 @@ const route = Router();
 const userController = require('../../controller/user');
 const tokenController = require('../../controller/token');
 
+const redis = require('../../redis/redis');
+const redisKeys = require('../../redis/redisKeys');
+
 const jwtDecode = require('jwt-decode');
 
 module.exports = (app) => {
@@ -86,11 +89,26 @@ module.exports = (app) => {
         return res.status(500);
       }
 
+      const redisFieldKey = `${groupId}:${accountId}`;
+      const isRefreshing = await redis.hgetAsync(
+        redisKeys.REFRESHING_CHAMPION_SCORES,
+        redisFieldKey,
+      );
+
+      if (isRefreshing) {
+        return res.json({ result: 'already refreshing' }).status(501);
+      }
+
+      redis.hset(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey, '1');
+
       const championScore = await userController.calculateChampionScore(
         groupId,
         accountId,
         tokenId,
       );
+
+      redis.hdel(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey);
+
       return res.json(championScore.result).status(championScore.statusCode);
     } catch (e) {
       logger.error(e);

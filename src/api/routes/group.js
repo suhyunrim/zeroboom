@@ -6,6 +6,9 @@ const route = Router();
 const groupController = require('../../controller/group');
 const matchController = require('../../controller/match');
 
+const redis = require('../../redis/redis');
+const redisKeys = require('../../redis/redisKeys');
+
 module.exports = (app) => {
   app.use('/group', route);
 
@@ -38,6 +41,18 @@ module.exports = (app) => {
     const groupName = req.body.groupName;
     if (!groupName) return res.json({ result: 'invalid group name' });
 
+    const redisFieldKey = groupName;
+    const isRefreshing = await redis.hgetAsync(
+      redisKeys.REFRESHING_GROUP_RATING,
+      redisFieldKey,
+    );
+
+    if (isRefreshing) {
+      return res.json({ result: 'already refreshing' }).status(501);
+    }
+
+    redis.hset(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey, '1');
+
     const retrieveResult = await groupController.retrieveMatches(groupName);
     if (retrieveResult.status !== 200)
       return res.json({ result: 'retrieve match failed' }).status(501);
@@ -46,6 +61,8 @@ module.exports = (app) => {
     if (calculateResult.status !== 200)
       return res.json({ result: 'calculate match failed' }).status(501);
 
-    return res.status(retrieveResult.status);
+    redis.hdel(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey);
+
+    return res.json({ result: calculateResult.result }).status(200);
   });
 };
