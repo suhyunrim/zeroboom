@@ -35,7 +35,7 @@ module.exports = (app) => {
       const loginResult = await userController.login(name, accountId, token);
       const groupList = await userController.getGroupList(accountId);
       return res
-        .status(loginResult.statusCode)
+        .status(loginResult.status)
         .json({ loginResult: loginResult.result, groupList: groupList.result });
     } catch (e) {
       logger.error(e);
@@ -54,7 +54,7 @@ module.exports = (app) => {
       }
 
       const groupList = await userController.getGroupList(accountId);
-      return res.status(groupList.statusCode).json(groupList.result);
+      return res.status(groupList.status).json(groupList.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -72,7 +72,7 @@ module.exports = (app) => {
       }
 
       const userInfo = await userController.getInfo(groupId, accountId);
-      return res.status(userInfo.statusCode).json(userInfo.result);
+      return res.status(userInfo.status).json(userInfo.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -109,7 +109,7 @@ module.exports = (app) => {
 
       redis.hdel(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey);
 
-      return res.status(championScore.statusCode).json(championScore.result);
+      return res.status(championScore.status).json(championScore.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);

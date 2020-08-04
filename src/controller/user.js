@@ -83,10 +83,10 @@ module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
       await models.userChampionScore.upsert(championScore);
     }
 
-    return { result: userChampionScores, statusCode: 200 };
+    return { result: userChampionScores, status: 200 };
   } catch (e) {
     logger.error(e.stack);
-    return { result: e.message, statusCode: 501 };
+    return { result: e.message, status: 501 };
   }
 };
 
@@ -116,7 +116,7 @@ module.exports.getGroupList = async (accountId) => {
     return { result: result || e.message, status: 501 };
   }
 
-  return { result, statusCode: 200 };
+  return { result, status: 200 };
 };
 
 module.exports.getInfo = async (groupId, accountId) => {

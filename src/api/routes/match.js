@@ -10,7 +10,7 @@ module.exports = (app) => {
   route.post('/register', async (req, res) => {
     const { tokenId, summonerName } = req.body;
     const result = await controller.registerMatch(tokenId, summonerName);
-    return res.status(result.statusCode).json(result);
+    return res.status(result.status).json(result);
   });
 
   route.post('/calculate', async (req, res) => {
@@ -27,7 +27,7 @@ module.exports = (app) => {
       team1.split(','),
       team2.split(','),
     );
-    return res.status(result.statusCode).json(result);
+    return res.status(result.status).json(result);
   });
 
   route.post('/generate-match', async function(req, res, next) {
@@ -43,6 +43,6 @@ module.exports = (app) => {
       team2Array,
       userPoolArray,
     );
-    return res.status(result.statusCode).json(result);
+    return res.status(result.status).json(result);
   });
 };

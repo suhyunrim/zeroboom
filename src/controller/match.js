@@ -34,11 +34,11 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
       await models.match.create(matchData);
     } catch (e) {
       logger.error(e.stack);
-      return { result: e.message, statusCode: 501 };
+      return { result: e.message, status: 501 };
     }
   }
 
-  return { result: 'succeed', statusCode: 200 };
+  return { result: 'succeed', status: 200 };
 };
 
 module.exports.predictWinRate = async (groupName, team1, team2) => {
@@ -80,7 +80,7 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
       team1Rating: team1Rating,
       team2Rating: team2Rating,
     },
-    statusCode: 200,
+    status: 200,
   };
 };
 
@@ -155,7 +155,7 @@ module.exports.generateMatch = async (
     });
   }
 
-  return { result: result, statusCode: 200 };
+  return { result: result, status: 200 };
 };
 
 module.exports.calculateRating = async (groupName) => {
