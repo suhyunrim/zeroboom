@@ -1,4 +1,5 @@
 const redis = require('redis');
+const { logger } = require('../loaders/logger');
 
 const client = redis.createClient({
   host: process.env.REDIS_HOST,
