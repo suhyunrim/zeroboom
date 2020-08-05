@@ -1,6 +1,8 @@
 FROM node:12
 LABEL maintainer="8eatles <8eatles@naver.com>"
 
+WORKDIR /app
+
 # Bundle APP files
 COPY . .
 
