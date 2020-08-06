@@ -10,6 +10,7 @@ COPY . .
 
 RUN sed -i s/%VERSION%/"$(echo $(git log --decorate --oneline -1)|sed -r 's/([\$\.\*\/\[\\^])/\\\1/g'|sed 's/[]]/\[]]/g')"/ src/commands/version.js
 ENV NPM_CONFIG_LOGLEVEL warn
+RUN npm install
 RUN yarn
 
 EXPOSE 3000
