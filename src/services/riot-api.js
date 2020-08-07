@@ -119,7 +119,10 @@ const getMatchData = async (tokenId, gameId) => {
       if (participantData) {
         const team =
           participantData.teamId == 100 ? matchData.team1 : matchData.team2;
-        team.push([identity.player.accountId, identity.player.summonerName]);
+        team.push([
+          String(identity.player.accountId),
+          identity.player.summonerName,
+        ]);
       }
     });
 

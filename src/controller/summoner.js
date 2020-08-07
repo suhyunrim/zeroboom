@@ -86,7 +86,7 @@ module.exports.getAccountIdByName = async (tokenId, name) => {
 
   try {
     const summonerResult = await getSummonerByName_V1(tokenId, name);
-    return summonerResult.accountId;
+    return String(summonerResult.accountId);
   } catch (e) {
     logger.error(e.stack);
   }

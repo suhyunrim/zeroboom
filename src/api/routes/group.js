@@ -2,6 +2,7 @@ const { Router } = require('express');
 const models = require('../../db/models');
 
 const route = Router();
+const { logger } = require('../../loaders/logger');
 
 const groupController = require('../../controller/group');
 const matchController = require('../../controller/match');
@@ -41,32 +42,36 @@ module.exports = (app) => {
   });
 
   route.post('/refresh-rating', async (req, res) => {
-    const groupName = req.body.groupName;
-    if (!groupName)
-      return res.status(501).json({ result: 'invalid group name' });
+    try {
+      const groupName = req.body.groupName;
+      if (!groupName)
+        return res.status(501).json({ result: 'invalid group name' });
 
-    const redisFieldKey = groupName;
-    const isRefreshing = await redis.hgetAsync(
-      redisKeys.REFRESHING_GROUP_RATING,
-      redisFieldKey,
-    );
+      const redisFieldKey = groupName;
+      const isRefreshing = await redis.hgetAsync(
+        redisKeys.REFRESHING_GROUP_RATING,
+        redisFieldKey,
+      );
 
-    if (isRefreshing) {
-      return res.status(501).json({ result: 'already refreshing' });
+      if (isRefreshing) {
+        return res.status(501).json({ result: 'already refreshing' });
+      }
+
+      redis.hset(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey, '1');
+
+      const retrieveResult = await groupController.retrieveMatches(groupName);
+      if (retrieveResult.status !== 200)
+        return res.status(501).json({ result: 'retrieve match failed' });
+
+      const calculateResult = await matchController.calculateRating(groupName);
+      if (calculateResult.status !== 200)
+        return res.status(501).json({ result: 'calculate match failed' });
+
+      return res.json({ result: calculateResult.result });
+    } catch (e) {
+      logger.error(e);
+    } finally {
+      redis.hdel(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey);
     }
-
-    redis.hset(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey, '1');
-
-    const retrieveResult = await groupController.retrieveMatches(groupName);
-    if (retrieveResult.status !== 200)
-      return res.status(501).json({ result: 'retrieve match failed' });
-
-    const calculateResult = await matchController.calculateRating(groupName);
-    if (calculateResult.status !== 200)
-      return res.status(501).json({ result: 'calculate match failed' });
-
-    redis.hdel(redisKeys.REFRESHING_GROUP_RATING, redisFieldKey);
-
-    return res.json({ result: calculateResult.result });
   });
 };

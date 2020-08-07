@@ -23,7 +23,12 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
   const summoner = await getSummonerByName_V1(tokenId, summonerName);
   if (!summoner) return { result: 'invalid summoner' };
 
-  const matches = await getCustomGameHistory(tokenId, summoner.accountId);
+  const until = new Date(new Date().getFullYear(), 0);
+  const matches = await getCustomGameHistory(
+    tokenId,
+    summoner.accountId,
+    until,
+  );
   for (let gameId of matches) {
     if (await models.match.findOne({ where: { gameId: gameId } })) continue;
 
