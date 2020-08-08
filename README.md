@@ -10,9 +10,10 @@ LOL Community Management Bot Service for Whipping Cream
 # Copy .env & configure it
 cp .env_defaults .env
 
-npm install
-npx sequelize db:migrate
-npm start
+npm install -g yarn
+yarn
+yarn sequelize db:migrate
+yarn start
 ```
 
 ### Prerequisites
