@@ -6,7 +6,7 @@ const summonerController = require('../controller/summoner');
 const elo = require('arpad');
 const {
   getSummonerByName_V1,
-  getCustomGameHistory,
+  getCustomGames,
   getMatchData,
 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
@@ -17,30 +17,55 @@ const User = require('../entity/user').User;
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
-
   if (!summonerName) return { result: 'invalid summoner name' };
 
   const summoner = await getSummonerByName_V1(tokenId, summonerName);
   if (!summoner) return { result: 'invalid summoner' };
 
-  const until = new Date(new Date().getFullYear(), 0);
-  const matches = await getCustomGameHistory(
-    tokenId,
-    summoner.accountId,
-    until,
-  );
-  for (let gameId of matches) {
-    if (await models.match.findOne({ where: { gameId: gameId } })) continue;
+  const accountId = summoner.accountId;
+  const latestGameCreation = await models.latest_game_creation.findOne({
+    where: { accountId },
+    raw: true,
+  });
+  const until = latestGameCreation
+    ? latestGameCreation.gameCreation
+    : new Date(new Date().getFullYear(), 0);
+  const matches = await getCustomGames(tokenId, accountId, until);
+  const matchIds = matches.map((elem) => elem.gameId);
+  const matchIdsInDB = (
+    await models.match.findAll({
+      where: { gameId: matchIds },
+      raw: true,
+    })
+  ).map((elem) => Number(elem.gameId));
 
-    const matchData = await getMatchData(tokenId, gameId);
-    if (!matchData) continue;
+  let newLatestGameCreation = 0;
+  try {
+    for (const simpleMatchData of matches) {
+      newLatestGameCreation =
+        simpleMatchData.gameCreation >= newLatestGameCreation
+          ? simpleMatchData.gameCreation
+          : newLatestGameCreation;
 
-    try {
+      const gameId = simpleMatchData.gameId;
+      if (matchIdsInDB.find((elem) => elem === gameId)) continue;
+
+      const matchData = await getMatchData(tokenId, gameId);
+      if (!matchData || matchData.team1.length + matchData.team2.length !== 10)
+        continue;
+
       await models.match.create(matchData);
-    } catch (e) {
-      logger.error(e.stack);
-      return { result: e.message, status: 501 };
     }
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
+  }
+
+  if (newLatestGameCreation !== 0) {
+    await models.latest_game_creation.upsert({
+      accountId,
+      gameCreation: newLatestGameCreation,
+    });
   }
 
   return { result: 'succeed', status: 200 };

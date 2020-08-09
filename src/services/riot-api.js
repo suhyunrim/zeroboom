@@ -38,12 +38,13 @@ const getSummonerByName_V1 = async (tokenId, summonerName) => {
       `riotAPI.v1.summoner.getByName(${summonerName}) => ${result.status}`,
     );
 
+  result.data.accountId = String(result.data.accountId);
   return result.data;
 };
 
 exports.getSummonerByName_V1 = getSummonerByName_V1;
 
-const getRawCustomeGames = async (tokenId, accountId, until) => {
+const getCustomGames = async (tokenId, accountId, until) => {
   let customGames = [];
 
   try {
@@ -51,49 +52,50 @@ const getRawCustomeGames = async (tokenId, accountId, until) => {
     let isFinished = false;
     until = until ? until : Date.now() - 86400 * 30 * 3 * 1000;
     while (!isFinished) {
-      const result = await riotAPI.v1.match.getMatchHistory(
+      const result = await riotAPI.v1.match.getCustomMatchHistory(
         tokenId,
         accountId,
         beginIndex,
       )();
       if (result.status != 200)
         throw new Error(
-          `riotAPI.v1.match.getMatchHistory(${accountId}) => ${result.status}`,
+          `riotAPI.v1.match.getCustomMatchHistory(${accountId}) => ${result.status}`,
         );
 
       result.data.games.games.forEach((element) => {
-        if (element.gameCreation < until) {
+        if (element.gameCreation <= until) {
           isFinished = true;
           return;
         }
 
         if (
-          element.gameMode == 'CLASSIC' &&
-          element.gameType == 'CUSTOM_GAME' &&
-          element.mapId == 11
-        ) {
-          customGames.push(element);
-        }
+          element.gameMode !== 'CLASSIC' ||
+          element.gameType !== 'CUSTOM_GAME' ||
+          element.mapId !== 11
+        )
+          return;
+
+        customGames.push(element);
       });
 
       beginIndex += 20;
     }
   } catch (e) {
     logger.error(e.stack);
-    logger.error(`getRawCustomeGames(${accountId})`);
+    logger.error(`getRawCustomGames(${accountId})`);
   }
 
   return customGames;
 };
 
-exports.getRawCustomeGames = getRawCustomeGames;
+exports.getCustomGames = getCustomGames;
 
-const getCustomGameHistory = async (tokenId, accountId, until) => {
-  let customGames = await getRawCustomeGames(tokenId, accountId, until);
+const getCustomGameIds = async (tokenId, accountId, until) => {
+  let customGames = await getCustomGames(tokenId, accountId, until);
   return customGames.map((elem) => elem.gameId);
 };
 
-exports.getCustomGameHistory = getCustomGameHistory;
+exports.getCustomGameIds = getCustomGameIds;
 
 const getMatchData = async (tokenId, gameId) => {
   try {
