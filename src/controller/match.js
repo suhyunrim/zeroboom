@@ -19,28 +19,28 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
   if (!summonerName) return { result: 'invalid summoner name' };
 
-  const summoner = await getSummonerByName_V1(tokenId, summonerName);
-  if (!summoner) return { result: 'invalid summoner' };
-
-  const accountId = summoner.accountId;
-  const latestGameCreation = await models.latest_game_creation.findOne({
-    where: { accountId },
-    raw: true,
-  });
-  const until = latestGameCreation
-    ? latestGameCreation.gameCreation
-    : new Date(new Date().getFullYear(), 0);
-  const matches = await getCustomGames(tokenId, accountId, until);
-  const matchIds = matches.map((elem) => elem.gameId);
-  const matchIdsInDB = (
-    await models.match.findAll({
-      where: { gameId: matchIds },
-      raw: true,
-    })
-  ).map((elem) => Number(elem.gameId));
-
-  let newLatestGameCreation = 0;
   try {
+    const summoner = await getSummonerByName_V1(tokenId, summonerName);
+    if (!summoner) return { result: 'invalid summoner' };
+
+    const accountId = summoner.accountId;
+    const latestGameCreation = await models.latest_game_creation.findOne({
+      where: { accountId },
+      raw: true,
+    });
+    const until = latestGameCreation
+      ? latestGameCreation.gameCreation
+      : new Date(new Date().getFullYear(), 0);
+    const matches = await getCustomGames(tokenId, accountId, until);
+    const matchIds = matches.map((elem) => elem.gameId);
+    const matchIdsInDB = (
+      await models.match.findAll({
+        where: { gameId: matchIds },
+        raw: true,
+      })
+    ).map((elem) => Number(elem.gameId));
+
+    let newLatestGameCreation = 0;
     for (const simpleMatchData of matches) {
       newLatestGameCreation =
         simpleMatchData.gameCreation >= newLatestGameCreation
@@ -56,16 +56,16 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
 
       await models.match.create(matchData);
     }
+
+    if (newLatestGameCreation !== 0) {
+      await models.latest_game_creation.upsert({
+        accountId,
+        gameCreation: newLatestGameCreation + 1000, // 시간 보정을 위해 1초 추가함 (by ZeroBoom)
+      });
+    }
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
-  }
-
-  if (newLatestGameCreation !== 0) {
-    await models.latest_game_creation.upsert({
-      accountId,
-      gameCreation: newLatestGameCreation,
-    });
   }
 
   return { result: 'succeed', status: 200 };

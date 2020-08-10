@@ -62,21 +62,28 @@ const getCustomGames = async (tokenId, accountId, until) => {
           `riotAPI.v1.match.getCustomMatchHistory(${accountId}) => ${result.status}`,
         );
 
-      result.data.games.games.forEach((element) => {
-        if (element.gameCreation <= until) {
+      if (result.data.games.games.length === 0) {
+        break;
+      }
+
+      const matches = result.data.games.games;
+      // index가 뒤로 갈 수록 나중 매치기 때문에 뒤에서부터 인덱싱
+      for (let i = matches.length - 1; i >= 0; --i) {
+        const match = matches[i];
+        if (match.gameCreation <= until) {
           isFinished = true;
-          return;
+          break;
         }
 
         if (
-          element.gameMode !== 'CLASSIC' ||
-          element.gameType !== 'CUSTOM_GAME' ||
-          element.mapId !== 11
+          match.gameMode !== 'CLASSIC' ||
+          match.gameType !== 'CUSTOM_GAME' ||
+          match.mapId !== 11
         )
-          return;
+          continue;
 
-        customGames.push(element);
-      });
+        customGames.push(match);
+      }
 
       beginIndex += 20;
     }
