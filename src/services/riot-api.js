@@ -89,7 +89,7 @@ const getCustomGames = async (tokenId, accountId, until) => {
     }
   } catch (e) {
     logger.error(e.stack);
-    logger.error(`getRawCustomGames(${accountId})`);
+    logger.error(`getCustomGames(${accountId})`);
   }
 
   return customGames;
