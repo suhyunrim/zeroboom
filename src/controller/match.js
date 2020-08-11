@@ -204,70 +204,25 @@ module.exports.calculateRating = async (groupName) => {
 
   matches.sort((a, b) => a.gameCreation > b.gameCreation);
 
-  let summoners = {};
+  const groupUsers = await models.user.findAll({
+    where: {
+      groupId: group.id,
+    },
+  });
+
   let users = {};
-  let unknownSummoners = {};
-  let unknownUsers = {};
-  let expectationGroup = {};
+  for (const user of groupUsers) {
+    user.win = 0;
+    user.lose = 0;
+    user.additionalRating = 0;
 
-  const getUser = async (accountId, name) => {
-    if (unknownSummoners[accountId]) {
-      unknownSummoners[accountId] = name;
-      return;
-    }
-
-    let summoner = summoners[accountId];
-    if (!summoner)
-      summoner = await models.summoner.findOne({
-        where: { accountId: accountId },
-      });
-
-    if (!summoner) {
-      summoner = await models.summoner.findOne({ where: { name: name } });
-      if (summoner) {
-        await models.summoner.update(
-          { accountId: accountId },
-          { where: { name: name } },
-        );
-      }
-    }
-
-    if (!summoner) {
-      unknownSummoners[accountId] = name;
-      return;
-    }
-
-    let user = users[summoner.riotId];
-    if (!user) {
-      user = await models.user.findOne({
-        where: {
-          [Op.and]: [{ riotId: summoner.riotId }, { groupId: group.id }],
-        },
-      });
-
-      if (user) {
-        user.win = 0;
-        user.lose = 0;
-        user.additionalRating = 0;
-        user.accountId = accountId;
-      }
-    }
-
-    if (!user) {
-      unknownUsers[summoner.riotId] = summoner.name;
-      return;
-    }
-
-    summoners[accountId] = summoner;
-    users[summoner.riotId] = user;
-
-    return user;
-  };
+    users[String(user.accountId)] = user;
+  }
 
   const getTeam = async (teamData) => {
     let ret = [];
     for (const pair of teamData) {
-      let user = await getUser(pair[0], pair[1]);
+      let user = users[pair[0]];
       if (user) ret.push(user);
     }
     return ret;
@@ -279,7 +234,6 @@ module.exports.calculateRating = async (groupName) => {
       else elem.lose++;
 
       elem.additionalRating += ratingDelta;
-      users[elem.accountId] = elem;
     });
   };
 
@@ -288,46 +242,23 @@ module.exports.calculateRating = async (groupName) => {
     return total;
   };
 
-  const groupBy = (list, keyGetter) => {
-    const map = new Map();
-    list.forEach((item) => {
-      const key = keyGetter(item);
-      const collection = map.get(key);
-      if (!collection) {
-        map.set(key, [item]);
-      } else {
-        collection.push(item);
-      }
-    });
-    return map;
-  };
-
+  let expectationGroup = {};
   for (const match of matches) {
-    let team1 = await getTeam(match.team1);
-    let team2 = await getTeam(match.team2);
+    const team1 = await getTeam(match.team1);
+    const team2 = await getTeam(match.team2);
 
-    if (team1.length + team2.length < 7) continue;
-    else if (team1.length + team2.length < 10) {
-      const existUserArray = team1.concat(team2);
-      const usersByGroupId = groupBy(existUserArray, (elem) => elem.groupId);
-      for (let pair of usersByGroupId) {
-        const groupIds = pair[1];
-        if (groupIds.length >= 6) {
-          const expectationGroupId = existUserArray[0].groupId;
-          if (!expectationGroup[expectationGroupId])
-            expectationGroup[expectationGroupId] = {};
+    if (team1.length + team2.length < 7) {
+      continue;
+    }
 
-          const riotTeamData = match.team1.concat(match.team2);
-          riotTeamData.forEach((elem) => {
-            if (
-              existUserArray.findIndex((user) => user.accountId == elem[0]) ==
-              -1
-            ) {
-              expectationGroup[expectationGroupId][elem[0]] = elem[1];
-            }
-          });
+    if (team1.length + team2.length < 10) {
+      const riotTeamData = match.team1.concat(match.team2);
+      riotTeamData.forEach((elem) => {
+        if (!users[elem[0]]) {
+          expectationGroup[elem[0]] = elem[1];
         }
-      }
+      });
+
       continue;
     }
 
@@ -336,8 +267,7 @@ module.exports.calculateRating = async (groupName) => {
     const team1Rating = team1.reduce(reducer, 0) / 5;
     const team2Rating = team2.reduce(reducer, 0) / 5;
 
-    let team1Delta,
-      team2Delta = 0;
+    let team1Delta, team2Delta;
     if (match.winTeam == 1) {
       team1Delta =
         ratingCalculator.newRatingIfWon(team1Rating, team2Rating) - team1Rating;
@@ -356,20 +286,12 @@ module.exports.calculateRating = async (groupName) => {
     apply(team2, match.winTeam == 2, team2Delta);
   }
 
-  Object.entries(users).forEach(([k, v]) => v.update(v.dataValues));
-
-  if (
-    Object.keys(unknownSummoners).length > 0 ||
-    Object.keys(unknownUsers).length > 0 ||
-    Object.keys(expectationGroup).length > 0
-  ) {
-    return {
-      result: 'unknown users are exist',
-      unknownSummoners: JSON.stringify(unknownSummoners),
-      unknownUsers: JSON.stringify(unknownUsers),
-      expectationGroup: JSON.stringify(expectationGroup),
-    };
+  for (const user of Object.values(users)) {
+    await user.update(user.dataValues);
   }
 
-  return { result: 'succeed' };
+  return {
+    result: { expectationGroup: JSON.stringify(expectationGroup) },
+    status: 200,
+  };
 };

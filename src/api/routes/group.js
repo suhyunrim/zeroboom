@@ -42,12 +42,12 @@ module.exports = (app) => {
   });
 
   route.post('/refresh-rating', async (req, res) => {
-    try {
-      const groupName = req.body.groupName;
-      if (!groupName)
-        return res.status(501).json({ result: 'invalid group name' });
+    const groupName = req.body.groupName;
+    if (!groupName)
+      return res.status(501).json({ result: 'invalid group name' });
 
-      const redisFieldKey = groupName;
+    const redisFieldKey = groupName;
+    try {
       const isRefreshing = await redis.hgetAsync(
         redisKeys.REFRESHING_GROUP_RATING,
         redisFieldKey,
