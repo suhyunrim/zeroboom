@@ -121,71 +121,102 @@ module.exports.generateMatch = async (
   userPool,
   matchCount,
 ) => {
-  const group = await models.group.findOne({ where: { groupName: groupName } });
-
-  let summoners = {};
-
-  const getUserModel = async (summonerName) => {
-    const { result } = await summonerController.getSummonerByName(summonerName);
-
-    if (!result) {
-      logger.error(`db error ${summonerName} not found`);
-      return;
+  try {
+    if (team1Names.length + team2Names.length + userPool.length !== 10) {
+      throw '자동매칭에 필요한 유저 수는 10명입니다.';
     }
 
-    if (!summoners[result.riotId]) summoners[result.riotId] = result;
-
-    return (userModel = await models.user.findOne({
-      where: {
-        groupId: group.id,
-        riotId: result.riotId,
-      },
-    }));
-  };
-
-  const applyTeam = async (teamArray, summonerNames) => {
-    for (const name of summonerNames) {
-      const userModel = await getUserModel(name);
-      if (!userModel) {
-        logger.error(`db error ${name} not found`);
-        return;
+    const allNames = team1Names.concat(team2Names).concat(userPool);
+    const duplicationNames = new Set();
+    const exists = {};
+    allNames.forEach((elem) => {
+      if (exists[elem]) {
+        duplicationNames.add(elem);
+      } else {
+        exists[elem] = true;
       }
-      let user = new User();
-      user.setFromUserModel(userModel);
-      teamArray.push(user);
-    }
-  };
-
-  let preOrganizationTeam1 = [];
-  await applyTeam(preOrganizationTeam1, team1Names);
-
-  let preOrganizationTeam2 = [];
-  await applyTeam(preOrganizationTeam2, team2Names);
-
-  let makerUserPool = [];
-  await applyTeam(makerUserPool, userPool);
-
-  const matchingGames = matchMaker.matchMake(
-    preOrganizationTeam1,
-    preOrganizationTeam2,
-    makerUserPool,
-    matchCount,
-  );
-  if (matchingGames == null) {
-    logger.error('invalid params');
-    return;
-  }
-
-  let result = [];
-  for (const match of matchingGames) {
-    result.push({
-      team1: match.team1.map((elem) => summoners[elem.id].name),
-      team2: match.team2.map((elem) => summoners[elem.id].name),
-      team1WinRate: match.winRate,
     });
-  }
 
-  return { result: result, status: 200 };
+    if (duplicationNames.size >= 1) {
+      let errorMessage = '';
+      duplicationNames.forEach((elem) => {
+        errorMessage = errorMessage + `[${elem}] `;
+      });
+      errorMessage += '가 중복입니다.';
+      throw errorMessage;
+    }
+
+    const group = await models.group.findOne({
+      where: { groupName: groupName },
+    });
+
+    let summoners = {};
+
+    const getUserModel = async (summonerName) => {
+      const result = await summonerController.getSummonerByName(summonerName);
+
+      if (result.status !== 200) {
+        throw `[${summonerName}]는 존재하지 않는 소환사입니다.`;
+      }
+
+      const summoner = result.result;
+      if (!summoners[summoner.riotId]) {
+        summoners[summoner.riotId] = summoner;
+      }
+
+      return await models.user.findOne({
+        where: {
+          groupId: group.id,
+          riotId: summoner.riotId,
+        },
+      });
+    };
+
+    const applyTeam = async (teamArray, summonerNames) => {
+      for (const name of summonerNames) {
+        const userModel = await getUserModel(name);
+        if (!userModel) {
+          throw `[${name}]는 그룹에 존재하지 않는 유저입니다.`;
+        }
+        let user = new User();
+        user.setFromUserModel(userModel);
+        teamArray.push(user);
+      }
+    };
+
+    let preOrganizationTeam1 = [];
+    await applyTeam(preOrganizationTeam1, team1Names);
+
+    let preOrganizationTeam2 = [];
+    await applyTeam(preOrganizationTeam2, team2Names);
+
+    let makerUserPool = [];
+    await applyTeam(makerUserPool, userPool);
+
+    const matchingGames = matchMaker.matchMake(
+      preOrganizationTeam1,
+      preOrganizationTeam2,
+      makerUserPool,
+      matchCount,
+    );
+    if (matchingGames == null) {
+      logger.error('invalid params');
+      throw 'invalid params';
+    }
+
+    let result = [];
+    for (const match of matchingGames) {
+      result.push({
+        team1: match.team1.map((elem) => summoners[elem.id].name),
+        team2: match.team2.map((elem) => summoners[elem.id].name),
+        team1WinRate: match.winRate,
+      });
+    }
+
+    return { result: result, status: 200 };
+  } catch (e) {
+    return { result: e, status: 501 };
+  }
 };
 
 module.exports.calculateRating = async (groupName) => {

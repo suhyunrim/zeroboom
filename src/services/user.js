@@ -103,7 +103,7 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
   );
 
   try {
-    await models.user.create({
+    await models.user.upsert({
       riotId: summoner.riotId,
       accountId: accountId,
       encryptedAccountId: summoner.encryptedAccountId,
