@@ -6,6 +6,7 @@ const { logger } = require('../../loaders/logger');
 
 const groupController = require('../../controller/group');
 const matchController = require('../../controller/match');
+const tokenController = require('../../controller/token');
 
 const redis = require('../../redis/redis');
 const redisKeys = require('../../redis/redisKeys');
@@ -37,8 +38,16 @@ module.exports = (app) => {
     if (!groupName)
       return res.status(501).json({ result: 'invalid group name' });
 
-    const rankings = await groupController.getRanking(groupName);
-    return res.status(rankings.status).json({ result: rankings.result });
+    try {
+      const tokenId = req.headers.riottokenid;
+      await tokenController.validateUserGroup(tokenId, groupName);
+
+      const rankings = await groupController.getRanking(groupName);
+      return res.status(rankings.status).json({ result: rankings.result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(501);
+    }
   });
 
   route.post('/refresh-rating', async (req, res) => {
