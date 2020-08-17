@@ -1,9 +1,12 @@
 const { Router } = require('express');
 const summoner = require('./routes/summoner');
 const chat = require('./routes/chat');
-const group = require('./routes/group')
-const user = require('./routes/user')
-const match = require('./routes/match')
+const group = require('./routes/group');
+const user = require('./routes/user');
+const match = require('./routes/match');
+
+// v2
+const groupsV2 = require('./routes/v2/groups');
 
 // guaranteed to get dependencies
 module.exports = () => {
@@ -14,5 +17,7 @@ module.exports = () => {
   user(app);
   match(app);
 
+  //v2
+  groupsV2(app);
   return app;
 };

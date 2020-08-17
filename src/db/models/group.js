@@ -14,6 +14,10 @@ module.exports = (sequelize, DataTypes) => {
       revisionDate: {
         type: DataTypes.DATE,
       },
+      discordGuildId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {},
   );

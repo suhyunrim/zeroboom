@@ -5,6 +5,26 @@ const RankingMinumumMatchCount = 5;
 
 const matchController = require('../controller/match');
 
+module.exports.get = async (id) => {
+  const result = await models.group.findByPk(id);
+
+  if (!(result instanceof models.group)) {
+    throw new Error(`Cannot find group(id:${id})`);
+  }
+
+  return result;
+};
+
+module.exports.getByDiscordGuildId = async (id) => {
+  const result = await models.group.findOne({ where: { discordGuildId: id } });
+
+  if (!(result instanceof models.group)) {
+    throw new Error(`Cannot find group(id:${id})`);
+  }
+
+  return result;
+};
+
 module.exports.registerGroup = async (groupName) => {
   const result = await models.group.findOrCreate({ where: { groupName } });
   return { result: result[1] ? 'succeed' : 'already exist', status: 200 };
