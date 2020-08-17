@@ -45,7 +45,7 @@
     "sequelize-cli": "^5.5.1",
     "socket.io": "^2.3.0",
     "thresh": "WhippingCream/thresh#53a3f35",
-    "tristana": "WhippingCream/tristana#2ab74fc",
+    "tristana": "WhippingCream/tristana#4c7070ed5e1271bf2ca70b66a14ef2fa1781874d",
     "winston": "^3.2.1"
   }
 }

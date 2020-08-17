@@ -6,7 +6,7 @@ const summonerController = require('../controller/summoner');
 const elo = require('arpad');
 const {
   getSummonerByName_V1,
-  getCustomGameHistory,
+  getCustomGames,
   getMatchData,
 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
@@ -17,30 +17,55 @@ const User = require('../entity/user').User;
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
-
   if (!summonerName) return { result: 'invalid summoner name' };
 
-  const summoner = await getSummonerByName_V1(tokenId, summonerName);
-  if (!summoner) return { result: 'invalid summoner' };
+  try {
+    const summoner = await getSummonerByName_V1(tokenId, summonerName);
+    if (!summoner) return { result: 'invalid summoner' };
 
-  const until = new Date(new Date().getFullYear(), 0);
-  const matches = await getCustomGameHistory(
-    tokenId,
-    summoner.accountId,
-    until,
-  );
-  for (let gameId of matches) {
-    if (await models.match.findOne({ where: { gameId: gameId } })) continue;
+    const accountId = summoner.accountId;
+    const latestGameCreation = await models.latest_game_creation.findOne({
+      where: { accountId },
+      raw: true,
+    });
+    const until = latestGameCreation
+      ? latestGameCreation.gameCreation
+      : new Date(new Date().getFullYear(), 0);
+    const matches = await getCustomGames(tokenId, accountId, until);
+    const matchIds = matches.map((elem) => elem.gameId);
+    const matchIdsInDB = (
+      await models.match.findAll({
+        where: { gameId: matchIds },
+        raw: true,
+      })
+    ).map((elem) => Number(elem.gameId));
 
-    const matchData = await getMatchData(tokenId, gameId);
-    if (!matchData) continue;
+    let newLatestGameCreation = 0;
+    for (const simpleMatchData of matches) {
+      newLatestGameCreation =
+        simpleMatchData.gameCreation >= newLatestGameCreation
+          ? simpleMatchData.gameCreation
+          : newLatestGameCreation;
 
-    try {
+      const gameId = simpleMatchData.gameId;
+      if (matchIdsInDB.find((elem) => elem === gameId)) continue;
+
+      const matchData = await getMatchData(tokenId, gameId);
+      if (!matchData || matchData.team1.length + matchData.team2.length !== 10)
+        continue;
+
       await models.match.create(matchData);
-    } catch (e) {
-      logger.error(e.stack);
-      return { result: e.message, status: 501 };
     }
+
+    if (newLatestGameCreation !== 0) {
+      await models.latest_game_creation.upsert({
+        accountId,
+        gameCreation: newLatestGameCreation + 1000, // 시간 보정을 위해 1초 추가함 (by ZeroBoom)
+      });
+    }
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
   }
 
   return { result: 'succeed', status: 200 };
@@ -96,71 +121,102 @@ module.exports.generateMatch = async (
   userPool,
   matchCount,
 ) => {
-  const group = await models.group.findOne({ where: { groupName: groupName } });
-
-  let summoners = {};
-
-  const getUserModel = async (summonerName) => {
-    const { result } = await summonerController.getSummonerByName(summonerName);
-
-    if (!result) {
-      logger.error(`db error ${summonerName} not found`);
-      return;
+  try {
+    if (team1Names.length + team2Names.length + userPool.length !== 10) {
+      throw '자동매칭에 필요한 유저 수는 10명입니다.';
     }
 
-    if (!summoners[result.riotId]) summoners[result.riotId] = result;
-
-    return (userModel = await models.user.findOne({
-      where: {
-        groupId: group.id,
-        riotId: result.riotId,
-      },
-    }));
-  };
-
-  const applyTeam = async (teamArray, summonerNames) => {
-    for (const name of summonerNames) {
-      const userModel = await getUserModel(name);
-      if (!userModel) {
-        logger.error(`db error ${name} not found`);
-        return;
+    const allNames = team1Names.concat(team2Names).concat(userPool);
+    const duplicationNames = new Set();
+    const exists = {};
+    allNames.forEach((elem) => {
+      if (exists[elem]) {
+        duplicationNames.add(elem);
+      } else {
+        exists[elem] = true;
       }
-      let user = new User();
-      user.setFromUserModel(userModel);
-      teamArray.push(user);
-    }
-  };
-
-  let preOrganizationTeam1 = [];
-  await applyTeam(preOrganizationTeam1, team1Names);
-
-  let preOrganizationTeam2 = [];
-  await applyTeam(preOrganizationTeam2, team2Names);
-
-  let makerUserPool = [];
-  await applyTeam(makerUserPool, userPool);
-
-  const matchingGames = matchMaker.matchMake(
-    preOrganizationTeam1,
-    preOrganizationTeam2,
-    makerUserPool,
-    matchCount,
-  );
-  if (matchingGames == null) {
-    logger.error('invalid params');
-    return;
-  }
-
-  let result = [];
-  for (const match of matchingGames) {
-    result.push({
-      team1: match.team1.map((elem) => summoners[elem.id].name),
-      team2: match.team2.map((elem) => summoners[elem.id].name),
-      team1WinRate: match.winRate,
     });
-  }
 
-  return { result: result, status: 200 };
+    if (duplicationNames.size >= 1) {
+      let errorMessage = '';
+      duplicationNames.forEach((elem) => {
+        errorMessage = errorMessage + `[${elem}] `;
+      });
+      errorMessage += '가 중복입니다.';
+      throw errorMessage;
+    }
+
+    const group = await models.group.findOne({
+      where: { groupName: groupName },
+    });
+
+    let summoners = {};
+
+    const getUserModel = async (summonerName) => {
+      const result = await summonerController.getSummonerByName(summonerName);
+
+      if (result.status !== 200) {
+        throw `[${summonerName}]는 존재하지 않는 소환사입니다.`;
+      }
+
+      const summoner = result.result;
+      if (!summoners[summoner.riotId]) {
+        summoners[summoner.riotId] = summoner;
+      }
+
+      return await models.user.findOne({
+        where: {
+          groupId: group.id,
+          riotId: summoner.riotId,
+        },
+      });
+    };
+
+    const applyTeam = async (teamArray, summonerNames) => {
+      for (const name of summonerNames) {
+        const userModel = await getUserModel(name);
+        if (!userModel) {
+          throw `[${name}]는 그룹에 존재하지 않는 유저입니다.`;
+        }
+        let user = new User();
+        user.setFromUserModel(userModel);
+        teamArray.push(user);
+      }
+    };
+
+    let preOrganizationTeam1 = [];
+    await applyTeam(preOrganizationTeam1, team1Names);
+
+    let preOrganizationTeam2 = [];
+    await applyTeam(preOrganizationTeam2, team2Names);
+
+    let makerUserPool = [];
+    await applyTeam(makerUserPool, userPool);
+
+    const matchingGames = matchMaker.matchMake(
+      preOrganizationTeam1,
+      preOrganizationTeam2,
+      makerUserPool,
+      matchCount,
+    );
+    if (matchingGames == null) {
+      logger.error('invalid params');
+      throw 'invalid params';
+    }
+
+    let result = [];
+    for (const match of matchingGames) {
+      result.push({
+        team1: match.team1.map((elem) => summoners[elem.id].name),
+        team2: match.team2.map((elem) => summoners[elem.id].name),
+        team1WinRate: match.winRate,
+      });
+    }
+
+    return { result: result, status: 200 };
+  } catch (e) {
+    return { result: e, status: 501 };
+  }
 };
 
 module.exports.calculateRating = async (groupName) => {
@@ -179,70 +235,25 @@ module.exports.calculateRating = async (groupName) => {
 
   matches.sort((a, b) => a.gameCreation > b.gameCreation);
 
-  let summoners = {};
+  const groupUsers = await models.user.findAll({
+    where: {
+      groupId: group.id,
+    },
+  });
+
   let users = {};
-  let unknownSummoners = {};
-  let unknownUsers = {};
-  let expectationGroup = {};
+  for (const user of groupUsers) {
+    user.win = 0;
+    user.lose = 0;
+    user.additionalRating = 0;
 
-  const getUser = async (accountId, name) => {
-    if (unknownSummoners[accountId]) {
-      unknownSummoners[accountId] = name;
-      return;
-    }
-
-    let summoner = summoners[accountId];
-    if (!summoner)
-      summoner = await models.summoner.findOne({
-        where: { accountId: accountId },
-      });
-
-    if (!summoner) {
-      summoner = await models.summoner.findOne({ where: { name: name } });
-      if (summoner) {
-        await models.summoner.update(
-          { accountId: accountId },
-          { where: { name: name } },
-        );
-      }
-    }
-
-    if (!summoner) {
-      unknownSummoners[accountId] = name;
-      return;
-    }
-
-    let user = users[summoner.riotId];
-    if (!user) {
-      user = await models.user.findOne({
-        where: {
-          [Op.and]: [{ riotId: summoner.riotId }, { groupId: group.id }],
-        },
-      });
-
-      if (user) {
-        user.win = 0;
-        user.lose = 0;
-        user.additionalRating = 0;
-        user.accountId = accountId;
-      }
-    }
-
-    if (!user) {
-      unknownUsers[summoner.riotId] = summoner.name;
-      return;
-    }
-
-    summoners[accountId] = summoner;
-    users[summoner.riotId] = user;
-
-    return user;
-  };
+    users[String(user.accountId)] = user;
+  }
 
   const getTeam = async (teamData) => {
     let ret = [];
     for (const pair of teamData) {
-      let user = await getUser(pair[0], pair[1]);
+      let user = users[pair[0]];
       if (user) ret.push(user);
     }
     return ret;
@@ -254,7 +265,6 @@ module.exports.calculateRating = async (groupName) => {
       else elem.lose++;
 
       elem.additionalRating += ratingDelta;
-      users[elem.accountId] = elem;
     });
   };
 
@@ -263,46 +273,23 @@ module.exports.calculateRating = async (groupName) => {
     return total;
   };
 
-  const groupBy = (list, keyGetter) => {
-    const map = new Map();
-    list.forEach((item) => {
-      const key = keyGetter(item);
-      const collection = map.get(key);
-      if (!collection) {
-        map.set(key, [item]);
-      } else {
-        collection.push(item);
-      }
-    });
-    return map;
-  };
-
+  let expectationGroup = {};
   for (const match of matches) {
-    let team1 = await getTeam(match.team1);
-    let team2 = await getTeam(match.team2);
+    const team1 = await getTeam(match.team1);
+    const team2 = await getTeam(match.team2);
 
-    if (team1.length + team2.length < 7) continue;
-    else if (team1.length + team2.length < 10) {
-      const existUserArray = team1.concat(team2);
-      const usersByGroupId = groupBy(existUserArray, (elem) => elem.groupId);
-      for (let pair of usersByGroupId) {
-        const groupIds = pair[1];
-        if (groupIds.length >= 6) {
-          const expectationGroupId = existUserArray[0].groupId;
-          if (!expectationGroup[expectationGroupId])
-            expectationGroup[expectationGroupId] = {};
+    if (team1.length + team2.length < 7) {
+      continue;
+    }
 
-          const riotTeamData = match.team1.concat(match.team2);
-          riotTeamData.forEach((elem) => {
-            if (
-              existUserArray.findIndex((user) => user.accountId == elem[0]) ==
-              -1
-            ) {
-              expectationGroup[expectationGroupId][elem[0]] = elem[1];
-            }
-          });
+    if (team1.length + team2.length < 10) {
+      const riotTeamData = match.team1.concat(match.team2);
+      riotTeamData.forEach((elem) => {
+        if (!users[elem[0]]) {
+          expectationGroup[elem[0]] = elem[1];
         }
-      }
+      });
+
       continue;
     }
 
@@ -311,8 +298,7 @@ module.exports.calculateRating = async (groupName) => {
     const team1Rating = team1.reduce(reducer, 0) / 5;
     const team2Rating = team2.reduce(reducer, 0) / 5;
 
-    let team1Delta,
-      team2Delta = 0;
+    let team1Delta, team2Delta;
     if (match.winTeam == 1) {
       team1Delta =
         ratingCalculator.newRatingIfWon(team1Rating, team2Rating) - team1Rating;
@@ -331,20 +317,12 @@ module.exports.calculateRating = async (groupName) => {
     apply(team2, match.winTeam == 2, team2Delta);
   }
 
-  Object.entries(users).forEach(([k, v]) => v.update(v.dataValues));
-
-  if (
-    Object.keys(unknownSummoners).length > 0 ||
-    Object.keys(unknownUsers).length > 0 ||
-    Object.keys(expectationGroup).length > 0
-  ) {
-    return {
-      result: 'unknown users are exist',
-      unknownSummoners: JSON.stringify(unknownSummoners),
-      unknownUsers: JSON.stringify(unknownUsers),
-      expectationGroup: JSON.stringify(expectationGroup),
-    };
+  for (const user of Object.values(users)) {
+    await user.update(user.dataValues);
   }
 
-  return { result: 'succeed' };
+  return {
+    result: { expectationGroup: JSON.stringify(expectationGroup) },
+    status: 200,
+  };
 };

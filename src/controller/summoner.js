@@ -57,9 +57,12 @@ module.exports.getSummonerByName = async (name) => {
       }
 
       await found.update({ name: summonerData.name });
-      models.token
-        .findOne({ where: { accountId: summonerData.accountId } })
-        .then((row) => row.update({ name: name }));
+
+      if (summonerData.accountId) {
+        models.token
+          .findOne({ where: { accountId: summonerData.accountId } })
+          .then((row) => row.update({ name }));
+      }
     } catch (e) {
       logger.error(e.stack);
       return { result: found || e.message, status: 501 };

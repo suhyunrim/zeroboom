@@ -11,6 +11,9 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         primaryKey: true,
       },
+      discordGuildId: {
+        type: DataTypes.STRING,
+      },
       revisionDate: {
         type: DataTypes.DATE,
       },

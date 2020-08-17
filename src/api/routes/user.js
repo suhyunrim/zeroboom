@@ -45,14 +45,8 @@ module.exports = (app) => {
 
   route.get('/getGroupList', async (req, res, next) => {
     try {
-      const accountId = await tokenController.getAccountId(
-        req.headers.riottokenid,
-      );
-
-      if (!accountId) {
-        return res.status(500);
-      }
-
+      const tokenId = req.headers.riottokenid;
+      const accountId = await tokenController.getAccountId(tokenId);
       const groupList = await userController.getGroupList(accountId);
       return res.status(groupList.status).json(groupList.result);
     } catch (e) {
@@ -66,11 +60,6 @@ module.exports = (app) => {
     try {
       const tokenId = req.headers.riottokenid;
       const accountId = await tokenController.getAccountId(tokenId);
-
-      if (!accountId) {
-        return res.status(500);
-      }
-
       const userInfo = await userController.getInfo(groupId, accountId);
       return res.status(userInfo.status).json(userInfo.result);
     } catch (e) {
@@ -84,11 +73,6 @@ module.exports = (app) => {
     try {
       const tokenId = req.headers.riottokenid;
       const accountId = await tokenController.getAccountId(tokenId);
-
-      if (!accountId) {
-        return res.status(500);
-      }
-
       const redisFieldKey = `${groupId}:${accountId}`;
       const isRefreshing = await redis.hgetAsync(
         redisKeys.REFRESHING_CHAMPION_SCORES,

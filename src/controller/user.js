@@ -1,6 +1,6 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
-const { getRawCustomeGames } = require('../services/riot-api');
+const { getCustomGames } = require('../services/riot-api');
 const { getRatingTier } = require('../services/user');
 
 module.exports.login = async (name, accountId, token) => {
@@ -34,7 +34,7 @@ module.exports.login = async (name, accountId, token) => {
 module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
   try {
     const until = new Date(new Date().getFullYear(), 0);
-    const riotMatches = await getRawCustomeGames(tokenId, accountId, until);
+    const riotMatches = await getCustomGames(tokenId, accountId, until);
 
     const riotMatchIds = riotMatches.map((elem) => elem.gameId);
     const availableMatchIds = await models.match
