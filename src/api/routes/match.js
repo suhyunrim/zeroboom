@@ -19,7 +19,7 @@ module.exports = (app) => {
     return res.json(ret);
   });
 
-  route.post('/predict-winrate', async function(req, res, next) {
+  route.post('/predict-winrate', async function (req, res, next) {
     const { groupName, team1, team2 } = req.body;
 
     const result = await controller.predictWinRate(
@@ -30,7 +30,7 @@ module.exports = (app) => {
     return res.status(result.status).json(result);
   });
 
-  route.post('/generate-match', async function(req, res, next) {
+  route.post('/generate-match', async function (req, res, next) {
     const { groupName, team1, team2, userPool } = req.body;
 
     const team1Array = team1 != '' ? team1.split(',') : [];
