@@ -56,7 +56,7 @@ module.exports.getSummonerByName = async (name) => {
         return { result: created, status: 200 };
       }
 
-      await found.update({ name: summonerData.name });
+      await found.update(summonerData);
 
       if (summonerData.accountId) {
         models.token
@@ -70,7 +70,7 @@ module.exports.getSummonerByName = async (name) => {
   } else if (expirationCheck(found.updatedAt)) {
     try {
       const summonerData = await generateSummonerData(name);
-      found.update(summonerData);
+      await found.update(summonerData);
     } catch (e) {
       logger.error(e.stack);
       return { result: found || e.message, status: 501 };
