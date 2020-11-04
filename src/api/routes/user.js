@@ -22,7 +22,7 @@ module.exports = (app) => {
     return res.status(ret.status).json({ result: ret.result });
   });
 
-  route.post('/login', async function(req, res, next) {
+  route.post('/login', async (req, res, next) => {
     const { id, password } = req.body;
     try {
       const loginCookies = await thresh.getLoginCookies(id, password);
@@ -48,7 +48,7 @@ module.exports = (app) => {
       const tokenId = req.headers.riottokenid;
       const accountId = await tokenController.getAccountId(tokenId);
       const groupList = await userController.getGroupList(accountId);
-      return res.status(groupList.status).json(groupList.result);
+      return res.status(groupList.status).json({ result: groupList.result });
     } catch (e) {
       logger.error(e);
       return res.status(500);
@@ -61,7 +61,7 @@ module.exports = (app) => {
       const tokenId = req.headers.riottokenid;
       const accountId = await tokenController.getAccountId(tokenId);
       const userInfo = await userController.getInfo(groupId, accountId);
-      return res.status(userInfo.status).json(userInfo.result);
+      return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);
       return res.status(500);
