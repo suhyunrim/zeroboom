@@ -28,6 +28,11 @@ module.exports = (sequelize, DataTypes) => {
       additionalRating: {
         type: DataTypes.INTEGER,
       },
+      role: {
+        type: DataTypes.STRING,
+        defaultValue: 'member',
+        allowNull: false,
+      },
       latestMatchDate: {
         type: DataTypes.DATE,
       },

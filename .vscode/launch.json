@@ -12,7 +12,6 @@
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/src/app.js",
-            "runtimeExecutable": "${workspaceRoot}/node_modules/.bin/nodemon",
             "sourceMaps": true,
             "runtimeArgs": [
                 "--nolazy"

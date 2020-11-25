@@ -77,6 +77,12 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
   if (tier && !isValidTier(tier))
     return { result: 'invalid tier', status: 501 };
 
+  const accountId = await summonerController.getAccountIdByName(
+    tokenId,
+    summonerName,
+  );
+  if (!accountId) return { result: 'invalid summoner name', status: 501 };
+
   const summonerResult = await summonerController.getSummonerByName(
     summonerName,
   );
@@ -91,14 +97,8 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
   )
     return { result: 'enter the tier explicitly', status: 501 };
 
-  const accountId = await summonerController.getAccountIdByName(
-    tokenId,
-    summonerName,
-  );
-  if (!accountId) return { result: 'invalid summoner name', status: 501 };
-
   models.summoner.update(
-    { accountId: accountId },
+    { accountId },
     { where: { name: summonerName } },
   );
 

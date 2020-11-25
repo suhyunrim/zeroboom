@@ -56,6 +56,27 @@ module.exports.retrieveMatches = async (groupName) => {
   return { status: 200 };
 };
 
+module.exports.setUserRole = async (groupName, accountId, role) => {
+  if (!groupName) return { result: 'invalid groupId', status: 501 };
+  if (!accountId) return { result: 'invalid accountId', status: 501 };
+  if (role !== 'admin' && role !== 'member' && role !== 'outsider')
+    return { result: 'invalid role type', status: 501 };
+
+  const group = await models.group.findOne({ where: { groupName } });
+  if (!group) return { result: 'group is not exist' };
+
+  try {
+    await models.user.update(
+      { role },
+      { where: { groupId: group.id, accountId } },
+    );
+    return { result: {}, status: 200 };
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
+  }
+};
+
 module.exports.getRanking = async (groupName) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
