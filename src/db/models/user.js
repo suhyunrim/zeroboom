@@ -28,6 +28,9 @@ module.exports = (sequelize, DataTypes) => {
       additionalRating: {
         type: DataTypes.INTEGER,
       },
+      latestMatchDate: {
+        type: DataTypes.DATE,
+      },
       revisionDate: {
         type: DataTypes.DATE,
       },

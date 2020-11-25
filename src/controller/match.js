@@ -259,12 +259,16 @@ module.exports.calculateRating = async (groupName) => {
     return ret;
   };
 
-  const apply = (team, isWon, ratingDelta) => {
+  const apply = (team, isWon, ratingDelta, matchDate) => {
     team.forEach((elem) => {
       if (isWon) elem.win++;
       else elem.lose++;
 
       elem.additionalRating += ratingDelta;
+
+      if (!elem.latestMatchDate || matchDate > elem.latestMatchDate) {
+        elem.latestMatchDate = matchDate;
+      }
     });
   };
 
@@ -313,8 +317,8 @@ module.exports.calculateRating = async (groupName) => {
         ratingCalculator.newRatingIfWon(team2Rating, team1Rating) - team2Rating;
     }
 
-    apply(team1, match.winTeam == 1, team1Delta);
-    apply(team2, match.winTeam == 2, team2Delta);
+    apply(team1, match.winTeam == 1, team1Delta, match.gameCreation);
+    apply(team2, match.winTeam == 2, team2Delta, match.gameCreation);
   }
 
   for (const user of Object.values(users)) {

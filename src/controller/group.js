@@ -1,6 +1,9 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
+const moment = require('moment');
+const { Op } = require("sequelize");
 
+const LatestMatchDateConditionDays = 60;
 const RankingMinumumMatchCount = 5;
 
 const matchController = require('../controller/match');
@@ -57,10 +60,19 @@ module.exports.getRanking = async (groupName) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
-  let users = await models.user.findAll({ where: { groupId: group.id } });
+  LatestMatchDateConditionDays
+  let users = await models.user.findAll({ where: {
+        groupId: group.id,
+        latestMatchDate: {
+          [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
+        }
+    }
+  });
+
   users = users.filter(
     (elem) => elem.win + elem.lose >= RankingMinumumMatchCount,
   );
+
   users.sort(
     (a, b) =>
       b.defaultRating +
