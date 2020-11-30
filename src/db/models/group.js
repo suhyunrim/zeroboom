@@ -13,13 +13,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       discordGuildId: {
         type: DataTypes.STRING,
+        allowNull: true,
+      },
+      usableMatchDate: {
+        type: DataTypes.STRING,
       },
       revisionDate: {
         type: DataTypes.DATE,
-      },
-      discordGuildId: {
-        type: DataTypes.STRING,
-        allowNull: true,
       },
     },
     {},

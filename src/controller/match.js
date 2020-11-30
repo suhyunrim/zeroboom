@@ -225,13 +225,18 @@ module.exports.calculateRating = async (groupName) => {
   const group = await models.group.findOne({ where: { groupName: groupName } });
   if (!group) return { result: 'group is not exist' };
 
+  let usableMatchDate = group.usableMatchDate;
+  if (!usableMatchDate)
+    usableMatchDate = new Date(new Date().getFullYear(), 0);
+
   const matches = await models.match.findAll({
     where: {
       [Op.or]: [{ groupId: null }, { groupId: group.id }],
+      gameCreation: {
+        [Op.gte]: usableMatchDate
+      }
     },
   });
-
-  if (matches.length == 0) return { result: 'there is no match' };
 
   matches.sort((a, b) => a.gameCreation > b.gameCreation);
 
