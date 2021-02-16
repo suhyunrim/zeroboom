@@ -44,6 +44,7 @@ module.exports = async (app, message) => {
     const args = message.content.split(' ').slice(1);
     const output = await cmd.run({ message, groupName, args });
     if (output) {
+      message.react('✅');
       message.channel.send(output);
     }
   } catch (e) {
