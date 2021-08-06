@@ -119,15 +119,15 @@ module.exports.getGroupList = async (accountId) => {
   return { result, status: 200 };
 };
 
-module.exports.getRating = async (groupId, accountId) => {
+module.exports.getRating = async (groupId, riotId) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
-  if (!accountId) return { result: 'invalid accountId', status: 501 };
+  if (!riotId) return { result: 'invalid riotId', status: 501 };
 
   try {
     const userInfo = await models.user.findOne({
       where: {
         groupId,
-        accountId,
+        riotId,
       },
       raw: true,
     });

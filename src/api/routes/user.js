@@ -75,7 +75,7 @@ module.exports = (app) => {
     try {
       const group = await groupController.getByName(groupName);
       const summoner = await summonerController.getSummonerByName(userName);
-      const userInfo = await userController.getRating(group.id, summoner.result.accountId);
+      const userInfo = await userController.getRating(group.id, summoner.result.riotId);
       return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);
