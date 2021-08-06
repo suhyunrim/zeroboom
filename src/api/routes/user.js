@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
 const { registerUser } = require('../../services/user');
-const thresh = require('thresh');
+const { getLoginCookies } = require('@whipping-cream/thresh');
 const route = Router();
 const userController = require('../../controller/user');
 const tokenController = require('../../controller/token');
@@ -27,7 +27,7 @@ module.exports = (app) => {
   route.post('/login', async (req, res, next) => {
     const { id, password } = req.body;
     try {
-      const loginCookies = await thresh.getLoginCookies(id, password);
+      const loginCookies = await getLoginCookies(id, password);
       if (!loginCookies) return res.status(520).json({result: 'selenium erorr!'});
 
       const jwtDecoded = jwtDecode(loginCookies['id_token']);
