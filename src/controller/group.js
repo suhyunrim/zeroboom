@@ -18,6 +18,16 @@ module.exports.get = async (id) => {
   return result;
 };
 
+module.exports.getByName = async (groupName) => {
+  const result = await models.group.findOne({ where: { groupName } });
+
+  if (!(result instanceof models.group)) {
+    throw new Error(`Cannot find group(id:${id})`);
+  }
+
+  return result;
+}
+
 module.exports.getByDiscordGuildId = async (id) => {
   const result = await models.group.findOne({ where: { discordGuildId: id } });
 

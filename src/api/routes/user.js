@@ -5,6 +5,8 @@ const thresh = require('thresh');
 const route = Router();
 const userController = require('../../controller/user');
 const tokenController = require('../../controller/token');
+const groupController = require('../../controller/group');
+const summonerController = require('../../controller/summoner');
 
 const redis = require('../../redis/redis');
 const redisKeys = require('../../redis/redisKeys');
@@ -67,6 +69,19 @@ module.exports = (app) => {
       return res.status(500);
     }
   });
+
+  route.get('/getRating', async(req, res, next) => {
+    const { groupName, userName } = req.query;
+    try {
+      const group = await groupController.getByName(groupName);
+      const summoner = await summonerController.getSummonerByName(userName);
+      const userInfo = await userController.getRating(group.id, summoner.result.accountId);
+      return res.status(userInfo.status).json({ result: userInfo.result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
+  })
 
   route.post('/calculateChampionScore', async (req, res, next) => {
     const { groupId } = req.body;

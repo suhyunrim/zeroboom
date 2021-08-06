@@ -119,6 +119,38 @@ module.exports.getGroupList = async (accountId) => {
   return { result, status: 200 };
 };
 
+module.exports.getRating = async (groupId, accountId) => {
+  if (!groupId) return { result: 'invalid groupId', status: 501 };
+  if (!accountId) return { result: 'invalid accountId', status: 501 };
+
+  try {
+    const userInfo = await models.user.findOne({
+      where: {
+        groupId,
+        accountId,
+      },
+      raw: true,
+    });
+
+    if (!userInfo) {
+      return { result: 'user is not exist', status: 501 };
+    }
+
+    const totalRating = userInfo.defaultRating + userInfo.additionalRating;
+    const ratingTier = getRatingTier(totalRating);
+
+    return { result: {
+      defaultRating: userInfo.defaultRating,
+      additionalRating: userInfo.additionalRating,
+      totalRating: totalRating,
+      ratingTier: ratingTier
+    }, status: 200 };
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
+  }
+};
+
 module.exports.getInfo = async (groupId, accountId) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
   if (!accountId) return { result: 'invalid accountId', status: 501 };
