@@ -26,7 +26,7 @@ module.exports = (app) => {
     const { id, password } = req.body;
     try {
       const loginCookies = await thresh.getLoginCookies(id, password);
-      if (!loginCookies) return res.status(520);
+      if (!loginCookies) return res.status(520).json({result: 'selenium erorr!'});
 
       const jwtDecoded = jwtDecode(loginCookies['id_token']);
       const name = jwtDecoded.acct.game_name;
