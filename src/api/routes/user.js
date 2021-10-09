@@ -28,12 +28,13 @@ module.exports = (app) => {
     const { id, password } = req.body;
     try {
       const loginCookies = await getLoginCookies(id, password);
-      if (!loginCookies) return res.status(520).json({result: 'selenium erorr!'});
+      if (!loginCookies)
+        return res.status(520).json({ result: 'selenium erorr!' });
 
-      const jwtDecoded = jwtDecode(loginCookies['id_token']);
+      const jwtDecoded = jwtDecode(loginCookies['__Secure-id_token']);
       const name = jwtDecoded.acct.game_name;
-      const accountId = loginCookies['PVPNET_ID_KR'];
-      const token = loginCookies['id_token'];
+      const accountId = jwtDecoded.lol[0].uid;
+      const token = loginCookies['__Secure-id_token'];
       const loginResult = await userController.login(name, accountId, token);
       const groupList = await userController.getGroupList(accountId);
       return res
@@ -70,18 +71,21 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/getRating', async(req, res, next) => {
+  route.get('/getRating', async (req, res, next) => {
     const { groupName, userName } = req.query;
     try {
       const group = await groupController.getByName(groupName);
       const summoner = await summonerController.getSummonerByName(userName);
-      const userInfo = await userController.getRating(group.id, summoner.result.riotId);
+      const userInfo = await userController.getRating(
+        group.id,
+        summoner.result.riotId,
+      );
       return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);
       return res.status(500);
     }
-  })
+  });
 
   route.post('/calculateChampionScore', async (req, res, next) => {
     const { groupId } = req.body;
