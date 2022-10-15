@@ -2,7 +2,6 @@ const expressLoader = require('./express');
 const sequelizeLoader = require('./sequelize');
 const socketioLoader = require('./socket.io');
 const discordLoader = require('./discord');
-const commandLoader = require('./command');
 const { logger } = require('./logger');
 
 module.exports = async (app) => {
@@ -12,9 +11,6 @@ module.exports = async (app) => {
   await expressLoader(app);
   logger.info('✌️ Express loaded');
 
-  await commandLoader(app);
-  logger.info('✌️ Command loaded');
- 
   await discordLoader(app);
   logger.info('✌️ Discord loaded');
 

@@ -1,6 +1,6 @@
 const { registerUser } = require('../services/user');
 
-exports.run = async ({ message, groupName, args }) => {
+exports.run = async (groupName, interaction) => {
   args = args.join(' ');
   args = args.split('@');
 
@@ -20,6 +20,7 @@ exports.conf = {
   enabled: true,
   requireGroup: true,
   aliases: ['유저등록', 'ru'],
+  args: [],
 };
 
 exports.help = {

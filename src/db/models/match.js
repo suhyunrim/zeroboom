@@ -3,7 +3,8 @@ module.exports = (sequelize, DataTypes) => {
     'match',
     {
       gameId: {
-        type: DataTypes.STRING,
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
         primaryKey: true,
       },
       groupId: {
@@ -31,7 +32,6 @@ module.exports = (sequelize, DataTypes) => {
       },
       winTeam: {
         type: DataTypes.INTEGER,
-        allowNull: false,
       },
       gameCreation: {
         type: DataTypes.DATE,
