@@ -62,10 +62,14 @@ exports.reactButton = async (interaction) => {
   const index = Number(split[0]);
   const team1WinRate = Number(split[1]);
   const teams = [[], []];
+  const teamsForDB = [[], []];
   for (let i = 0; i < 2; ++i) {
     const startIndex = i * 5 + 2;
     for (let j = startIndex; j < startIndex + 5; ++j) {
-      teams[i].push(split[j]);
+      // 나중에 최적화..
+      const summonerData = await models.summoner.findOne({where: {name: split[j]}});
+      teams[i].push(summonerData.name);
+      teamsForDB[i].push([summonerData.puuid, summonerData.name]);
     }
   }
 
@@ -75,8 +79,8 @@ exports.reactButton = async (interaction) => {
 
   const matchQueryResult = await models.match.create({
     groupId: group.id,
-    team1: teams[0],
-    team2: teams[1],
+    team1: teamsForDB[0],
+    team2: teamsForDB[1],
   });
 
   const buttons = new ActionRowBuilder()

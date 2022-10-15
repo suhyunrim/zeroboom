@@ -39,7 +39,7 @@ module.exports = async (app) => {
 		}
 	});
 
-	// 일단은 매치 나온 거 1~6 버튼 선택에 대한 로직만 있음 (by zeroboom)
+	// 일단은 여기에 로직들 넣어둠.. (by zeroboom)
 	client.on('interactionCreate', async interaction => {
 		if (!interaction.isButton()) {
 			return;
@@ -64,9 +64,11 @@ module.exports = async (app) => {
 					if (split[0] == 'winCommand') {
 						const group = await models.group.findOne({where: { discordGuildId: interaction.guildId }});
 						const matchData = await models.match.findOne({where: {gameId: Number(split[1])}});
-						await matchData.update({ winTeam: Number(split[2])});
+						const winTeam = Number(split[2]);
+						await matchData.update({ winTeam });
 						await matchController.calculateRating(group.groupName);
-						interaction.reply('완료');
+						const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
+						interaction.reply(`${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.`);
 					}
 				}
 			}

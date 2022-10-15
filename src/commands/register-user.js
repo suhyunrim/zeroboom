@@ -1,18 +1,9 @@
 const { registerUser } = require('../services/user');
 
 exports.run = async (groupName, interaction) => {
-  args = args.join(' ');
-  args = args.split('@');
-
-  if (args.length != 2) {
-    return 'invalid args';
-  }
-
-  const summonerName = args[0];
-  const tier = args[1];
-  const tokenId = process.env.RIOT_TOKEN_ID;
-
-  const ret = await registerUser(groupName, summonerName, tier, tokenId);
+  const summonerName = interaction.options.data[0].value;
+  const tier = interaction.options.data[1].value;
+  const ret = await registerUser(groupName, summonerName, tier);
   return ret.result;
 };
 
@@ -20,7 +11,10 @@ exports.conf = {
   enabled: true,
   requireGroup: true,
   aliases: ['유저등록', 'ru'],
-  args: [],
+  args: [
+    ['string', '닉네임', '닉네임을 입력해주세요.', true],
+    ['string', '티어', '티어를 입력해주세요. (ex. G1)', true],
+  ],
 };
 
 exports.help = {

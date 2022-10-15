@@ -253,7 +253,7 @@ module.exports.calculateRating = async (groupName) => {
     user.lose = 0;
     user.additionalRating = 0;
 
-    users[String(user.accountId)] = user;
+    users[String(user.puuid)] = user;
   }
 
   const getTeam = async (teamData) => {

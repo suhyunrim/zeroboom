@@ -1,4 +1,3 @@
-const { Router } = require('express');
 const { logger } = require('../loaders/logger');
 const models = require('../db/models');
 
@@ -95,6 +94,7 @@ const registerUser = async (groupName, summonerName, tier) => {
     await models.user.upsert({
       riotId: summoner.riotId,
       encryptedAccountId: summoner.encryptedAccountId,
+      puuid: summoner.puuid,
       groupId: group.id,
       defaultRating: getRating(tier ? tier : summoner.rankTier),
     });
@@ -103,7 +103,7 @@ const registerUser = async (groupName, summonerName, tier) => {
     return { result: e.message, status: 501 };
   }
 
-  return { result: 'succeed', status: 200 };
+  return { result: `[**${summonerName}**] - \`${tier}\` 로 등록되었습니다.`, status: 200 };
 };
 
 exports.registerUser = registerUser;

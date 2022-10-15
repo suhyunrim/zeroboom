@@ -12,6 +12,9 @@ module.exports = (sequelize, DataTypes) => {
       encryptedAccountId: {
         type: DataTypes.STRING,
       },
+      puuid: {
+        type: DataTypes.STRING,
+      },
       groupId: {
         type: DataTypes.INTEGER,
         primaryKey: true,
