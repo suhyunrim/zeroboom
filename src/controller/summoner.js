@@ -80,7 +80,7 @@ module.exports.getSummonerByName = async (name) => {
   return { result: found, status: 200 };
 };
 
-module.exports.getAccountIdByName = async (tokenId, name) => {
+module.exports.getAccountIdByName = async (name) => {
   const found = await models.summoner.findOne({ where: { name } });
 
   if (found && found.accountId) {
@@ -88,7 +88,7 @@ module.exports.getAccountIdByName = async (tokenId, name) => {
   }
 
   try {
-    const summonerResult = await getSummonerByName_V1(tokenId, name);
+    const summonerResult = await getSummonerByName(name);
     return String(summonerResult.accountId);
   } catch (e) {
     logger.error(e.stack);

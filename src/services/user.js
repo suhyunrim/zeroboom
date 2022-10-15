@@ -64,7 +64,7 @@ const getRating = (tier) => {
   return rating + tierMultiplier * 25;
 };
 
-const registerUser = async (groupName, summonerName, tier, tokenId) => {
+const registerUser = async (groupName, summonerName, tier) => {
   if (!groupName) return { result: 'invalid group name', status: 501 };
 
   if (!summonerName) return { result: 'invalid summoner name', status: 501 };
@@ -76,12 +76,6 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
 
   if (tier && !isValidTier(tier))
     return { result: 'invalid tier', status: 501 };
-
-  const accountId = await summonerController.getAccountIdByName(
-    tokenId,
-    summonerName,
-  );
-  if (!accountId) return { result: 'invalid summoner name', status: 501 };
 
   const summonerResult = await summonerController.getSummonerByName(
     summonerName,
@@ -97,15 +91,9 @@ const registerUser = async (groupName, summonerName, tier, tokenId) => {
   )
     return { result: 'enter the tier explicitly', status: 501 };
 
-  models.summoner.update(
-    { accountId },
-    { where: { name: summonerName } },
-  );
-
   try {
     await models.user.upsert({
       riotId: summoner.riotId,
-      accountId: accountId,
       encryptedAccountId: summoner.encryptedAccountId,
       groupId: group.id,
       defaultRating: getRating(tier ? tier : summoner.rankTier),

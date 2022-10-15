@@ -8,19 +8,16 @@ const tokenController = require('../../controller/token');
 const groupController = require('../../controller/group');
 const summonerController = require('../../controller/summoner');
 
-const redis = require('../../redis/redis');
-const redisKeys = require('../../redis/redisKeys');
-
 const jwtDecode = require('jwt-decode');
 
 module.exports = (app) => {
   app.use('/user', route);
 
   route.post('/register', async (req, res) => {
-    const { groupName, summonerName, tokenId } = req.body;
+    const { groupName, summonerName } = req.body;
     let { tier } = req.body;
 
-    var ret = await registerUser(groupName, summonerName, tier, tokenId);
+    var ret = await registerUser(groupName, summonerName, tier);
     return res.status(ret.status).json({ result: ret.result });
   });
 
@@ -81,38 +78,6 @@ module.exports = (app) => {
         summoner.result.riotId,
       );
       return res.status(userInfo.status).json({ result: userInfo.result });
-    } catch (e) {
-      logger.error(e);
-      return res.status(500);
-    }
-  });
-
-  route.post('/calculateChampionScore', async (req, res, next) => {
-    const { groupId } = req.body;
-    try {
-      const tokenId = req.headers.riottokenid;
-      const accountId = await tokenController.getAccountId(tokenId);
-      const redisFieldKey = `${groupId}:${accountId}`;
-      const isRefreshing = await redis.hgetAsync(
-        redisKeys.REFRESHING_CHAMPION_SCORES,
-        redisFieldKey,
-      );
-
-      if (isRefreshing) {
-        return res.status(501).json({ result: 'already refreshing' });
-      }
-
-      redis.hset(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey, '1');
-
-      const championScore = await userController.calculateChampionScore(
-        groupId,
-        accountId,
-        tokenId,
-      );
-
-      redis.hdel(redisKeys.REFRESHING_CHAMPION_SCORES, redisFieldKey);
-
-      return res.status(championScore.status).json(championScore.result);
     } catch (e) {
       logger.error(e);
       return res.status(500);
