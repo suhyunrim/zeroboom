@@ -1,5 +1,8 @@
 const matchController = require('../controller/match');
-const { formatMatches, formatMatch } = require('../discord/embed-messages/matching-results');
+const {
+  formatMatches,
+  formatMatch,
+} = require('../discord/embed-messages/matching-results');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 
@@ -43,13 +46,15 @@ exports.run = async (groupName, interaction) => {
       const match = result.result[j];
       // 버튼 interaction을 더 이쁘장하게 하는 법이 있을 것 같으나, 일단은 customId에 여러 정보를 실어보냄
       // customId limit length가 100이어서 간략화 (by zeroboom)
-      const customeIdStr = `${j}|${match.team1WinRate}|${match.team1.join('|')}|${match.team2.join('|')}`;
+      const customeIdStr = `${j}|${match.team1WinRate.toFixed(
+        2,
+      )}|${match.team1.join('|')}|${match.team2.join('|')}`;
       rows[i].addComponents(
-          new ButtonBuilder()
-              .setCustomId(customeIdStr)
-              .setLabel(`${j + 1}번`)
-              .setStyle(ButtonStyle.Primary)
-          );
+        new ButtonBuilder()
+          .setCustomId(customeIdStr)
+          .setLabel(`${j + 1}번`)
+          .setStyle(ButtonStyle.Primary),
+      );
     }
   }
 
@@ -67,7 +72,9 @@ exports.reactButton = async (interaction) => {
     const startIndex = i * 5 + 2;
     for (let j = startIndex; j < startIndex + 5; ++j) {
       // 나중에 최적화..
-      const summonerData = await models.summoner.findOne({where: {name: split[j]}});
+      const summonerData = await models.summoner.findOne({
+        where: { name: split[j] },
+      });
       teams[i].push(summonerData.name);
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
     }
@@ -84,26 +91,26 @@ exports.reactButton = async (interaction) => {
   });
 
   const buttons = new ActionRowBuilder()
-            .addComponents(
-              new ButtonBuilder()
-                .setCustomId(`winCommand|${matchQueryResult.gameId}|1`)
-                .setLabel('🐶팀 승리!')
-                .setStyle(ButtonStyle.Success)
-              )
-            .addComponents(
-              new ButtonBuilder()
-                .setCustomId(`winCommand|${matchQueryResult.gameId}|2`)
-                .setLabel('🐱팀 승리!')
-                .setStyle(ButtonStyle.Danger)
-              );
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`winCommand|${matchQueryResult.gameId}|1`)
+        .setLabel('🐶팀 승리!')
+        .setStyle(ButtonStyle.Success),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`winCommand|${matchQueryResult.gameId}|2`)
+        .setLabel('🐱팀 승리!')
+        .setStyle(ButtonStyle.Danger),
+    );
 
   const output = {
     content: `**Plan ${index + 1}이 선택되었습니다!!**`,
     embeds: [formatMatch(index, teams[0], teams[1], team1WinRate)],
-    components: [buttons]
+    components: [buttons],
   };
   return output;
-}
+};
 
 exports.conf = {
   enabled: true,
@@ -119,7 +126,7 @@ exports.conf = {
     ['string', '유저7', '유저7 닉네임', true],
     ['string', '유저8', '유저8 닉네임', true],
     ['string', '유저9', '유저9 닉네임', true],
-    ['string', '유저10', '유저10 닉네임', true]
+    ['string', '유저10', '유저10 닉네임', true],
   ],
 };
 

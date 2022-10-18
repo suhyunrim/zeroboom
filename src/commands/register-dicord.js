@@ -14,26 +14,40 @@ exports.run = async (groupName, interaction) => {
   const groupByGroupName = await models.group.findOne({
     where: { groupName },
   });
-  if (!groupByGroupName) {
-    return '존재하지 않는 그룹 이름입니다.';
-  }
-
   if (
+    groupByGroupName &&
     groupByGroupName.discordGuildId &&
     groupByGroupName.discordGuildId !== ''
   ) {
     return '이미 등록되어 있는 방입니다.';
   }
 
-  groupByGroupName.discordGuildId = guildId;
-  groupByGroupName.update(groupByGroupName.dataValues);
+  await models.group.create({
+    groupName,
+    discordGuildId: guildId,
+  });
 
   const commandList = await commandLoader();
-  const commandJsons = commandList.getSlashCommands().map(command => command.toJSON());
-	const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
-	rest.put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, guildId), { body: commandJsons })
-      .then((data) => console.log(`Successfully registered ${data.length} application commands.`))
-      .catch(console.error);
+  const commandJsons = commandList
+    .getSlashCommands()
+    .map((command) => command.toJSON());
+  const rest = new REST({ version: '10' }).setToken(
+    process.env.DISCORD_BOT_TOKEN,
+  );
+  rest
+    .put(
+      Routes.applicationGuildCommands(
+        process.env.DISCORD_APPLICATION_ID,
+        guildId,
+      ),
+      { body: commandJsons },
+    )
+    .then((data) =>
+      console.log(
+        `Successfully registered ${data.length} application commands.`,
+      ),
+    )
+    .catch(console.error);
 
   return `이 디스코드 방은 [${groupName}]으로 등록되었습니다.`;
 };
@@ -42,9 +56,7 @@ exports.conf = {
   enabled: true,
   requireGroup: false,
   aliases: ['방등록'],
-  args: [
-    ['string', '방이름', '세팅할 방이름을 입력해주세요.', true]
-  ],
+  args: [['string', '방이름', '세팅할 방이름을 입력해주세요.', true]],
 };
 
 exports.help = {
