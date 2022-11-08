@@ -39,6 +39,21 @@ module.exports = (sequelize, DataTypes) => {
       summonerLevel: {
         type: DataTypes.INTEGER,
       },
+      mainPosition: {
+        type: DataTypes.STRING,
+      },
+      mainPositionRate: {
+        type: DataTypes.FLOAT,
+      },
+      subPosition: {
+        type: DataTypes.STRING,
+      },
+      subPositionRate: {
+        type: DataTypes.FLOAT,
+      },
+      positionUpdatedAt: {
+        type: DataTypes.DATE,
+      },
     },
     {},
   );

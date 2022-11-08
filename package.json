@@ -28,8 +28,8 @@
   "dependencies": {
     "@hapi/joi": "^17.1.1",
     "@whipping-cream/thresh": "^1.2.0",
-    "@whipping-cream/tristana": "github:WhippingCream/tristana",
     "arpad": "1.0.2",
+    "axios": "^1.1.3",
     "celebrate": "^12.2.0",
     "chalk": "^3.0.0",
     "cors": "^2.8.5",

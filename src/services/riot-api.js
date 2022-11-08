@@ -1,29 +1,62 @@
 const { logger } = require('../loaders/logger');
 
-const riotAPI = require('@whipping-cream/tristana');
+const axios = require('axios');
+const RIOT_API_KEY = process.env.RIOT_API_KEY;
 
 /// v5
-const getMatchList = async (summonerName) => {
+const getMatchIds = async (summonerName, count = 20) => {
   const summoner = await getSummonerByName(summonerName);
   const puuid = summoner.puuid;
-  const result = await riotAPI.v5.match.getIds(puuid)();
+  const result = await axios({
+    method:'get',
+    url:`https://asia.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`,
+    params: {
+      api_key: RIOT_API_KEY,
+      queue:420,
+      count,
+    }
+  });
 
   if (result.status !== 200)
     throw new Error(
-      `riotAPI.match.v5.getMatchList(${puuid}) => ${result.status}`,
+      `riotAPI.match.v5.getMatchIds(${puuid}) => ${result.status}`,
     );
 
   return result.data;
 }
-exports.getMatchList = getMatchList;
+exports.getMatchIds = getMatchIds;
 
-/// V4
-const getSummonerByName = async (summonerName) => {
-  const result = await riotAPI.v4.summoner.getByName(summonerName)();
+const getMatchData = async (matchId) => {
+  const result = await axios({
+    method:'get',
+    url:`https://asia.api.riotgames.com/lol/match/v5/matches/${matchId}`,
+    params: {
+      api_key: RIOT_API_KEY,
+    }
+  });
 
   if (result.status !== 200)
     throw new Error(
-      `riotAPI.v4.summoner.getByName(${summonerName}) => ${result.status}`,
+      `riotAPI.getMatchData(${matchId}) => ${result.status}`,
+    );
+
+  return result.data;
+}
+exports.getMatchData = getMatchData;
+
+/// V4
+const getSummonerByName = async (summonerName) => {
+  const result = await axios({
+    method:'get',
+    url:`https://kr.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
+    params: {
+      api_key: RIOT_API_KEY,
+    }
+  });
+
+  if (result.status !== 200)
+    throw new Error(
+      `riotAPI.getSummonerByName(${summonerName}) => ${result.status}`,
     );
 
   return result.data;
@@ -32,11 +65,17 @@ const getSummonerByName = async (summonerName) => {
 exports.getSummonerByName = getSummonerByName;
 
 const getRankDataBySummonerId = async (summonerId) => {
-  const result = await riotAPI.v4.league.getEntriesBySummonerId(summonerId)();
+  const result = await axios({
+    method:'get',
+    url:`https://kr.api.riotgames.com/lol/league/v4/entries/by-summoner/${summonerId}`,
+    params: {
+      api_key: RIOT_API_KEY,
+    }
+  });
 
   if (result.status !== 200)
     throw new Error(
-      `riotAPI.v4.league.getEntriesBySummonerId(${summonerId}) => ${result.status}`,
+      `riotAPI.getRankDataBySummonerId(${summonerId}) => ${result.status}`,
     );
 
   return result.data;
@@ -44,117 +83,119 @@ const getRankDataBySummonerId = async (summonerId) => {
 
 exports.getRankDataBySummonerId = getRankDataBySummonerId;
 
-/// V1
-const getSummonerByName_V1 = async (tokenId, summonerName) => {
-  const result = await riotAPI.v1.summoner.getByName(tokenId, summonerName)();
+// 이하 동작 안함 (by zeroboom)
 
-  if (result.status !== 200)
-    throw new Error(
-      `riotAPI.v1.summoner.getByName(${summonerName}) => ${result.status}`,
-    );
+// /// V1
+// const getSummonerByName_V1 = async (tokenId, summonerName) => {
+//   const result = await riotAPI.v1.summoner.getByName(tokenId, summonerName)();
 
-  result.data.accountId = String(result.data.accountId);
-  return result.data;
-};
+//   if (result.status !== 200)
+//     throw new Error(
+//       `riotAPI.v1.summoner.getByName(${summonerName}) => ${result.status}`,
+//     );
 
-exports.getSummonerByName_V1 = getSummonerByName_V1;
+//   result.data.accountId = String(result.data.accountId);
+//   return result.data;
+// };
 
-const getCustomGames = async (tokenId, accountId, until) => {
-  let customGames = [];
+// exports.getSummonerByName_V1 = getSummonerByName_V1;
 
-  try {
-    let beginIndex = 0;
-    let isFinished = false;
-    until = until ? until : Date.now() - 86400 * 30 * 3 * 1000;
-    while (!isFinished) {
-      const result = await riotAPI.v1.match.getCustomMatchHistory(
-        tokenId,
-        accountId,
-        beginIndex,
-      )();
-      if (result.status != 200)
-        throw new Error(
-          `riotAPI.v1.match.getCustomMatchHistory(${accountId}) => ${result.status}`,
-        );
+// const getCustomGames = async (tokenId, accountId, until) => {
+//   let customGames = [];
 
-      if (result.data.games.games.length === 0) {
-        break;
-      }
+//   try {
+//     let beginIndex = 0;
+//     let isFinished = false;
+//     until = until ? until : Date.now() - 86400 * 30 * 3 * 1000;
+//     while (!isFinished) {
+//       const result = await riotAPI.v1.match.getCustomMatchHistory(
+//         tokenId,
+//         accountId,
+//         beginIndex,
+//       )();
+//       if (result.status != 200)
+//         throw new Error(
+//           `riotAPI.v1.match.getCustomMatchHistory(${accountId}) => ${result.status}`,
+//         );
 
-      const matches = result.data.games.games;
-      // index가 뒤로 갈 수록 나중 매치기 때문에 뒤에서부터 인덱싱
-      for (let i = matches.length - 1; i >= 0; --i) {
-        const match = matches[i];
-        if (match.gameCreation <= until) {
-          isFinished = true;
-          break;
-        }
+//       if (result.data.games.games.length === 0) {
+//         break;
+//       }
 
-        if (
-          match.gameMode !== 'CLASSIC' ||
-          match.gameType !== 'CUSTOM_GAME' ||
-          match.mapId !== 11
-        )
-          continue;
+//       const matches = result.data.games.games;
+//       // index가 뒤로 갈 수록 나중 매치기 때문에 뒤에서부터 인덱싱
+//       for (let i = matches.length - 1; i >= 0; --i) {
+//         const match = matches[i];
+//         if (match.gameCreation <= until) {
+//           isFinished = true;
+//           break;
+//         }
 
-        customGames.push(match);
-      }
+//         if (
+//           match.gameMode !== 'CLASSIC' ||
+//           match.gameType !== 'CUSTOM_GAME' ||
+//           match.mapId !== 11
+//         )
+//           continue;
 
-      beginIndex += 20;
-    }
-  } catch (e) {
-    logger.error(e.stack);
-    logger.error(`getCustomGames(${accountId})`);
-  }
+//         customGames.push(match);
+//       }
 
-  return customGames;
-};
+//       beginIndex += 20;
+//     }
+//   } catch (e) {
+//     logger.error(e.stack);
+//     logger.error(`getCustomGames(${accountId})`);
+//   }
 
-exports.getCustomGames = getCustomGames;
+//   return customGames;
+// };
 
-const getCustomGameIds = async (tokenId, accountId, until) => {
-  let customGames = await getCustomGames(tokenId, accountId, until);
-  return customGames.map((elem) => elem.gameId);
-};
+// exports.getCustomGames = getCustomGames;
 
-exports.getCustomGameIds = getCustomGameIds;
+// const getCustomGameIds = async (tokenId, accountId, until) => {
+//   let customGames = await getCustomGames(tokenId, accountId, until);
+//   return customGames.map((elem) => elem.gameId);
+// };
 
-const getMatchData = async (tokenId, gameId) => {
-  try {
-    const result = await riotAPI.v1.match.getMatchData(tokenId, gameId)();
-    if (result.status != 200)
-      throw new Error(
-        `riotAPI.v1.match.getMatchData(${gameId}) => ${result.status}`,
-      );
+// exports.getCustomGameIds = getCustomGameIds;
 
-    const data = result.data;
-    let matchData = {
-      gameId: data.gameId,
-      gameCreation: new Date(data.gameCreation),
-      winTeam: data.teams[0].win == 'Win' ? 1 : 2,
-      team1: [],
-      team2: [],
-    };
+// const getMatchData = async (tokenId, gameId) => {
+//   try {
+//     const result = await riotAPI.v1.match.getMatchData(tokenId, gameId)();
+//     if (result.status != 200)
+//       throw new Error(
+//         `riotAPI.v1.match.getMatchData(${gameId}) => ${result.status}`,
+//       );
 
-    data.participantIdentities.forEach((identity) => {
-      const participantData = data.participants.find(
-        (elem) => elem.participantId == identity.participantId,
-      );
-      if (participantData) {
-        const team =
-          participantData.teamId == 100 ? matchData.team1 : matchData.team2;
-        team.push([
-          String(identity.player.accountId),
-          identity.player.summonerName,
-        ]);
-      }
-    });
+//     const data = result.data;
+//     let matchData = {
+//       gameId: data.gameId,
+//       gameCreation: new Date(data.gameCreation),
+//       winTeam: data.teams[0].win == 'Win' ? 1 : 2,
+//       team1: [],
+//       team2: [],
+//     };
 
-    return matchData;
-  } catch (e) {
-    logger.error(e.stack);
-    logger.error(`getMatchData(${gameId})`);
-  }
-};
+//     data.participantIdentities.forEach((identity) => {
+//       const participantData = data.participants.find(
+//         (elem) => elem.participantId == identity.participantId,
+//       );
+//       if (participantData) {
+//         const team =
+//           participantData.teamId == 100 ? matchData.team1 : matchData.team2;
+//         team.push([
+//           String(identity.player.accountId),
+//           identity.player.summonerName,
+//         ]);
+//       }
+//     });
 
-exports.getMatchData = getMatchData;
+//     return matchData;
+//   } catch (e) {
+//     logger.error(e.stack);
+//     logger.error(`getMatchData(${gameId})`);
+//   }
+// };
+
+// exports.getMatchData = getMatchData;
