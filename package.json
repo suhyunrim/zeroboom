@@ -28,6 +28,7 @@
   "dependencies": {
     "@hapi/joi": "^17.1.1",
     "@whipping-cream/thresh": "^1.2.0",
+    "@whipping-cream/tristana": "github:WhippingCream/tristana",
     "arpad": "1.0.2",
     "celebrate": "^12.2.0",
     "chalk": "^3.0.0",
@@ -45,7 +46,6 @@
     "sequelize": "^5.21.5",
     "sequelize-cli": "^5.5.1",
     "socket.io": "^2.4.0",
-    "tristana": "WhippingCream/tristana#4c7070ed5e1271bf2ca70b66a14ef2fa1781874d",
     "winston": "^3.2.1"
   }
 }

@@ -3,17 +3,17 @@ const { logger } = require('../loaders/logger');
 const { getCustomGames } = require('../services/riot-api');
 const { getRatingTier } = require('../services/user');
 
-module.exports.login = async (name, accountId, token) => {
+module.exports.login = async (name, puuid, token) => {
   let found = await models.token.findOne({
     where: {
-      accountId: accountId,
+      accountId: puuid,
     },
   });
 
   const tokenData = {
-    name: name,
-    accountId: accountId,
-    token: token,
+    name,
+    accountId: puuid,
+    token,
   };
 
   try {
@@ -90,11 +90,11 @@ module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
   }
 };
 
-module.exports.getGroupList = async (accountId) => {
+module.exports.getGroupList = async (puuid) => {
   let result = [];
   try {
     const userInfos = await models.user.findAll({
-      where: { accountId: accountId },
+      where: { puuid },
     });
 
     const groupIds = userInfos.map((elem) => elem.groupId);
@@ -139,12 +139,15 @@ module.exports.getRating = async (groupId, riotId) => {
     const totalRating = userInfo.defaultRating + userInfo.additionalRating;
     const ratingTier = getRatingTier(totalRating);
 
-    return { result: {
-      defaultRating: userInfo.defaultRating,
-      additionalRating: userInfo.additionalRating,
-      totalRating: totalRating,
-      ratingTier: ratingTier
-    }, status: 200 };
+    return {
+      result: {
+        defaultRating: userInfo.defaultRating,
+        additionalRating: userInfo.additionalRating,
+        totalRating: totalRating,
+        ratingTier: ratingTier,
+      },
+      status: 200,
+    };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };

@@ -13,6 +13,14 @@ exports.run = async (groupName, interaction) => {
 
   const pickedNicknames = pickedUsers.map((member, index) => {
     const startIndex = member.nickname.indexOf('(');
+    return member.nickname.substring(
+      startIndex + 1,
+      member.nickname.length - 1,
+    );
+  });
+
+  const commandStr = pickedUsers.map((member, index) => {
+    const startIndex = member.nickname.indexOf('(');
     return `유저${index + 1}:${member.nickname.substring(
       startIndex + 1,
       member.nickname.length - 1,
@@ -33,7 +41,7 @@ exports.run = async (groupName, interaction) => {
 
    \`🎉 축하합니다! 🎉\`
    :white_check_mark:: ${pickedNicknames.join(', ')}
-   :robot:: /매칭생성 ${pickedNicknames.join(' ')}`;
+   :robot:: /매칭생성 ${commandStr.join(' ')}`;
 
   if (unpickedNicknames.length > 0) {
     message += `

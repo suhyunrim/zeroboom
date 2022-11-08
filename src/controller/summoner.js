@@ -3,7 +3,7 @@ const models = require('../db/models');
 const {
   getSummonerByName,
   getRankDataBySummonerId,
-  getSummonerByName_V1,
+  getMatchList,
 } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
@@ -79,6 +79,11 @@ module.exports.getSummonerByName = async (name) => {
 
   return { result: found, status: 200 };
 };
+
+module.exports.getPositions = async (name) => {
+  const matchList = await getMatchList(name);
+  return { result: null, status: 200 };
+}
 
 module.exports.getAccountIdByName = async (name) => {
   const found = await models.summoner.findOne({ where: { name } });

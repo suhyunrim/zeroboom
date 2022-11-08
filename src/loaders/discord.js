@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, ComponentType, InteractionResponse } = require('discord.js');
 const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
@@ -32,9 +32,7 @@ module.exports = async (app) => {
           groupName = group ? group.groupName : '';
 
           if (groupName === '') {
-            interaction.reply(
-              '[Error] 방 등록을 해주세요. 사용법: /방등록 그룹이름',
-            );
+            interaction.reply('[Error] 방 등록을 해주세요. 사용법: /방등록 그룹이름');
             return;
           }
         }
@@ -42,7 +40,14 @@ module.exports = async (app) => {
 
       const output = await command.run(groupName, interaction);
       if (output) {
-        interaction.reply(output);
+        const replied = await interaction.reply(output);
+        const collector = replied.createMessageComponentCollector({
+          componentType: ComponentType.Button,
+        });
+
+        collector.on('collect', async (interaction) => {
+          await replied.edit({ components: [] });
+        });
       }
     } catch (e) {
       logger.error(e);
@@ -67,7 +72,7 @@ module.exports = async (app) => {
       if (command) {
         const output = await command.reactButton(interaction);
         if (output) {
-          interaction.reply(output);
+          await interaction.reply(output);
         }
       } else if (interaction.customId) {
         const split = interaction.customId.split('|');
@@ -83,8 +88,8 @@ module.exports = async (app) => {
             await matchData.update({ winTeam });
             await matchController.calculateRating(group.groupName);
             const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
-            interaction.reply(
-              `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.`,
+            await interaction.reply(
+              `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다. (by ${interaction.member.nickname})`,
             );
           }
         }
@@ -98,24 +103,12 @@ module.exports = async (app) => {
   client.login(process.env.DISCORD_BOT_TOKEN);
 
   const commandList = await commandListLoader();
-  const commandJsons = commandList
-    .getSlashCommands()
-    .map((command) => command.toJSON());
-  const rest = new REST({ version: '10' }).setToken(
-    process.env.DISCORD_BOT_TOKEN,
-  );
+  const commandJsons = commandList.getSlashCommands().map((command) => command.toJSON());
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
   rest
-    .put(
-      Routes.applicationGuildCommands(
-        process.env.DISCORD_APPLICATION_ID,
-        '280311002656931844',
-      ),
-      { body: commandJsons },
-    )
-    .then((data) =>
-      console.log(
-        `Successfully registered ${data.length} application commands.`,
-      ),
-    )
+    .put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, '280311002656931844'), {
+      body: commandJsons,
+    })
+    .then((data) => console.log(`Successfully registered ${data.length} application commands.`))
     .catch(console.error);
 };

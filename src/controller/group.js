@@ -1,7 +1,7 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
 const moment = require('moment');
-const { Op } = require("sequelize");
+const { Op } = require('sequelize');
 
 const LatestMatchDateConditionDays = 60;
 const RankingMinumumMatchCount = 5;
@@ -26,7 +26,7 @@ module.exports.getByName = async (groupName) => {
   }
 
   return result;
-}
+};
 
 module.exports.getByDiscordGuildId = async (id) => {
   const result = await models.group.findOne({ where: { discordGuildId: id } });
@@ -69,17 +69,13 @@ module.exports.retrieveMatches = async (groupName) => {
 module.exports.setUserRole = async (groupName, accountId, role) => {
   if (!groupName) return { result: 'invalid groupId', status: 501 };
   if (!accountId) return { result: 'invalid accountId', status: 501 };
-  if (role !== 'admin' && role !== 'member' && role !== 'outsider')
-    return { result: 'invalid role type', status: 501 };
+  if (role !== 'admin' && role !== 'member' && role !== 'outsider') return { result: 'invalid role type', status: 501 };
 
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
   try {
-    await models.user.update(
-      { role },
-      { where: { groupId: group.id, accountId } },
-    );
+    await models.user.update({ role }, { where: { groupId: group.id, accountId } });
     return { result: {}, status: 200 };
   } catch (e) {
     logger.error(e.stack);
@@ -91,25 +87,15 @@ module.exports.getRanking = async (groupName) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
-  LatestMatchDateConditionDays
-  let users = await models.user.findAll({ where: {
-        groupId: group.id,
-        latestMatchDate: {
-          [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
-        }
-    }
+  let users = await models.user.findAll({
+    where: {
+      groupId: group.id,
+    },
   });
 
-  users = users.filter(
-    (elem) => elem.win + elem.lose >= RankingMinumumMatchCount,
-  );
+  users = users.filter((elem) => elem.win + elem.lose >= RankingMinumumMatchCount);
 
-  users.sort(
-    (a, b) =>
-      b.defaultRating +
-      b.additionalRating -
-      (a.defaultRating + a.additionalRating),
-  );
+  users.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
 
   const userIds = users.map((elem) => elem.riotId);
   const summoners = await models.summoner.findAll({

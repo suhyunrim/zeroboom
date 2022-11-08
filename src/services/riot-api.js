@@ -1,6 +1,21 @@
 const { logger } = require('../loaders/logger');
 
-const riotAPI = require('tristana');
+const riotAPI = require('@whipping-cream/tristana');
+
+/// v5
+const getMatchList = async (summonerName) => {
+  const summoner = await getSummonerByName(summonerName);
+  const puuid = summoner.puuid;
+  const result = await riotAPI.v5.match.getIds(puuid)();
+
+  if (result.status !== 200)
+    throw new Error(
+      `riotAPI.match.v5.getMatchList(${puuid}) => ${result.status}`,
+    );
+
+  return result.data;
+}
+exports.getMatchList = getMatchList;
 
 /// V4
 const getSummonerByName = async (summonerName) => {

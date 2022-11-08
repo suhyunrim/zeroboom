@@ -31,7 +31,7 @@ const startServer = async () => {
     }
     logger.info(`
       ################################################
-      Hello, Camille! Server listening on port: ${port}
+      Hello, ZeroBoom! Server listening on port: ${port}
       ################################################
     `);
   });

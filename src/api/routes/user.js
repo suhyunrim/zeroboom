@@ -24,16 +24,23 @@ module.exports = (app) => {
   route.post('/login', async (req, res, next) => {
     const { id, password } = req.body;
     try {
-      const loginCookies = await getLoginCookies(id, password);
-      if (!loginCookies)
-        return res.status(520).json({ result: 'selenium erorr!' });
+      // const loginCookies = await getLoginCookies(id, password);
+      // if (!loginCookies)
+      //   return res.status(520).json({ result: 'selenium erorr!' });
 
-      const jwtDecoded = jwtDecode(loginCookies['__Secure-id_token']);
-      const name = jwtDecoded.acct.game_name;
-      const accountId = jwtDecoded.lol[0].uid;
-      const token = loginCookies['__Secure-id_token'];
-      const loginResult = await userController.login(name, accountId, token);
-      const groupList = await userController.getGroupList(accountId);
+      // const jwtDecoded = jwtDecode(loginCookies['__Secure-id_token']);
+      // const name = jwtDecoded.acct.game_name;
+      // const accountId = jwtDecoded.lol[0].uid;
+      // const token = loginCookies['__Secure-id_token'];
+      if (id != 'loliday' || password != '1234')
+        return res.status(520).json({ result: 'erorr!' });
+
+      const name = 'ZeroBoom';
+      const puuid =
+        'q2OE3y7njNK6pcYTD1Gb7SmiGUQwI4PFfu_r19rnBxjYMENzcUe3Ik1HcXQRDzfAJIYtZzLrPOCUiQ';
+      const token = 'asdfasdf';
+      const loginResult = await userController.login(name, puuid, token);
+      const groupList = await userController.getGroupList(puuid);
       return res
         .status(loginResult.status)
         .json({ loginResult: loginResult.result, groupList: groupList.result });
@@ -77,6 +84,18 @@ module.exports = (app) => {
         group.id,
         summoner.result.riotId,
       );
+      return res.status(userInfo.status).json({ result: userInfo.result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500);
+    }
+  });
+
+  route.get('/getPosition', async (req, res, next) => {
+    const { userName } = req.query;
+    try {
+      const positions = await summonerController.getPositions(userName);
+      
       return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);

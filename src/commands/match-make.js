@@ -1,8 +1,5 @@
 const matchController = require('../controller/match');
-const {
-  formatMatches,
-  formatMatch,
-} = require('../discord/embed-messages/matching-results');
+const { formatMatches, formatMatch } = require('../discord/embed-messages/matching-results');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 
@@ -27,13 +24,7 @@ exports.run = async (groupName, interaction) => {
     }
   });
 
-  const result = await matchController.generateMatch(
-    groupName,
-    team1,
-    team2,
-    userPool,
-    6,
-  );
+  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 6);
 
   if (result.status !== 200) {
     return result.result;
@@ -46,9 +37,7 @@ exports.run = async (groupName, interaction) => {
       const match = result.result[j];
       // 버튼 interaction을 더 이쁘장하게 하는 법이 있을 것 같으나, 일단은 customId에 여러 정보를 실어보냄
       // customId limit length가 100이어서 간략화 (by zeroboom)
-      const customeIdStr = `${j}|${match.team1WinRate.toFixed(
-        2,
-      )}|${match.team1.join('|')}|${match.team2.join('|')}`;
+      const customeIdStr = `${j}|${match.team1WinRate.toFixed(4)}|${match.team1.join('|')}|${match.team2.join('|')}`;
       rows[i].addComponents(
         new ButtonBuilder()
           .setCustomId(customeIdStr)
@@ -58,7 +47,7 @@ exports.run = async (groupName, interaction) => {
     }
   }
 
-  return { embeds: [formatMatches(result.result)], components: [...rows] };
+  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true };
 };
 
 exports.reactButton = async (interaction) => {
@@ -105,7 +94,7 @@ exports.reactButton = async (interaction) => {
     );
 
   const output = {
-    content: `**Plan ${index + 1}이 선택되었습니다!!**`,
+    content: `**[${interaction.member.nickname}]님이 Plan ${index + 1}를 선택하였습니다!!**`,
     embeds: [formatMatch(index, teams[0], teams[1], team1WinRate)],
     components: [buttons],
   };
