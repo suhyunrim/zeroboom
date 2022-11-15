@@ -57,6 +57,11 @@ exports.reactButton = async (interaction) => {
   const team1WinRate = Number(split[1]);
   const teams = [[], []];
   const teamsForDB = [[], []];
+
+  const group = await models.group.findOne({
+    where: { discordGuildId: interaction.guildId },
+  });
+
   for (let i = 0; i < 2; ++i) {
     const startIndex = i * 5 + 2;
     for (let j = startIndex; j < startIndex + 5; ++j) {
@@ -64,14 +69,18 @@ exports.reactButton = async (interaction) => {
       const summonerData = await models.summoner.findOne({
         where: { name: split[j] },
       });
-      teams[i].push(summonerData.name);
+      const userData = await models.user.findOne({
+        where: { groupId: group.id, riotId: summonerData.riotId },
+      });
+      teams[i].push(`${summonerData.name} (${userData.defaultRating + userData.additionalRating})`);
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
     }
+    teams[i].sort((a, b) => {
+      const aRating = Number(a.split('(')[1].split(')')[0]);
+      const bRating = Number(b.split('(')[1].split(')')[0]);
+      return bRating - aRating;
+    });
   }
-
-  const group = await models.group.findOne({
-    where: { discordGuildId: interaction.guildId },
-  });
 
   const matchQueryResult = await models.match.create({
     groupId: group.id,
