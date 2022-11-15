@@ -109,7 +109,7 @@ module.exports.getPositions = async (name) => {
       result.push([found.mainPosition, found.mainPositionRate]);
       result.push([found.subPosition, found.subPositionRate]);
     } else {
-      const matchids = await getMatchIds(name, 100);
+      const matchids = await getMatchIds(name, 50);
       for (let i = 0; i < matchids.length; ++i) {
         const matchData = await getMatchData(matchids[i]);
         const summonerData = matchData.info.participants.find((elem) => elem.summonerId == found.riotId);
