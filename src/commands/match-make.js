@@ -1,5 +1,5 @@
 const matchController = require('../controller/match');
-const { formatMatches, formatMatch } = require('../discord/embed-messages/matching-results');
+const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 
@@ -7,6 +7,7 @@ exports.run = async (groupName, interaction) => {
   const userPool = new Array();
   const team1 = new Array();
   const team2 = new Array();
+  const groups = new Map();
 
   interaction.options.data.forEach(function(optionData) {
     const userInfo = optionData.value.split('@');
@@ -17,14 +18,32 @@ exports.run = async (groupName, interaction) => {
 
     if (userInfo[1] == 1) {
       team1.push(userInfo[0]);
-    }
-
-    if (userInfo[1] == 2) {
+    } else if (userInfo[1] == 2) {
       team2.push(userInfo[0]);
+    } else {
+      if (groups.has(userInfo[1])) {
+        groups.get(userInfo[1]).push(userInfo[0]);
+      } else {
+        groups.set(userInfo[1], [userInfo[0]]);
+      }
+      userPool.push(userInfo[0]);
     }
   });
 
-  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 6);
+  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 100);
+  result.result = result.result.filter((elem) => {
+    for (let [key, value] of groups) {
+      if (elem.team1.includes(value[0]) && elem.team1.includes(value[1])) {
+        return false;
+      } else if (elem.team2.includes(value[0]) && elem.team2.includes(value[1])) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  result.result = result.result.slice(0, 6);
 
   if (result.status !== 200) {
     return result.result;
@@ -57,6 +76,7 @@ exports.reactButton = async (interaction) => {
   const team1WinRate = Number(split[1]);
   const teams = [[], []];
   const teamsForDB = [[], []];
+  const teamRatings = [0, 0];
 
   const group = await models.group.findOne({
     where: { discordGuildId: interaction.guildId },
@@ -72,9 +92,14 @@ exports.reactButton = async (interaction) => {
       const userData = await models.user.findOne({
         where: { groupId: group.id, riotId: summonerData.riotId },
       });
-      teams[i].push(`${summonerData.name} (${userData.defaultRating + userData.additionalRating})`);
+      const rating = userData.defaultRating + userData.additionalRating;
+      teams[i].push(`${summonerData.name} (${rating})`);
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
+      teamRatings[i] += rating;
     }
+
+    teamRatings[i] /= 5;
+
     teams[i].sort((a, b) => {
       const aRating = Number(a.split('(')[1].split(')')[0]);
       const bRating = Number(b.split('(')[1].split(')')[0]);
@@ -104,7 +129,7 @@ exports.reactButton = async (interaction) => {
 
   const output = {
     content: `**[${interaction.member.nickname}]님이 Plan ${index + 1}를 선택하였습니다!!**`,
-    embeds: [formatMatch(index, teams[0], teams[1], team1WinRate)],
+    embeds: [formatMatchWithRating(index, teams[0], teamRatings[0], teams[1], teamRatings[1], team1WinRate)],
     components: [buttons],
   };
   return output;
