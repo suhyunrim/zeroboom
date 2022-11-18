@@ -113,6 +113,9 @@ module.exports.getPositions = async (name) => {
       for (let i = 0; i < matchids.length; ++i) {
         const matchData = await getMatchData(matchids[i]);
         const summonerData = matchData.info.participants.find((elem) => elem.summonerId == found.riotId);
+        if (!summonerData.teamPosition) {
+          continue;
+        }
         positions[summonerData.teamPosition]++;
       }
 
