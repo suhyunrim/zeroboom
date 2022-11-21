@@ -50,8 +50,9 @@ exports.run = async (groupName, interaction) => {
   }
 
   // 디스코드 버튼은 한번에 최대 5개만 삽입 가능해서 3개씩 두줄로 처리 (by zeroboom)
-  const rows = [new ActionRowBuilder(), new ActionRowBuilder()];
-  for (let i = 0; i < 2; ++i) {
+  const rows = [];
+  for (let i = 0; i < (result.result.length < 3 ? 1 : 2); ++i) {
+    rows.push(new ActionRowBuilder());
     for (let j = i * 3; j < Math.min(result.result.length, (i + 1) * 3); j++) {
       const match = result.result[j];
       // 버튼 interaction을 더 이쁘장하게 하는 법이 있을 것 같으나, 일단은 customId에 여러 정보를 실어보냄

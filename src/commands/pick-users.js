@@ -7,37 +7,27 @@ exports.run = async (groupName, interaction) => {
 
   const members = interaction.member.voice.channel.members;
   const pickedUsers = members.random(10);
-  const unpickedUsers = members.filter(
-    (member) => !pickedUsers.includes(member),
-  );
+  const unpickedUsers = members.filter((member) => !pickedUsers.includes(member));
 
   const pickedNicknames = pickedUsers.map((member, index) => {
-    const startIndex = member.nickname.indexOf('(');
-    return member.nickname.substring(
-      startIndex + 1,
-      member.nickname.length - 1,
-    );
+    const nickname = member.nickname != null ? member.nickname : member.user.username;
+    const startIndex = nickname.indexOf('(');
+    return nickname.substring(startIndex + 1, nickname.length - 1);
   });
 
   const commandStr = pickedUsers.map((member, index) => {
-    const startIndex = member.nickname.indexOf('(');
-    return `유저${index + 1}:${member.nickname.substring(
-      startIndex + 1,
-      member.nickname.length - 1,
-    )}`;
+    const nickname = member.nickname != null ? member.nickname : member.user.username;
+    const startIndex = nickname.indexOf('(');
+    return `유저${index + 1}:${nickname.substring(startIndex + 1, nickname.length - 1)}`;
   });
 
   const unpickedNicknames = unpickedUsers.map((member) => {
-    const startIndex = member.nickname.indexOf('(');
-    return member.nickname.substring(
-      startIndex + 1,
-      member.nickname.length - 1,
-    );
+    const nickname = member.nickname != null ? member.nickname : member.user.username;
+    const startIndex = nickname.indexOf('(');
+    return nickname.substring(startIndex + 1, nickname.length - 1);
   });
 
-  let message = `**${interaction.member.voice.channel.name}** 채널에서 **${
-    members.size
-  }명** 중 **${10}명**을 뽑습니다!
+  let message = `**${interaction.member.voice.channel.name}** 채널에서 **${members.size}명** 중 **${10}명**을 뽑습니다!
 
    \`🎉 축하합니다! 🎉\`
    :white_check_mark:: ${pickedNicknames.join(', ')}
