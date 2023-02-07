@@ -2,6 +2,7 @@ const matchController = require('../controller/match');
 const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
+const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 
 exports.run = async (groupName, interaction) => {
   const userPool = new Array();
@@ -31,6 +32,10 @@ exports.run = async (groupName, interaction) => {
   });
 
   const result = await matchController.generateMatch(groupName, team1, team2, userPool, 100);
+  if (typeof(result.result) == 'string') {
+    return result.result;
+  }
+
   result.result = result.result.filter((elem) => {
     for (let [key, value] of groups) {
       if (elem.team1.includes(value[0]) && elem.team1.includes(value[1])) {
@@ -94,18 +99,16 @@ exports.reactButton = async (interaction) => {
         where: { groupId: group.id, riotId: summonerData.riotId },
       });
       const rating = userData.defaultRating + userData.additionalRating;
-      teams[i].push(`${summonerData.name} (${rating})`);
+      teams[i].push({
+        name: `${summonerData.name} (${getTierName(rating).charAt(0)}${getTierStep(rating)} ${getTierPoint(rating)}LP)`,
+        rating: rating,
+      });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
       teamRatings[i] += rating;
     }
 
     teamRatings[i] /= 5;
-
-    teams[i].sort((a, b) => {
-      const aRating = Number(a.split('(')[1].split(')')[0]);
-      const bRating = Number(b.split('(')[1].split(')')[0]);
-      return bRating - aRating;
-    });
+    teams[i].sort((a, b) => b.rating - a.rating);
   }
 
   const matchQueryResult = await models.match.create({

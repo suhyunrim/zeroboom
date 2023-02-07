@@ -16,15 +16,8 @@ const format = (idx, team, winRate, emoji, teamRating = 0) => {
 
 module.exports.formatMatchWithRating = (idx, team1, team1Rating, team2, team2Rating, team1WinRate) => {
   const fields = [];
-  fields.push(format(idx + 1, team1, team1WinRate, '🐶', team1Rating));
-  fields.push(format(idx + 1, team2, 1 - team1WinRate, '🐱', team2Rating));
-  return new EmbedBuilder().addFields(fields);
-};
-
-module.exports.formatMatch = (idx, team1, team2, team1WinRate) => {
-  const fields = [];
-  fields.push(format(idx + 1, team1, team1WinRate, '🐶'));
-  fields.push(format(idx + 1, team2, 1 - team1WinRate, '🐱'));
+  fields.push(format(idx + 1, team1.map(elem => elem.name), team1WinRate, '🐶', team1Rating));
+  fields.push(format(idx + 1, team2.map(elem => elem.name), 1 - team1WinRate, '🐱', team2Rating));
   return new EmbedBuilder().addFields(fields);
 };
 

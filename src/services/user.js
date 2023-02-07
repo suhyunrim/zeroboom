@@ -45,11 +45,7 @@ const isValidTier = (tier) => {
 };
 
 const isNonStepTier = (tierName) => {
-  return (
-    tierName === 'MASTER' ||
-    tierName === 'GRANDMASTER' ||
-    tierName === 'CHALLENGER'
-  );
+  return tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
 };
 
 const getRating = (tier) => {
@@ -73,21 +69,13 @@ const registerUser = async (groupName, summonerName, tier) => {
 
   if (tier) tier = convertAbbreviationTier(tier);
 
-  if (tier && !isValidTier(tier))
-    return { result: 'invalid tier', status: 501 };
+  if (tier && !isValidTier(tier)) return { result: 'invalid tier', status: 501 };
 
-  const summonerResult = await summonerController.getSummonerByName(
-    summonerName,
-  );
-  if (summonerResult.status != 200)
-    return { result: summonerResult.result, status: summonerResult.status };
+  const summonerResult = await summonerController.getSummonerByName(summonerName);
+  if (summonerResult.status != 200) return { result: summonerResult.result, status: summonerResult.status };
 
   const summoner = summonerResult.result;
-  if (
-    !tier &&
-    (summoner.rankTier == 'UNRANKED' ||
-      summoner.rankWin + summoner.rankLose < 100)
-  )
+  if (!tier && (summoner.rankTier == 'UNRANKED' || summoner.rankWin + summoner.rankLose < 100))
     return { result: 'enter the tier explicitly', status: 501 };
 
   try {
