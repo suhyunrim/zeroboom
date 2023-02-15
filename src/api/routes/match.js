@@ -45,4 +45,10 @@ module.exports = (app) => {
     );
     return res.status(result.status).json(result);
   });
+
+  route.post('/get-match-history', async function (req, res, next) {
+    const { groupName, from, to } = req.body;
+    const result = await controller.getMatchHistory(groupName, from, to);
+    return res.status(result.status).send(result.result);
+  });
 };

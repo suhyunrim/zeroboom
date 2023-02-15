@@ -1,4 +1,5 @@
 const models = require('../db/models');
+const moment = require('moment');
 const { Op } = require('sequelize');
 
 const summonerController = require('../controller/summoner');
@@ -323,8 +324,8 @@ module.exports.calculateRating = async (groupName) => {
         ratingCalculator.newRatingIfWon(team2Rating, team1Rating) - team2Rating;
     }
 
-    apply(team1, match.winTeam == 1, team1Delta, match.gameCreation);
-    apply(team2, match.winTeam == 2, team2Delta, match.gameCreation);
+    apply(team1, match.winTeam == 1, team1Delta, match.createdAt);
+    apply(team2, match.winTeam == 2, team2Delta, match.createdAt);
   }
 
   for (const user of Object.values(users)) {
@@ -336,3 +337,67 @@ module.exports.calculateRating = async (groupName) => {
     status: 200,
   };
 };
+
+module.exports.getMatchHistory = async (groupName, from, to) => {
+  if (!groupName) return { status: 900, result: 'invalid group name' };
+
+  const group = await models.group.findOne({ where: { groupName: groupName } });
+  if (!group) return { status: 901, result: 'group is not exist' };
+
+  const matches = await models.match.findAll({ where: {
+    groupId: group.id,
+    winTeam: {[Op.ne]: null},
+    createdAt: {
+      [Op.gte]: from,
+      [Op.lte]: to,
+    }
+  }});
+
+  const nameCache = {};
+  const playCount = {};
+  const fixedMatchPlayCount = {};
+  for (let match of matches) {
+    const participants = match.team1.concat(match.team2);
+    for (let participant of participants) {
+      const puuid = participant[0];
+      if (nameCache[puuid] == null) {
+        const summoner = await models.summoner.findOne({ where: { puuid } });
+        nameCache[puuid] = summoner.name;
+      }
+
+      const name = nameCache[puuid];
+      playCount[name] = (playCount[name] || 0) + 1;
+
+      const weekDay = moment(match.createdAt).isoWeekday();
+      if (weekDay == 3 || weekDay == 7) {
+        fixedMatchPlayCount[name] = (fixedMatchPlayCount[name] || 0) + 1;
+      }
+    }
+  }
+
+  let result = [];
+  for (let name of Object.keys(playCount)) {
+    result.push({
+      name,
+      playCount: playCount[name],
+      fixedMatchPlayCount: fixedMatchPlayCount[name] || 0,
+      msg: `${name} : ${playCount[name]} (정기내전: ${fixedMatchPlayCount[name] || 0})`,
+    });
+  }
+
+  result = result.sort((a, b) => b.playCount - a.playCount);
+
+  const msg = result.map((elem) => elem.msg).join('<br>');
+
+  return {
+    result: msg,
+    status: 200,
+  }
+}
+
+// module.exports.getMatchHistory = async (groupName, from, to) => {
+//   if (!groupName) return { result: 'invalid group name' };
+
+//   const group = await models.group.findOne({ where: { groupName: groupName } });
+//   if (!group) return { result: 'group is not exist' };
+// }

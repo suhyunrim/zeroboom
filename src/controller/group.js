@@ -90,6 +90,9 @@ module.exports.getRanking = async (groupName) => {
   let users = await models.user.findAll({
     where: {
       groupId: group.id,
+      latestMatchDate: {
+        [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
+      }
     },
   });
 

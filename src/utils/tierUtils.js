@@ -61,7 +61,11 @@ const getTierPoint = (rating) => {
       continue;
     }
   
-    return Math.floor((rating - tierRating) % 25 * 4);
+    if (isNonStepTier(name)) {
+      return Math.floor((rating - tierRating) * 4);
+    } else {
+      return Math.floor((rating - tierRating) % 25 * 4);
+    }
   }
 }
 exports.getTierPoint = getTierPoint;

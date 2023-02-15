@@ -8,6 +8,7 @@ const path = require('path');
 const indexRouter = require('./routes/index');
 const userRouter = require('./routes/user');
 const friendlyGameRouter = require('./routes/friendly-game');
+const matchHistoryRouter = require('./routes/match-history');
 
 const startServer = async () => {
   const app = express();
@@ -21,7 +22,8 @@ const startServer = async () => {
   app.use('/', indexRouter);
   app.use('/user', userRouter);
   app.use('/friendly-game', friendlyGameRouter);
-
+  app.use('/match-history', matchHistoryRouter);
+  
   const server = await loader(app);
 
   server.listen(port, (err) => {
