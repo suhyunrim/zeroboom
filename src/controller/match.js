@@ -1,6 +1,7 @@
 const models = require('../db/models');
 const moment = require('moment');
 const { Op } = require('sequelize');
+const table = require('table');
 
 const summonerController = require('../controller/summoner');
 
@@ -344,6 +345,17 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
   const group = await models.group.findOne({ where: { groupName: groupName } });
   if (!group) return { status: 901, result: 'group is not exist' };
 
+  const users = await models.user.findAll({
+    where: {
+      groupId: group.id,
+      latestMatchDate: {
+        [Op.gte]: moment().subtract(60, 'days').toDate()
+      }
+    },
+  });
+
+  const puuIds = users.map((elem) => elem.puuid);
+
   const matches = await models.match.findAll({ where: {
     groupId: group.id,
     winTeam: {[Op.ne]: null},
@@ -354,8 +366,9 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
   }});
 
   const nameCache = {};
-  const playCount = {};
-  const fixedMatchPlayCount = {};
+
+  const matchPlayCountMap = {};
+  const fixedMatchPlayCountMap = {};
   for (let match of matches) {
     const participants = match.team1.concat(match.team2);
     for (let participant of participants) {
@@ -366,38 +379,92 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
       }
 
       const name = nameCache[puuid];
-      playCount[name] = (playCount[name] || 0) + 1;
+      matchPlayCountMap[name] = (matchPlayCountMap[name] || 0) + 1;
 
       const weekDay = moment(match.createdAt).isoWeekday();
       if (weekDay == 3 || weekDay == 7) {
-        fixedMatchPlayCount[name] = (fixedMatchPlayCount[name] || 0) + 1;
+        fixedMatchPlayCountMap[name] = (fixedMatchPlayCountMap[name] || 0) + 1;
       }
     }
   }
 
+  const riotMatches = await models.riot_match.findAll({ where: {
+    gameCreation: {
+      [Op.gte]: from,
+      [Op.lte]: to,
+    }
+  }});
+
+  const riotMatchSet = {};
+  const riotMatchPlayCountMap = {};
+  for (let match of riotMatches) {
+    const filtered = match.participants.filter((elem) => puuIds.includes(elem));
+    if (filtered.length <= 1)
+      continue;
+
+    for (let puuId of filtered) {
+      if (nameCache[puuId] == null) {
+        const summoner = await models.summoner.findOne({ where: { puuId } });
+        nameCache[puuId] = summoner.name;
+      }
+      
+      const name = nameCache[puuId];
+      if (riotMatchSet[name] == null) {
+        riotMatchSet[name] = [];
+      }
+
+      const others = filtered.filter((elem) => elem != puuId && !riotMatchSet[name].includes(elem));
+      if (others.length == 0) {
+        continue;
+      }
+
+      riotMatchSet[name].push(...others);
+      riotMatchPlayCountMap[name] = (riotMatchPlayCountMap[name] || 0) + others.length;
+    }
+  }
+
   let result = [];
-  for (let name of Object.keys(playCount)) {
+  for (let user of users) {
+    const name = nameCache[user.puuid];
+    if (!name)
+      continue;
+
+    const riotMatchPlayCount = riotMatchPlayCountMap[name] || 0;
+    const matchPlayCount = matchPlayCountMap[name] || 0;
+    const fixedMatchPlayCount = fixedMatchPlayCountMap[name] || 0;
+    const point = matchPlayCount * 2 + riotMatchPlayCount;
     result.push({
       name,
-      playCount: playCount[name],
-      fixedMatchPlayCount: fixedMatchPlayCount[name] || 0,
-      msg: `${name} : ${playCount[name]} (정기내전: ${fixedMatchPlayCount[name] || 0})`,
+      riotMatchPlayCount,
+      matchPlayCount,
+      fixedMatchPlayCount,
+      point,
     });
   }
 
-  result = result.sort((a, b) => b.playCount - a.playCount);
+  result = result.sort((a, b) => b.point - a.point);
 
-  const msg = result.map((elem) => elem.msg).join('<br>');
+  let tableData = [['닉네임', '정기 내전', '일반 내전', '롤데인', '합산']];
+  for (let elem of result) {
+    tableData.push([elem.name, elem.fixedMatchPlayCount, elem.matchPlayCount - elem.fixedMatchPlayCount, elem.riotMatchPlayCount, elem.point]);
+  }
+
+  const config = {
+    border: table.getBorderCharacters("ramac"),
+    columns: {
+      0: { alignment: 'center', width: 20 },
+      1: { alignment: 'center', width: 10 },
+      2: { alignment: 'center', width: 10 },
+      3: { alignment: 'center', width: 10 },
+      4: { alignment: 'center', width: 10 },
+    }
+  }
+
+  let msg = `<pre>${table.table(tableData, config)}</pre>`
+  msg = msg.replaceAll('\n', '<br>');
 
   return {
     result: msg,
     status: 200,
   }
 }
-
-// module.exports.getMatchHistory = async (groupName, from, to) => {
-//   if (!groupName) return { result: 'invalid group name' };
-
-//   const group = await models.group.findOne({ where: { groupName: groupName } });
-//   if (!group) return { result: 'group is not exist' };
-// }

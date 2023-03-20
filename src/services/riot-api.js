@@ -4,27 +4,39 @@ const axios = require('axios');
 const RIOT_API_KEY = process.env.RIOT_API_KEY;
 
 /// v5
-const getMatchIds = async (summonerName, count = 20) => {
+const getMatchIdsFromSummonerName = async (summonerName, beginIndex, count = 20) => {
   const summoner = await getSummonerByName(summonerName);
   const puuid = summoner.puuid;
+  const result = await getMatchIdsFromPuuid(puuid, beginIndex, count);
+
+  if (result.status !== 200)
+    throw new Error(
+      `riotAPI.match.v5.getMatchIdsFromSummonerName(${puuid}) => ${result.status}`,
+    );
+
+  return result.data;
+}
+exports.getMatchIdsFromSummonerName = getMatchIdsFromSummonerName;
+
+const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20) => {
   const result = await axios({
     method:'get',
     url:`https://asia.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`,
     params: {
       api_key: RIOT_API_KEY,
-      queue:420,
+      start: beginIndex,
       count,
     }
   });
 
   if (result.status !== 200)
     throw new Error(
-      `riotAPI.match.v5.getMatchIds(${puuid}) => ${result.status}`,
+      `riotAPI.match.v5.getMatchIdsFromPuuid(${puuid}) => ${result.status}`,
     );
 
   return result.data;
 }
-exports.getMatchIds = getMatchIds;
+exports.getMatchIdsFromPuuid = getMatchIdsFromPuuid;
 
 const getMatchData = async (matchId) => {
   const result = await axios({

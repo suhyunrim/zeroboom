@@ -1,4 +1,5 @@
 const express = require('express');
+const moment = require('moment');
 const bodyParser = require('body-parser');
 const loader = require('./loaders');
 const { port } = require('./config');
@@ -9,6 +10,8 @@ const indexRouter = require('./routes/index');
 const userRouter = require('./routes/user');
 const friendlyGameRouter = require('./routes/friendly-game');
 const matchHistoryRouter = require('./routes/match-history');
+
+const riotMatchController = require('./controller/riot-match');
 
 const startServer = async () => {
   const app = express();
@@ -40,3 +43,11 @@ const startServer = async () => {
 };
 
 startServer();
+
+const retrieveRiotMatches = async () => {
+  const targetDate = moment.utc().subtract(30, 'days');
+  await riotMatchController.retrieveMatches('롤리데이', targetDate);
+  setTimeout(retrieveRiotMatches, 1000 * 60 * 60 * 24);
+}
+
+retrieveRiotMatches();
