@@ -432,7 +432,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     const riotMatchPlayCount = riotMatchPlayCountMap[name] || 0;
     const matchPlayCount = matchPlayCountMap[name] || 0;
     const fixedMatchPlayCount = fixedMatchPlayCountMap[name] || 0;
-    const point = matchPlayCount * 2 + riotMatchPlayCount;
+    const point = matchPlayCount + riotMatchPlayCount;
     result.push({
       name,
       riotMatchPlayCount,
@@ -444,12 +444,28 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
 
   result = result.sort((a, b) => b.point - a.point);
 
-  let tableData = [['닉네임', '정기 내전', '일반 내전', '롤데인', '합산']];
-  for (let elem of result) {
-    tableData.push([elem.name, elem.fixedMatchPlayCount, elem.matchPlayCount - elem.fixedMatchPlayCount, elem.riotMatchPlayCount, elem.point]);
+  const completedTableConfig = {
+    border: table.getBorderCharacters("ramac"),
+    columns: {
+      0: { alignment: 'center', width: 5 },
+      1: { alignment: 'center', width: 20 },
+      2: { alignment: 'center', width: 10 },
+      3: { alignment: 'center', width: 10 },
+      4: { alignment: 'center', width: 10 },
+      5: { alignment: 'center', width: 10 },
+    }
   }
 
-  const config = {
+  const matchCountCondition = 4;
+  const riotMatchCountCondition = 8;
+
+  const completedTableData = [['No', '닉네임', '내전', '롤데인', '합산']];
+  let rank = 1;
+  for (let elem of result.filter(elem => elem.matchPlayCount >= matchCountCondition || elem.riotMatchPlayCount >= riotMatchCountCondition)) {
+    completedTableData.push([rank++, elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
+  }
+
+  const uncompletedTableConfig = {
     border: table.getBorderCharacters("ramac"),
     columns: {
       0: { alignment: 'center', width: 20 },
@@ -460,7 +476,12 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     }
   }
 
-  let msg = `<pre>${table.table(tableData, config)}</pre>`
+  const uncompletedTableData = [['닉네임', '내전', '롤데인', '합산']];
+  for (let elem of result.filter(elem => elem.matchPlayCount < matchCountCondition && elem.riotMatchPlayCount < riotMatchCountCondition)) {
+    uncompletedTableData.push([elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
+  }
+
+  let msg = `<pre><h1>달성자</h1>${table.table(completedTableData, completedTableConfig)}<br><h1>미달성자</h1>${table.table(uncompletedTableData, uncompletedTableConfig)}</pre>`
   msg = msg.replaceAll('\n', '<br>');
 
   return {
