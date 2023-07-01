@@ -245,7 +245,7 @@ module.exports.calculateRating = async (groupName) => {
 
   const groupUsers = await models.user.findAll({
     where: {
-      groupId: group.id,
+      groupId: group.id
     },
   });
 
@@ -304,8 +304,6 @@ module.exports.calculateRating = async (groupName) => {
 
       continue;
     }
-
-    match.update({ groupId: group.id });
 
     const team1Rating = team1.reduce(reducer, 0) / 5;
     const team2Rating = team2.reduce(reducer, 0) / 5;
@@ -375,6 +373,9 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
       const puuid = participant[0];
       if (nameCache[puuid] == null) {
         const summoner = await models.summoner.findOne({ where: { puuid } });
+        if (!summoner)
+          continue;
+
         nameCache[puuid] = summoner.name;
       }
 

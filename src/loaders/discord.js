@@ -41,13 +41,13 @@ module.exports = async (app) => {
       const output = await command.run(groupName, interaction);
       if (output) {
         const replied = await interaction.reply(output);
-        const collector = replied.createMessageComponentCollector({
-          componentType: ComponentType.Button,
-        });
+        // const collector = replied.createMessageComponentCollector({
+        //   componentType: ComponentType.Button,
+        // });
 
-        collector.on('collect', async (interaction) => {
-          await replied.edit({ components: [] });
-        });
+        // collector.on('collect', async (interaction) => {
+        //   await replied.edit({ components: [] });
+        // });
       }
     } catch (e) {
       logger.error(e);
