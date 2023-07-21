@@ -38,9 +38,9 @@ exports.run = async (groupName, interaction) => {
 
   result.result = result.result.filter((elem) => {
     for (let [key, value] of groups) {
-      if (elem.team1.includes(value[0]) && elem.team1.includes(value[1])) {
-        return false;
-      } else if (elem.team2.includes(value[0]) && elem.team2.includes(value[1])) {
+      const team1Simplified = elem.team1.map(elem => elem.replaceAll(' ', ''));
+      const team2Simplified = elem.team2.map(elem => elem.replaceAll(' ', ''));
+      if ((team1Simplified.includes(value[0]) && team1Simplified.includes(value[1])) || (team2Simplified.includes(value[0]) && team2Simplified.includes(value[1]))) {
         return false;
       }
     }
