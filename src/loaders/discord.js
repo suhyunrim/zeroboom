@@ -14,6 +14,8 @@ module.exports = async (app) => {
     ],
   });
 
+  const matches = new Map();
+
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -40,6 +42,12 @@ module.exports = async (app) => {
 
       const output = await command.run(groupName, interaction);
       if (output) {
+        if (command.conf.aliases[0] == '매칭생성') {
+          for (let i = 0; i < output.match.length; ++i) {
+            matches.set(`${groupName}/${output.time}/${i}`, output.match[i]);
+          }
+        }
+
         const replied = await interaction.reply(output);
         // const collector = replied.createMessageComponentCollector({
         //   componentType: ComponentType.Button,
@@ -70,7 +78,8 @@ module.exports = async (app) => {
 
     try {
       if (command) {
-        const output = await command.reactButton(interaction);
+        const match = matches.get(interaction.customId);
+        const output = await command.reactButton(interaction, match);
         if (output) {
           await interaction.reply(output);
         }

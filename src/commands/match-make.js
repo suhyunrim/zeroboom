@@ -56,6 +56,7 @@ exports.run = async (groupName, interaction) => {
 
   // 디스코드 버튼은 한번에 최대 5개만 삽입 가능해서 3개씩 두줄로 처리 (by zeroboom)
   const rows = [];
+  const time = Date.now();
   for (let i = 0; i < (result.result.length < 3 ? 1 : 2); ++i) {
     rows.push(new ActionRowBuilder());
     for (let j = i * 3; j < Math.min(result.result.length, (i + 1) * 3); j++) {
@@ -65,21 +66,21 @@ exports.run = async (groupName, interaction) => {
       const customeIdStr = `${j}|${match.team1WinRate.toFixed(4)}|${match.team1.join('|')}|${match.team2.join('|')}`;
       rows[i].addComponents(
         new ButtonBuilder()
-          .setCustomId(customeIdStr)
+          .setCustomId(`${groupName}/${time}/${j}`)
           .setLabel(`${j + 1}번`)
           .setStyle(ButtonStyle.Primary),
       );
     }
   }
 
-  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true };
+  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true, match: result.result, time };
 };
 
-exports.reactButton = async (interaction) => {
+exports.reactButton = async (interaction, match) => {
   const customId = interaction.customId;
-  const split = customId.split('|');
-  const index = Number(split[0]);
-  const team1WinRate = Number(split[1]);
+  const split = customId.split('/');
+  const index = Number(split[2]);
+  const team1WinRate = match.team1WinRate;
   const teams = [[], []];
   const teamsForDB = [[], []];
   const teamRatings = [0, 0];
@@ -88,12 +89,12 @@ exports.reactButton = async (interaction) => {
     where: { discordGuildId: interaction.guildId },
   });
 
+  const members = [...match.team1, ...match.team2];
   for (let i = 0; i < 2; ++i) {
-    const startIndex = i * 5 + 2;
+    const startIndex = i * 5;
     for (let j = startIndex; j < startIndex + 5; ++j) {
-      // 나중에 최적화..
       const summonerData = await models.summoner.findOne({
-        where: { name: split[j] },
+        where: { name: members[j] },
       });
       const userData = await models.user.findOne({
         where: { groupId: group.id, riotId: summonerData.riotId },

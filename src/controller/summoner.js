@@ -22,14 +22,14 @@ const generateSummonerData = async (name) => {
     riotId: summonerResult.id,
     encryptedAccountId: summonerResult.accountId,
     puuid: summonerResult.puuid,
-    name: summonerResult.name,
+    name,
     rankTier: soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED',
     rankWin: soloRankData ? soloRankData.wins : 0,
     rankLose: soloRankData ? soloRankData.losses : 0,
     profileIconId: summonerResult.profileIconId,
     revisionDate: summonerResult.revisionDate,
     summonerLevel: summonerResult.summonerLevel,
-    simplifiedName: summonerResult.name.toLowerCase().replace(' ', ''),
+    simplifiedName: name.toLowerCase().replace(' ', ''),
   };
 };
 

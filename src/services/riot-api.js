@@ -58,18 +58,29 @@ exports.getMatchData = getMatchData;
 
 /// V4
 const getSummonerByName = async (summonerName) => {
-  const result = await axios({
+  const split = summonerName.split('#');
+  const name = split[0];
+  const tagLine = split[1];
+  const rsoResult = await axios({
     method:'get',
-    url:`https://kr.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
+    url:`https://asia.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${name}/${tagLine}`,
     params: {
       api_key: RIOT_API_KEY,
     }
   });
 
-  if (result.status !== 200)
+  if (rsoResult.status !== 200)
     throw new Error(
-      `riotAPI.getSummonerByName(${summonerName}) => ${result.status}`,
+      `riotAPI.getSummonerByName(${summonerName}) rsoResult => ${rsoResult.status}`,
     );
+
+  const result = await axios({
+    method:'get',
+    url:`https://kr.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${rsoResult.data.puuid}`,
+    params: {
+      api_key: RIOT_API_KEY,
+    }
+  });
 
   return result.data;
 };
