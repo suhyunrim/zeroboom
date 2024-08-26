@@ -3,6 +3,38 @@ const moment = require('moment');
 const pickCount = 10;
 const fixedMember = {};
 
+const specialChars = ['(', ')', '-', '_', '[', ']', '{', '}', '|', '\\', ':', '"', "'", '<', '>', ',', '.', '/'];
+
+function findSpecialCharBeforeIndex(str, index) {
+  const substring = str.slice(0, index);
+  for (let i = substring.length - 1; i >= 0; i--) {
+    if (specialChars.includes(substring[i])) {
+      return i;
+    }
+  }
+
+  return 0;
+}
+
+function findSpecialCharAfterIndex(str, index) {
+  const substring = str.slice(index);
+
+  for (let i = 0; i < substring.length; i++) {
+    if (specialChars.includes(substring[i])) {
+      return index + i;
+    }
+  }
+
+  return str.length;
+}
+
+const getLOLNickname = (nickname) => {
+  const sharpIndex = nickname.indexOf('#');
+  const specialCharIndex1 = findSpecialCharBeforeIndex(nickname, sharpIndex);
+  const specialCharIndex2 = findSpecialCharAfterIndex(nickname, sharpIndex);
+  return nickname.substring(specialCharIndex1 + 1, specialCharIndex2);
+};
+
 exports.run = async (groupName, interaction) => {
   if (!interaction.member.voice.channelId) {
     return '입장해있는 음성채널이 없습니다.';
@@ -19,7 +51,9 @@ exports.run = async (groupName, interaction) => {
     const member = pair[1];
     const tagetUserMoment = fixedMember[groupName][member.id];
     if (tagetUserMoment) {
-      const diff = moment().utc().diff(tagetUserMoment, 'hours');
+      const diff = moment()
+        .utc()
+        .diff(tagetUserMoment, 'hours');
       if (diff < 12) {
         pickedUsers.push(member);
         delete fixedMember[groupName][member.id];
@@ -29,11 +63,12 @@ exports.run = async (groupName, interaction) => {
 
   const fixedNicknames = pickedUsers.map((member) => {
     const nickname = member.nickname != null ? member.nickname : member.user.username;
-    const startIndex = nickname.indexOf('(');
-    return nickname.substring(startIndex + 1, nickname.length - 1);
+    return getLOLNickname(nickname);
   });
 
-  pickedUsers = pickedUsers.concat(members.filter(member => !pickedUsers.includes(member)).random(pickCount - pickedUsers.length));
+  pickedUsers = pickedUsers.concat(
+    members.filter((member) => !pickedUsers.includes(member)).random(pickCount - pickedUsers.length),
+  );
 
   const unpickedUsers = members.filter((member) => !pickedUsers.includes(member)).map((member) => member);
   for (let unpickedUser of unpickedUsers) {
@@ -42,26 +77,27 @@ exports.run = async (groupName, interaction) => {
 
   const pickedNicknames = pickedUsers.map((member, index) => {
     const nickname = member.nickname != null ? member.nickname : member.user.username;
-    const startIndex = nickname.indexOf('(');
-    return nickname.substring(startIndex + 1, nickname.length - 1);
+    return getLOLNickname(nickname);
   });
 
   const commandStr = pickedUsers.map((member, index) => {
     const nickname = member.nickname != null ? member.nickname : member.user.username;
-    const startIndex = nickname.indexOf('(');
-    return `유저${index + 1}:${nickname.substring(startIndex + 1, nickname.length - 1)}`;
+    return `유저${index + 1}:${getLOLNickname(nickname)}`;
   });
 
   const unpickedNicknames = unpickedUsers.map((member) => {
     const nickname = member.nickname != null ? member.nickname : member.user.username;
-    const startIndex = nickname.indexOf('(');
-    return nickname.substring(startIndex + 1, nickname.length - 1);
+    return getLOLNickname(nickname);
   });
 
-  let message = `**${interaction.member.voice.channel.name}** 채널에서 **${members.size}명** 중 **${pickCount}명**을 뽑습니다!
+  let message = `**${interaction.member.voice.channel.name}** 채널에서 **${
+    members.size
+  }명** 중 **${pickCount}명**을 뽑습니다!
 
    \`🎉 축하합니다! 🎉\`
-   :white_check_mark:: ${pickedNicknames.map(name => fixedNicknames.includes(name) ? `${name}(확정)` : name).join(', ')}
+   :white_check_mark:: ${pickedNicknames
+     .map((name) => (fixedNicknames.includes(name) ? `${name}(확정)` : name))
+     .join(', ')}
    :robot:: /매칭생성 ${commandStr.join(' ')}`;
 
   if (unpickedNicknames.length > 0) {
