@@ -26,7 +26,7 @@ const startServer = async () => {
   app.use('/user', userRouter);
   app.use('/friendly-game', friendlyGameRouter);
   app.use('/match-history', matchHistoryRouter);
-  
+
   const server = await loader(app);
 
   server.listen(port, (err) => {
@@ -48,6 +48,6 @@ const retrieveRiotMatches = async () => {
   const targetDate = moment.utc().subtract(30, 'days');
   await riotMatchController.retrieveMatches('롤리데이', targetDate);
   setTimeout(retrieveRiotMatches, 1000 * 60 * 60 * 24);
-}
+};
 
-retrieveRiotMatches();
+//retrieveRiotMatches();
