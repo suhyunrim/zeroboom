@@ -114,10 +114,19 @@ module.exports = async (app) => {
   const commandList = await commandListLoader();
   const commandJsons = commandList.getSlashCommands().map((command) => command.toJSON());
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
-  rest
-    .put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, '280311002656931844'), {
-      body: commandJsons,
-    })
-    .then((data) => console.log(`Successfully registered ${data.length} application commands.`))
-    .catch(console.error);
+
+  const serverIds = [
+    '635802085601968158', // 협곡에휘핑크림
+    '280311002656931844', // 롤리데이
+    '765934529231716365', // LRZ
+  ];
+
+  for (let serverId of serverIds) {
+    rest
+      .put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, serverId), {
+        body: commandJsons,
+      })
+      .then((data) => console.log(`Successfully registered ${data.length} application commands.`))
+      .catch(console.error);
+  }
 };
