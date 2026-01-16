@@ -119,6 +119,7 @@ module.exports = async (app) => {
     '635802085601968158', // 협곡에휘핑크림
     '280311002656931844', // 롤리데이
     '765934529231716365', // LRZ
+    '1235540411230191626',
   ];
 
   for (let serverId of serverIds) {
@@ -126,7 +127,7 @@ module.exports = async (app) => {
       .put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, serverId), {
         body: commandJsons,
       })
-      .then((data) => console.log(`Successfully registered ${data.length} application commands.`))
+      .then((data) => console.log(`[${serverId}] Successfully registered ${data.length} application commands.`))
       .catch(console.error);
   }
 };
