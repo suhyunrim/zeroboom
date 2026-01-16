@@ -58,6 +58,9 @@ module.exports.getSummonerByName = async (name) => {
       }
     } catch (e) {
       logger.error(e.stack);
+      if (e.response.status === 404)
+        return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 }
+
       return { result: found || e.message, status: 501 };
     }
   } else if (isExpired(found.updatedAt)) {
@@ -66,6 +69,9 @@ module.exports.getSummonerByName = async (name) => {
       await found.update(summonerData);
     } catch (e) {
       logger.error(e.stack);
+      if (e.response.status === 404)
+        return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 }
+
       return { result: found || e.message, status: 501 };
     }
   }
@@ -146,6 +152,9 @@ module.exports.getPositions = async (name) => {
     }
   } catch (e) {
     logger.error(e.stack);
+    if (e.response.status === 404)
+        return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 }
+    
     return { result: found || e.message, status: 501 };
   }
 
