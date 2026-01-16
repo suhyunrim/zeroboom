@@ -10,5 +10,5 @@ services:
       - ./docker/data=/var/lib/mysql
         
   app:
-    container_name: camille
+    container_name: zeroboom-bot
     build: .

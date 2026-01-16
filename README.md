@@ -1,4 +1,4 @@
-# Camille
+# ZeroBoom Bot
 
 LOL Community Management Bot Service for Whipping Cream
 
@@ -68,7 +68,7 @@ Give an example
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/WhippingCream/camille/tags).
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/suhyunrim/zeroboom/tags).
 
 ### Major Version Up
 

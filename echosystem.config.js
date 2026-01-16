@@ -1,6 +1,6 @@
 module.exports = { 
   apps: [{
-    name    : "camille-app",
+    name    : "zeroboom-bot",
     script  : "./src/app.js"
   }]
 }
