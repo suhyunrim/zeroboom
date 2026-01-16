@@ -4,6 +4,8 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 
+const MAX_MATCH_COUNT = 3
+
 exports.run = async (groupName, interaction) => {
   const userPool = new Array();
   const team1 = new Array();
@@ -48,7 +50,7 @@ exports.run = async (groupName, interaction) => {
     return true;
   });
 
-  result.result = result.result.slice(0, 6);
+  result.result = result.result.slice(0, MAX_MATCH_COUNT);
 
   if (result.status !== 200) {
     return result.result;
@@ -57,7 +59,7 @@ exports.run = async (groupName, interaction) => {
   // 디스코드 버튼은 한번에 최대 5개만 삽입 가능해서 3개씩 두줄로 처리 (by zeroboom)
   const rows = [];
   const time = Date.now();
-  for (let i = 0; i < (result.result.length < 3 ? 1 : 2); ++i) {
+  for (let i = 0; i < (result.result.length <= 3 ? 1 : 2); ++i) {
     rows.push(new ActionRowBuilder());
     for (let j = i * 3; j < Math.min(result.result.length, (i + 1) * 3); j++) {
       const match = result.result[j];
