@@ -97,7 +97,7 @@ exports.reactButton = async (interaction, match) => {
         where: { name: members[j] },
       });
       const userData = await models.user.findOne({
-        where: { groupId: group.id, riotId: summonerData.riotId },
+        where: { groupId: group.id, puuid: summonerData.puuid },
       });
       const rating = userData.defaultRating + userData.additionalRating;
       teams[i].push({

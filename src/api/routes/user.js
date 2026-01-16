@@ -32,7 +32,7 @@ module.exports = (app) => {
       // const name = jwtDecoded.acct.game_name;
       // const accountId = jwtDecoded.lol[0].uid;
       // const token = loginCookies['__Secure-id_token'];
-      if (id != 'loliday' || password != '1234') return res.status(520).json({ result: 'erorr!' });
+      //if (id != 'loliday' || password != '1234') return res.status(520).json({ result: 'erorr!' });
 
       const name = 'ZeroBoom';
       const puuid = 'q2OE3y7njNK6pcYTD1Gb7SmiGUQwI4PFfu_r19rnBxjYMENzcUe3Ik1HcXQRDzfAJIYtZzLrPOCUiQ';
@@ -76,7 +76,7 @@ module.exports = (app) => {
     try {
       const group = await groupController.getByName(groupName);
       const summoner = await summonerController.getSummonerByName(userName);
-      const userInfo = await userController.getRating(group.id, summoner.result.riotId);
+      const userInfo = await userController.getRating(group.id, summoner.result.puuid);
       return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);

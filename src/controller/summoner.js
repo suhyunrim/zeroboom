@@ -1,6 +1,6 @@
 const moment = require('moment');
 const models = require('../db/models');
-const { getSummonerByName, getRankDataBySummonerId, getMatchIds, getMatchData } = require('../services/riot-api');
+const { getSummonerByName, getRankDataByPuuid, getMatchIds, getMatchData } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
 const isExpired = (time) => {
@@ -15,11 +15,10 @@ const isExpired = (time) => {
 
 const generateSummonerData = async (name) => {
   const summonerResult = await getSummonerByName(name);
-  const leagueResult = await getRankDataBySummonerId(summonerResult.id);
+  const leagueResult = await getRankDataByPuuid(summonerResult.puuid);
   const soloRankData = leagueResult.find((elem) => elem.queueType == 'RANKED_SOLO_5x5');
 
   return {
-    riotId: summonerResult.id,
     encryptedAccountId: summonerResult.accountId,
     puuid: summonerResult.puuid,
     name,
@@ -45,7 +44,7 @@ module.exports.getSummonerByName = async (name) => {
       const summonerData = await generateSummonerData(name);
 
       found = await models.summoner.findOne({
-        where: { riotId: summonerData.riotId },
+        where: { puuid: summonerData.puuid },
       });
       if (!found) {
         const created = await models.summoner.create(summonerData);
@@ -95,7 +94,7 @@ module.exports.getPositions = async (name) => {
       const summonerData = await generateSummonerData(name);
 
       found = await models.summoner.findOne({
-        where: { riotId: summonerData.riotId },
+        where: { puuid: summonerData.puuid },
       });
 
       if (!found) {
@@ -112,7 +111,7 @@ module.exports.getPositions = async (name) => {
       const matchids = await getMatchIds(name, 50);
       for (let i = 0; i < matchids.length; ++i) {
         const matchData = await getMatchData(matchids[i]);
-        const summonerData = matchData.info.participants.find((elem) => elem.summonerId == found.riotId);
+        const summonerData = matchData.info.participants.find((elem) => elem.summonerId == found.puuid);
         if (!summonerData.teamPosition) {
           continue;
         }

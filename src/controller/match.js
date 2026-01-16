@@ -83,7 +83,7 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
     const user = await models.user.findOne({
       where: {
         groupId: group.id,
-        riotId: summoner.riotId,
+        puuid: summoner.puuid,
       },
     });
     return user.defaultRating + user.additionalRating;
@@ -162,14 +162,14 @@ module.exports.generateMatch = async (
       }
 
       const summoner = result.result;
-      if (!summoners[summoner.riotId]) {
-        summoners[summoner.riotId] = summoner;
+      if (!summoners[summoner.puuid]) {
+        summoners[summoner.puuid] = summoner;
       }
 
       return await models.user.findOne({
         where: {
           groupId: group.id,
-          riotId: summoner.riotId,
+          puuid: summoner.puuid,
         },
       });
     };

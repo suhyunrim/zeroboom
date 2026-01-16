@@ -81,7 +81,6 @@ const registerUser = async (groupName, summonerName, tier) => {
 
   try {
     await models.user.upsert({
-      riotId: summoner.riotId,
       encryptedAccountId: summoner.encryptedAccountId,
       puuid: summoner.puuid,
       groupId: group.id,

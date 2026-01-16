@@ -100,18 +100,18 @@ module.exports.getRanking = async (groupName) => {
 
   users.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
 
-  const userIds = users.map((elem) => elem.riotId);
+  const userIds = users.map((elem) => elem.puuid);
   const summoners = await models.summoner.findAll({
-    where: { riotId: userIds },
+    where: { puuid: userIds },
   });
   const summonerObj = summoners.reduce((obj, v) => {
-    obj[v.riotId] = v;
+    obj[v.puuid] = v;
     return obj;
   }, {});
 
   let result = users.map((elem, index) => {
     return {
-      riotId: elem.riotId,
+      puuid: elem.puuid,
       ranking: index + 1,
       rating: elem.defaultRating + elem.additionalRating,
       win: elem.win,
@@ -121,7 +121,7 @@ module.exports.getRanking = async (groupName) => {
   });
 
   result.forEach((user) => {
-    user.name = summonerObj[user.riotId].name;
+    user.name = summonerObj[user.puuid].name;
   });
 
   return { result: result, status: 200 };

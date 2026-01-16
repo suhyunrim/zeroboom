@@ -87,10 +87,10 @@ const getSummonerByName = async (summonerName) => {
 
 exports.getSummonerByName = getSummonerByName;
 
-const getRankDataBySummonerId = async (summonerId) => {
+const getRankDataByPuuid = async (puuid) => {
   const result = await axios({
     method:'get',
-    url:`https://kr.api.riotgames.com/lol/league/v4/entries/by-summoner/${summonerId}`,
+    url:`https://kr.api.riotgames.com/lol/league/v4/entries/by-puuid/${puuid}`,
     params: {
       api_key: RIOT_API_KEY,
     }
@@ -98,13 +98,13 @@ const getRankDataBySummonerId = async (summonerId) => {
 
   if (result.status !== 200)
     throw new Error(
-      `riotAPI.getRankDataBySummonerId(${summonerId}) => ${result.status}`,
+      `riotAPI.getRankDataByPuuid(${puuid}) => ${result.status}`,
     );
 
   return result.data;
 };
 
-exports.getRankDataBySummonerId = getRankDataBySummonerId;
+exports.getRankDataByPuuid = getRankDataByPuuid;
 
 // 이하 동작 안함 (by zeroboom)
 

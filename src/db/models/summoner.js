@@ -2,7 +2,7 @@ module.exports = (sequelize, DataTypes) => {
   const summoner = sequelize.define(
     'summoner',
     {
-      riotId: {
+      puuid: {
         type: DataTypes.STRING,
         primaryKey: true,
       },
@@ -10,9 +10,6 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
       },
       encryptedAccountId: {
-        type: DataTypes.STRING,
-      },
-      puuid: {
         type: DataTypes.STRING,
       },
       name: {
