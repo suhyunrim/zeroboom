@@ -83,8 +83,21 @@ const getTierStep = (rating) => {
     if (isNonStepTier(name)) {
       return 1;
     }
-  
+
     return Math.ceil((100 - (rating - tierRating)) / 25);
   }
 }
 exports.getTierStep = getTierStep;
+
+const formatTier = (rating) => {
+  const tierName = getTierName(rating);
+  if (!tierName) return 'UNRANKED';
+
+  if (isNonStepTier(tierName)) {
+    return tierName;
+  }
+
+  const step = getTierStep(rating);
+  return `${tierName} ${tierSteps[step - 1] || 'IV'}`;
+};
+exports.formatTier = formatTier;

@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { celebrate, Segments, Joi } = require('celebrate');
 const { logger } = require('../../loaders/logger');
 const controller = require('../../controller/match');
 
@@ -51,4 +52,18 @@ module.exports = (app) => {
     const result = await controller.getMatchHistory(groupName, from, to);
     return res.status(result.status).send(result.result);
   });
+
+  route.get(
+    '/history/:groupId',
+    celebrate({
+      [Segments.PARAMS]: Joi.object({
+        groupId: Joi.number().integer().required(),
+      }),
+    }),
+    async (req, res) => {
+      const { groupId } = req.params;
+      const result = await controller.getMatchHistoryByGroupId(groupId);
+      return res.status(result.status).json(result.result);
+    },
+  );
 };

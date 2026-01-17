@@ -16,6 +16,7 @@ const { logger } = require('../loaders/logger');
 const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
+const { formatTier } = require('../utils/tierUtils');
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
@@ -490,3 +491,126 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     status: 200,
   }
 }
+
+module.exports.getMatchHistoryByGroupId = async (groupId) => {
+  const group = await models.group.findByPk(groupId);
+  if (!group) {
+    return { status: 404, result: { error: 'Group not found' } };
+  }
+
+  // 해당 그룹의 모든 유저 조회
+  const groupUsers = await models.user.findAll({
+    where: { groupId: group.id },
+  });
+
+  // 유저별 현재 레이팅 상태 초기화 (defaultRating에서 시작)
+  const userRatings = {};
+  for (const user of groupUsers) {
+    userRatings[user.puuid] = user.defaultRating;
+  }
+
+  // 해당 그룹의 완료된 모든 매치를 시간순(오래된 순)으로 조회
+  const matches = await models.match.findAll({
+    where: {
+      groupId: group.id,
+      winTeam: { [Op.ne]: null },
+    },
+    order: [['createdAt', 'ASC']],
+  });
+
+  // 소환사 이름 캐시
+  const summonerCache = {};
+  const getSummonerName = async (puuid) => {
+    if (!summonerCache[puuid]) {
+      const summoner = await models.summoner.findOne({ where: { puuid } });
+      summonerCache[puuid] = summoner ? summoner.name : 'Unknown';
+    }
+    return summonerCache[puuid];
+  };
+
+  // 매치별 스냅샷 저장
+  const matchSnapshots = [];
+
+  for (const match of matches) {
+    const team1Data = match.team1; // [[puuid, savedRating], ...]
+    const team2Data = match.team2;
+
+    // 팀 플레이어 정보 구성 (현재 시점의 레이팅 사용)
+    const buildTeamPlayers = async (teamData) => {
+      const players = [];
+      let totalRating = 0;
+      let validCount = 0;
+
+      for (const [puuid] of teamData) {
+        const rating = userRatings[puuid] ?? 500; // 그룹에 없는 유저는 기본값 500
+        const name = await getSummonerName(puuid);
+        const tier = formatTier(rating);
+
+        players.push({ name, rating: Math.round(rating), tier });
+        totalRating += rating;
+        validCount++;
+      }
+
+      return {
+        players,
+        avgRating: validCount > 0 ? Math.round(totalRating / validCount) : 0,
+      };
+    };
+
+    const team1 = await buildTeamPlayers(team1Data);
+    const team2 = await buildTeamPlayers(team2Data);
+
+    // 레이팅 증감 계산
+    const team1AvgRating = team1.avgRating;
+    const team2AvgRating = team2.avgRating;
+
+    let team1RatingChange, team2RatingChange;
+    if (match.winTeam === 1) {
+      team1RatingChange = ratingCalculator.newRatingIfWon(team1AvgRating, team2AvgRating) - team1AvgRating;
+      team2RatingChange = ratingCalculator.newRatingIfLost(team2AvgRating, team1AvgRating) - team2AvgRating;
+    } else {
+      team1RatingChange = ratingCalculator.newRatingIfLost(team1AvgRating, team2AvgRating) - team1AvgRating;
+      team2RatingChange = ratingCalculator.newRatingIfWon(team2AvgRating, team1AvgRating) - team2AvgRating;
+    }
+
+    // 스냅샷 저장
+    matchSnapshots.push({
+      gameId: match.gameId,
+      createdAt: match.createdAt,
+      winTeam: match.winTeam,
+      team1: {
+        players: team1.players,
+        avgRating: team1.avgRating,
+        ratingChange: Math.round(team1RatingChange),
+      },
+      team2: {
+        players: team2.players,
+        avgRating: team2.avgRating,
+        ratingChange: Math.round(team2RatingChange),
+      },
+    });
+
+    // 유저별 레이팅 업데이트 (다음 매치를 위해)
+    for (const [puuid] of team1Data) {
+      if (userRatings[puuid] !== undefined) {
+        userRatings[puuid] += team1RatingChange;
+      }
+    }
+    for (const [puuid] of team2Data) {
+      if (userRatings[puuid] !== undefined) {
+        userRatings[puuid] += team2RatingChange;
+      }
+    }
+  }
+
+  // 최근 순으로 정렬
+  matchSnapshots.reverse();
+
+  return {
+    status: 200,
+    result: {
+      matches: matchSnapshots,
+      total: matchSnapshots.length,
+    },
+  };
+};
