@@ -248,10 +248,10 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
     let line;
     if (data.position === '상관X') {
-      line = displayName;
+      line = `\`${displayName}\``;
     } else {
       const posEmoji = POSITION_EMOJI[data.position];
-      line = `${posEmoji} ${data.position}: ${displayName}`;
+      line = `\`${posEmoji} ${data.position}: ${displayName}\``;
     }
 
     const entry = { line, position: data.position };
@@ -297,6 +297,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
   const rows = [];
 
+  // 유저 버튼 (한 줄에 5개씩)
   for (let start = 0; start < pickedUsers.length; start += 5) {
     const slice = pickedUsers.slice(start, start + 5);
     const row = new ActionRowBuilder().addComponents(
