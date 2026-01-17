@@ -1,53 +1,11 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const matchMake = require('./match-make');
 const models = require('../db/models');
+const pickUsers = require('./pick-users');
 
 const pickCount = 10;
-const maxToggleMembers = 24; // 버튼 최대 개수 (5x5=25, 마지막에 뽑기 버튼)
-
-const specialChars = ['(', ')', '-', '_', '[', ']', '{', '}', '|', '\\', ':', '"', "'", '<', '>', ',', '.', '/'];
-
-function findSpecialCharBeforeIndex(str, index) {
-  const substring = str.slice(0, index);
-  for (let i = substring.length - 1; i >= 0; i--) {
-    if (specialChars.includes(substring[i])) {
-      return i;
-    }
-  }
-
-  return 0;
-}
-
-function findSpecialCharAfterIndex(str, index) {
-  const substring = str.slice(index);
-
-  for (let i = 0; i < substring.length; i++) {
-    if (specialChars.includes(substring[i])) {
-      return index + i;
-    }
-  }
-
-  return str.length;
-}
-
-const getLOLNickname = (nickname) => {
-  const sharpIndex = nickname.indexOf('#');
-  if (sharpIndex === -1) return nickname;
-  const specialCharIndex1 = findSpecialCharBeforeIndex(nickname, sharpIndex);
-  const specialCharIndex2 = findSpecialCharAfterIndex(nickname, sharpIndex);
-  return nickname.substring(specialCharIndex1 + 1, specialCharIndex2);
-};
-
-// 멤버 정보를 가져오는 헬퍼 함수
-const getMemberInfo = (member) => {
-  const nickname = member.nickname != null ? member.nickname : member.user.username;
-  const lolNickname = getLOLNickname(nickname);
-  return {
-    id: member.id,
-    nickname,
-    lolNickname,
-  };
-};
+const testMemberCount = 15;
+const maxToggleMembers = 24;
 
 // 토글 UI 버튼 생성 함수 (lolNickname을 키로 사용)
 const buildToggleButtons = (memberList, excludedNames, timeKey) => {
@@ -96,26 +54,50 @@ const buildToggleButtons = (memberList, excludedNames, timeKey) => {
   return rows;
 };
 
+// 테스트 모드: 그룹에서 랜덤 15명 가져오기
+const getTestMembers = async (groupName) => {
+  const group = await models.group.findOne({
+    where: { groupName },
+  });
+
+  if (!group) {
+    return [];
+  }
+
+  // 그룹에 속한 유저들 조회
+  const users = await models.user.findAll({
+    where: { groupId: group.id },
+  });
+
+  if (users.length === 0) {
+    return [];
+  }
+
+  // puuid 목록으로 소환사 정보 조회
+  const puuids = users.map((u) => u.puuid);
+  const summoners = await models.summoner.findAll({
+    where: { puuid: puuids },
+  });
+
+  // 소환사 정보를 멤버 형식으로 변환
+  const memberList = summoners.map((s) => ({
+    id: s.puuid,
+    nickname: s.name,
+    lolNickname: s.name,
+  }));
+
+  // 랜덤 섞기 후 15명 선택
+  const shuffled = memberList.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, testMemberCount);
+};
+
 exports.run = async (groupName, interaction) => {
-  // 일반 모드: 음성채널 멤버
-  if (!interaction.member.voice.channelId) {
-    return '입장해있는 음성채널이 없습니다.';
-  }
+  // 테스트 모드: 그룹에서 랜덤 15명
+  const memberList = await getTestMembers(groupName);
+  const channelName = '테스트 모드';
 
-  const members = interaction.member.voice.channel.members;
-  const channelName = interaction.member.voice.channel.name;
-
-  if (members.size < pickCount) {
-    return `채널에 ${members.size}명이 있습니다. 최소 ${pickCount}명이 필요합니다.`;
-  }
-
-  if (members.size > maxToggleMembers) {
-    return `채널에 ${members.size}명이 있습니다. 토글 UI는 최대 ${maxToggleMembers}명까지 지원합니다.`;
-  }
-
-  const memberList = [];
-  for (const [, member] of members) {
-    memberList.push(getMemberInfo(member));
+  if (memberList.length < pickCount) {
+    return `그룹에 등록된 유저가 ${memberList.length}명입니다. 최소 ${pickCount}명이 필요합니다.`;
   }
 
   const time = Date.now();
@@ -257,12 +239,12 @@ exports.reactButton = async (interaction, data) => {
 exports.conf = {
   enabled: true,
   requireGroup: true,
-  aliases: ['인원뽑기'],
+  aliases: ['테스트_인원뽑기'],
   args: [],
 };
 
 exports.help = {
-  name: 'pick-users',
-  description: '제외할 인원을 선택 후 10명 뽑기',
-  usage: 'pick-users',
+  name: 'test-pick-users',
+  description: '그룹에서 랜덤 15명으로 테스트 뽑기',
+  usage: 'test-pick-users',
 };

@@ -21,12 +21,18 @@ class CommandList {
 		for (let command of this.commands) {
 			const commandName = command.conf.aliases[0]; // 일단 첫번째 커맨드만
 			const slashCommand = new SlashCommandBuilder().setName(commandName).setDescription(command.help.description);
-			for (let argument of command.conf.args) { 
+			for (let argument of command.conf.args) {
+				const isRequired = argument[3] !== false; // 기본값은 true
 				if (argument[0] == 'string') {
 					slashCommand.addStringOption(option =>
 						option.setName(argument[1])
 								.setDescription(argument[2])
-								.setRequired(true));
+								.setRequired(isRequired));
+				} else if (argument[0] == 'boolean') {
+					slashCommand.addBooleanOption(option =>
+						option.setName(argument[1])
+								.setDescription(argument[2])
+								.setRequired(isRequired));
 				}
 			}
 			ret.push(slashCommand);
