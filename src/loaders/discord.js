@@ -3,6 +3,7 @@ const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
 const matchController = require('../controller/match');
+const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 
 module.exports = async (app) => {
   const client = new Client({
@@ -318,9 +319,8 @@ module.exports = async (app) => {
         }
 
         // ephemeral 메시지 닫기
-        const teamEmoji = selectedTeam === '1팀' ? '🔵' : selectedTeam === '2팀' ? '🔴' : '🎲';
         await interaction.update({
-          content: `✅ **${nickname}** 팀 설정: ${teamEmoji} ${selectedTeam}`,
+          content: `✅ **${nickname}** 팀 설정: ${TEAM_EMOJI[selectedTeam]} ${selectedTeam}`,
           components: []
         });
         return;
@@ -350,12 +350,8 @@ module.exports = async (app) => {
         }
 
         // ephemeral 메시지 닫기
-        const posEmoji = {
-          '상관X': '🎲', '탑': '⚔️', '정글': '🐺',
-          '미드': '✨', '원딜': '🏹', '서폿': '💖'
-        }[selectedPosition];
         await interaction.update({
-          content: `✅ **${nickname}** 포지션 설정: ${posEmoji} ${selectedPosition}`,
+          content: `✅ **${nickname}** 포지션 설정: ${POSITION_EMOJI[selectedPosition]} ${selectedPosition}`,
           components: []
         });
         return;

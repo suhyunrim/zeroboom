@@ -1,42 +1,17 @@
 const moment = require('moment');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const matchMake = require('./match-make');
-const pickUsers = require('./pick-users');
+const models = require('../db/models');
+const utils = require('../utils/pick-users-utils');
 
-const pickCount = 10;
+const {
+  PICK_COUNT,
+  getLOLNickname,
+  buildResultButtons,
+  buildPositionUI,
+  createReactButtonHandler,
+} = utils;
+
 const fixedMember = {};
-
-const specialChars = ['(', ')', '-', '_', '[', ']', '{', '}', '|', '\\', ':', '"', "'", '<', '>', ',', '.', '/'];
-
-function findSpecialCharBeforeIndex(str, index) {
-  const substring = str.slice(0, index);
-  for (let i = substring.length - 1; i >= 0; i--) {
-    if (specialChars.includes(substring[i])) {
-      return i;
-    }
-  }
-
-  return 0;
-}
-
-function findSpecialCharAfterIndex(str, index) {
-  const substring = str.slice(index);
-
-  for (let i = 0; i < substring.length; i++) {
-    if (specialChars.includes(substring[i])) {
-      return index + i;
-    }
-  }
-
-  return str.length;
-}
-
-const getLOLNickname = (nickname) => {
-  const sharpIndex = nickname.indexOf('#');
-  const specialCharIndex1 = findSpecialCharBeforeIndex(nickname, sharpIndex);
-  const specialCharIndex2 = findSpecialCharAfterIndex(nickname, sharpIndex);
-  return nickname.substring(specialCharIndex1 + 1, specialCharIndex2);
-};
 
 exports.run = async (groupName, interaction) => {
   if (!interaction.member.voice.channelId) {
@@ -66,7 +41,7 @@ exports.run = async (groupName, interaction) => {
   }
 
   pickedUsers = pickedUsers.concat(
-    members.filter((member) => !pickedUsers.includes(member)).random(pickCount - pickedUsers.length),
+    members.filter((member) => !pickedUsers.includes(member)).random(PICK_COUNT - pickedUsers.length),
   );
 
   const unpickedUsers = members.filter((member) => !pickedUsers.includes(member)).map((member) => member);
@@ -91,7 +66,7 @@ exports.run = async (groupName, interaction) => {
 
   let message = `**${interaction.member.voice.channel.name}** 채널에서 **${
     members.size
-  }명** 중 **${pickCount}명**을 뽑습니다!
+  }명** 중 **${PICK_COUNT}명**을 뽑습니다!
 
    \`🎉 축하합니다! 🎉\`
    :robot:: /매칭생성 ${commandStr.join(' ')}`;
@@ -103,25 +78,7 @@ exports.run = async (groupName, interaction) => {
   }
 
   const time = Date.now();
-  const row = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`pickUsers|${time}|copy`)
-        .setLabel('📋 명령어 복사')
-        .setStyle(ButtonStyle.Secondary),
-    )
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`pickUsers|${time}|match`)
-        .setLabel('🎮 바로 매칭생성')
-        .setStyle(ButtonStyle.Primary),
-    )
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`pickUsers|${time}|position`)
-        .setLabel('🎯 포지션 정하기')
-        .setStyle(ButtonStyle.Success),
-    );
+  const row = buildResultButtons(time);
 
   return {
     content: message,
@@ -132,59 +89,7 @@ exports.run = async (groupName, interaction) => {
   };
 };
 
-exports.reactButton = async (interaction, data) => {
-  const customId = interaction.customId;
-  const action = customId.split('|')[2];
-
-  if (action === 'copy') {
-    return {
-      content: `\`\`\`${data.commandStr}\`\`\`\n위 명령어를 복사해서 사용하세요!`,
-      ephemeral: true,
-    };
-  }
-
-  if (action === 'match') {
-    const fakeOptions = data.pickedUsers.map((name, index) => ({
-      name: `유저${index + 1}`,
-      value: name,
-    }));
-
-    const fakeInteraction = {
-      ...interaction,
-      options: {
-        data: fakeOptions,
-      },
-    };
-
-    const group = await require('../db/models').group.findOne({
-      where: { discordGuildId: interaction.guildId },
-    });
-
-    if (!group) {
-      return { content: '그룹 정보를 찾을 수 없습니다.', ephemeral: true };
-    }
-
-    const result = await matchMake.run(group.groupName, fakeInteraction);
-    return result;
-  }
-
-  if (action === 'position') {
-    // 포지션 설정 UI로 전환 (pick-users.js의 함수 사용)
-    const timeKey = customId.split('|')[1];
-    const positionData = {};
-    data.pickedUsers.forEach((nickname) => {
-      positionData[nickname] = { team: '랜덤팀', position: '상관X' };
-    });
-
-    const ui = pickUsers.buildPositionUI(data.pickedUsers, positionData, timeKey);
-    return {
-      ...ui,
-      isPositionMode: true,
-      pickedUsers: data.pickedUsers,
-      positionData,
-    };
-  }
-};
+exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 
 exports.conf = {
   enabled: true,
