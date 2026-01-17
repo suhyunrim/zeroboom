@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const matchMake = require('./match-make');
 const models = require('../db/models');
 
@@ -207,6 +207,12 @@ exports.executePick = async (interaction, data) => {
         .setCustomId(`pickUsers|${time}|match`)
         .setLabel('🎮 바로 매칭생성')
         .setStyle(ButtonStyle.Primary),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pickUsers|${time}|position`)
+        .setLabel('🎯 포지션 정하기')
+        .setStyle(ButtonStyle.Success),
     );
 
   return {
@@ -214,6 +220,113 @@ exports.executePick = async (interaction, data) => {
     components: [row],
     pickedUsers: pickedNicknames,
     commandStr: `/매칭생성 ${commandStr.join(' ')}`,
+  };
+};
+
+// 포지션 설정 메인 UI - 유저 버튼 리스트
+exports.buildPositionUI = (pickedUsers, positionData, timeKey) => {
+  // 전체 상태 요약 텍스트
+  let summaryText = '**🎯 포지션 설정**\n\n';
+  const team1 = [];
+  const team2 = [];
+  const random = [];
+
+  pickedUsers.forEach((nickname, idx) => {
+    const data = positionData[nickname];
+    const teamEmoji = data.team === '랜덤팀' ? '🎲' : data.team === '1팀' ? '🔵' : '🔴';
+    const posEmoji = {
+      '상관X': '🎲', '탑': '🛡️', '정글': '🌲',
+      '미드': '🔥', '원딜': '🏹', '서폿': '💚'
+    }[data.position];
+    const line = `${teamEmoji}${posEmoji} ${idx + 1}. ${nickname} - ${data.team} / ${data.position}`;
+
+    if (data.team === '1팀') team1.push(line);
+    else if (data.team === '2팀') team2.push(line);
+    else random.push(line);
+  });
+
+  if (team1.length > 0) summaryText += `**🔵 1팀:**\n${team1.join('\n')}\n\n`;
+  if (team2.length > 0) summaryText += `**🔴 2팀:**\n${team2.join('\n')}\n\n`;
+  if (random.length > 0) summaryText += `**🎲 랜덤팀:**\n${random.join('\n')}\n\n`;
+
+  summaryText += '━━━━━━━━━━━━━━━━━━━━\n**유저 버튼을 클릭**하여 팀/포지션을 설정하세요';
+
+  const rows = [];
+
+  // 10명 유저 버튼 (2줄, 각 줄당 5개)
+  for (let start = 0; start < pickedUsers.length; start += 5) {
+    const slice = pickedUsers.slice(start, start + 5);
+    const row = new ActionRowBuilder().addComponents(
+      slice.map((nickname, idx) => {
+        const globalIdx = start + idx;
+        const displayName = nickname.length > 12 ? nickname.substring(0, 10) + '..' : nickname;
+        return new ButtonBuilder()
+          .setCustomId(`posEditUser|${timeKey}|${nickname}`)
+          .setLabel(`${globalIdx + 1}. ${displayName}`)
+          .setStyle(ButtonStyle.Secondary);
+      })
+    );
+    rows.push(row);
+  }
+
+  // 매칭 생성 버튼
+  const confirmRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`posConfirm|${timeKey}`)
+      .setLabel('🎮 매칭 생성')
+      .setStyle(ButtonStyle.Success)
+  );
+
+  rows.push(confirmRow);
+
+  return {
+    content: summaryText,
+    components: rows,
+  };
+};
+
+// 개별 유저 설정 UI (ephemeral)
+exports.buildUserEditUI = (nickname, positionData, timeKey) => {
+  const data = positionData[nickname];
+
+  const teamEmoji = data.team === '랜덤팀' ? '🎲' : data.team === '1팀' ? '🔵' : '🔴';
+  const posEmoji = {
+    '상관X': '🎲', '탑': '🛡️', '정글': '🌲',
+    '미드': '🔥', '원딜': '🏹', '서폿': '💚'
+  }[data.position];
+
+  const content = `**⚙️ ${nickname} 설정**\n\n현재: ${teamEmoji} ${data.team} / ${posEmoji} ${data.position}`;
+
+  // 팀 선택 SelectMenu
+  const teamSelect = new StringSelectMenuBuilder()
+    .setCustomId(`posSelectTeam|${timeKey}|${nickname}`)
+    .setPlaceholder(data.team ? `현재: ${data.team}` : '팀 선택')
+    .addOptions([
+      { label: '랜덤팀', value: '랜덤팀', emoji: '🎲', description: '자동으로 팀 배정' },
+      { label: '1팀', value: '1팀', emoji: '🔵', description: 'Blue Side' },
+      { label: '2팀', value: '2팀', emoji: '🔴', description: 'Red Side' }
+    ]);
+
+  // 포지션 선택 SelectMenu
+  const positionSelect = new StringSelectMenuBuilder()
+    .setCustomId(`posSelectPos|${timeKey}|${nickname}`)
+    .setPlaceholder(data.position ? `현재: ${data.position}` : '포지션 선택')
+    .addOptions([
+      { label: '상관X', value: '상관X', emoji: '🎲', description: '자동으로 포지션 배정' },
+      { label: '탑', value: '탑', emoji: '🛡️', description: 'Top Lane' },
+      { label: '정글', value: '정글', emoji: '🌲', description: 'Jungle' },
+      { label: '미드', value: '미드', emoji: '🔥', description: 'Mid Lane' },
+      { label: '원딜', value: '원딜', emoji: '🏹', description: 'ADC' },
+      { label: '서폿', value: '서폿', emoji: '💚', description: 'Support' }
+    ]);
+
+  return {
+    content,
+    components: [
+      new ActionRowBuilder().addComponents(teamSelect),
+      new ActionRowBuilder().addComponents(positionSelect)
+    ],
+    ephemeral: true,
   };
 };
 
@@ -251,6 +364,23 @@ exports.reactButton = async (interaction, data) => {
 
     const result = await matchMake.run(group.groupName, fakeInteraction);
     return result;
+  }
+
+  if (action === 'position') {
+    // 포지션 설정 UI로 전환
+    const timeKey = customId.split('|')[1];
+    const positionData = {};
+    data.pickedUsers.forEach((nickname) => {
+      positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+    });
+
+    const ui = exports.buildPositionUI(data.pickedUsers, positionData, timeKey);
+    return {
+      ...ui,
+      isPositionMode: true,
+      pickedUsers: data.pickedUsers,
+      positionData,
+    };
   }
 };
 

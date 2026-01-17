@@ -144,11 +144,101 @@ module.exports = async (app) => {
           const pickUsersCommand = commandList.get('인원뽑기') || commandList.get('랜덤인원뽑기');
           const output = await pickUsersCommand.reactButton(interaction, data);
           if (output) {
-            await interaction.reply(output);
+            if (output.isPositionMode) {
+              // 포지션 모드 데이터 저장
+              const reply = await interaction.update(output);
+              pickUsersData.set(timeKey, {
+                ...data,
+                isPositionMode: true,
+                positionData: output.positionData,
+                mainMessage: reply, // 메인 메시지 참조 저장
+              });
+            } else {
+              await interaction.reply(output);
+            }
           }
         } else {
           await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
         }
+        return;
+      }
+
+      // posEditUser 버튼 (유저별 설정 버튼)
+      if (split[0] === 'posEditUser') {
+        const timeKey = split[1];
+        const nickname = split[2];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const pickUsersCommand = commandList.get('인원뽑기');
+
+        // 메인 UI 먼저 업데이트 (현재 상태 반영)
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        const reply = await interaction.update(mainUI);
+
+        // 메인 메시지 참조 저장
+        data.mainMessage = reply;
+        pickUsersData.set(timeKey, data);
+
+        // ephemeral로 개인 설정창 표시
+        const editUI = pickUsersCommand.buildUserEditUI(nickname, data.positionData, timeKey);
+        await interaction.followUp(editUI);
+        return;
+      }
+
+
+      // posConfirm 버튼 (매칭 생성)
+      if (split[0] === 'posConfirm') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        // 팀 정보 기반으로 매칭 생성
+        const fakeOptions = data.pickedUsers.map((nickname, index) => {
+          const pData = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+          let value = nickname;
+
+          if (pData.team === '1팀') {
+            value = `${nickname}@1`;
+          } else if (pData.team === '2팀') {
+            value = `${nickname}@2`;
+          }
+
+          return {
+            name: `유저${index + 1}`,
+            value: value,
+          };
+        });
+
+        const fakeInteraction = {
+          ...interaction,
+          options: {
+            data: fakeOptions,
+          },
+        };
+
+        const group = await models.group.findOne({
+          where: { discordGuildId: interaction.guildId },
+        });
+
+        if (!group) {
+          await interaction.update({ content: '그룹 정보를 찾을 수 없습니다.', components: [] });
+          return;
+        }
+
+        const matchMakeCommand = commandList.get('매칭생성');
+        const result = await matchMakeCommand.run(group.groupName, fakeInteraction);
+
+        await interaction.update({ content: '매칭을 생성합니다...', components: [] });
+        await interaction.followUp(result);
         return;
       }
 
@@ -199,7 +289,72 @@ module.exports = async (app) => {
     try {
       const split = interaction.customId.split('|');
 
-      // 추후 Select Menu 핸들러 추가 예정
+      // posSelectTeam SelectMenu (팀 선택)
+      if (split[0] === 'posSelectTeam') {
+        const timeKey = split[1];
+        const nickname = split[2];
+        const selectedTeam = interaction.values[0];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        // 데이터 업데이트
+        data.positionData[nickname].team = selectedTeam;
+        pickUsersData.set(timeKey, data);
+
+        // 메인 메시지 업데이트
+        if (data.mainMessage) {
+          const pickUsersCommand = commandList.get('인원뽑기');
+          const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+          await data.mainMessage.edit(mainUI);
+        }
+
+        // ephemeral 메시지 닫기
+        const teamEmoji = selectedTeam === '1팀' ? '🔵' : selectedTeam === '2팀' ? '🔴' : '🎲';
+        await interaction.update({
+          content: `✅ **${nickname}** 팀 설정: ${teamEmoji} ${selectedTeam}`,
+          components: []
+        });
+        return;
+      }
+
+      // posSelectPos SelectMenu (포지션 선택)
+      if (split[0] === 'posSelectPos') {
+        const timeKey = split[1];
+        const nickname = split[2];
+        const selectedPosition = interaction.values[0];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        // 데이터 업데이트
+        data.positionData[nickname].position = selectedPosition;
+        pickUsersData.set(timeKey, data);
+
+        // 메인 메시지 업데이트
+        if (data.mainMessage) {
+          const pickUsersCommand = commandList.get('인원뽑기');
+          const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+          await data.mainMessage.edit(mainUI);
+        }
+
+        // ephemeral 메시지 닫기
+        const posEmoji = {
+          '상관X': '🎲', '탑': '🛡️', '정글': '🌲',
+          '미드': '🔥', '원딜': '🏹', '서폿': '💚'
+        }[selectedPosition];
+        await interaction.update({
+          content: `✅ **${nickname}** 포지션 설정: ${posEmoji} ${selectedPosition}`,
+          components: []
+        });
+        return;
+      }
     } catch (e) {
       logger.error(e);
     }

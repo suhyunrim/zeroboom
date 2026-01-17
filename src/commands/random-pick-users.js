@@ -115,6 +115,12 @@ exports.run = async (groupName, interaction) => {
         .setCustomId(`pickUsers|${time}|match`)
         .setLabel('🎮 바로 매칭생성')
         .setStyle(ButtonStyle.Primary),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pickUsers|${time}|position`)
+        .setLabel('🎯 포지션 정하기')
+        .setStyle(ButtonStyle.Success),
     );
 
   return {
@@ -160,6 +166,23 @@ exports.reactButton = async (interaction, data) => {
 
     const result = await matchMake.run(group.groupName, fakeInteraction);
     return result;
+  }
+
+  if (action === 'position') {
+    // 포지션 설정 UI로 전환 (pick-users.js의 함수 사용)
+    const timeKey = customId.split('|')[1];
+    const positionData = {};
+    data.pickedUsers.forEach((nickname) => {
+      positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+    });
+
+    const ui = pickUsers.buildPositionUI(data.pickedUsers, positionData, timeKey);
+    return {
+      ...ui,
+      isPositionMode: true,
+      pickedUsers: data.pickedUsers,
+      positionData,
+    };
   }
 };
 
