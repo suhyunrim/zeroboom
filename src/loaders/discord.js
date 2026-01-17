@@ -201,15 +201,20 @@ module.exports = async (app) => {
           return;
         }
 
-        // 팀 정보 기반으로 매칭 생성
+        // 팀/포지션 정보 기반으로 매칭 생성
         const fakeOptions = data.pickedUsers.map((nickname, index) => {
           const pData = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
           let value = nickname;
 
           if (pData.team === '1팀') {
+            // 1팀 고정
             value = `${nickname}@1`;
           } else if (pData.team === '2팀') {
+            // 2팀 고정
             value = `${nickname}@2`;
+          } else if (pData.position !== '상관X') {
+            // 랜덤팀이지만 포지션 지정됨 → 같은 포지션은 다른 팀으로 나뉨
+            value = `${nickname}@${pData.position}`;
           }
 
           return {
@@ -237,7 +242,7 @@ module.exports = async (app) => {
         const matchMakeCommand = commandList.get('매칭생성');
         const result = await matchMakeCommand.run(group.groupName, fakeInteraction);
 
-        await interaction.update({ content: '매칭을 생성합니다...', components: [] });
+        await interaction.update({ components: [] });
         await interaction.followUp(result);
         return;
       }
@@ -346,8 +351,8 @@ module.exports = async (app) => {
 
         // ephemeral 메시지 닫기
         const posEmoji = {
-          '상관X': '🎲', '탑': '🛡️', '정글': '🌲',
-          '미드': '🔥', '원딜': '🏹', '서폿': '💚'
+          '상관X': '🎲', '탑': '⚔️', '정글': '🐺',
+          '미드': '✨', '원딜': '🏹', '서폿': '💖'
         }[selectedPosition];
         await interaction.update({
           content: `✅ **${nickname}** 포지션 설정: ${posEmoji} ${selectedPosition}`,
