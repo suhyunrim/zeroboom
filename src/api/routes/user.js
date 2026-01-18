@@ -1,14 +1,10 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
 const { registerUser } = require('../../services/user');
-const { getLoginCookies } = require('@whipping-cream/thresh');
 const route = Router();
 const userController = require('../../controller/user');
-const tokenController = require('../../controller/token');
 const groupController = require('../../controller/group');
 const summonerController = require('../../controller/summoner');
-
-const jwtDecode = require('jwt-decode');
 
 module.exports = (app) => {
   app.use('/user', route);
@@ -22,52 +18,57 @@ module.exports = (app) => {
   });
 
   route.post('/login', async (req, res, next) => {
-    const { id, password } = req.body;
+    const { riotId } = req.body;
     try {
-      // const loginCookies = await getLoginCookies(id, password);
-      // if (!loginCookies)
-      //   return res.status(520).json({ result: 'selenium erorr!' });
+      if (!riotId || !riotId.includes('#')) {
+        return res.status(400).json({ result: 'riotId 형식이 올바르지 않습니다. (예: 닉네임#태그)' });
+      }
 
-      // const jwtDecoded = jwtDecode(loginCookies['__Secure-id_token']);
-      // const name = jwtDecoded.acct.game_name;
-      // const accountId = jwtDecoded.lol[0].uid;
-      // const token = loginCookies['__Secure-id_token'];
-      //if (id != 'loliday' || password != '1234') return res.status(520).json({ result: 'erorr!' });
+      const summoner = await summonerController.getSummonerByName(riotId);
+      if (!summoner || !summoner.result) {
+        return res.status(404).json({ result: '소환사를 찾을 수 없습니다.' });
+      }
 
-      const name = 'ZeroBoom';
-      const puuid = 'q2OE3y7njNK6pcYTD1Gb7SmiGUQwI4PFfu_r19rnBxjYMENzcUe3Ik1HcXQRDzfAJIYtZzLrPOCUiQ';
-      const token = 'asdfasdf';
-      const loginResult = await userController.login(name, puuid, token);
+      const puuid = summoner.result.puuid;
       const groupList = await userController.getGroupList(puuid);
-      return res.status(loginResult.status).json({ loginResult: loginResult.result, groupList: groupList.result });
+
+      return res.status(200).json({
+        puuid,
+        name: riotId,
+        groupList: groupList.result,
+      });
     } catch (e) {
       logger.error(e);
-      return res.status(500);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
 
   route.get('/getGroupList', async (req, res, next) => {
     try {
-      const tokenId = req.headers.riottokenid;
-      const accountId = await tokenController.getAccountId(tokenId);
-      const groupList = await userController.getGroupList(accountId);
+      const puuid = req.headers.puuid;
+      if (!puuid) {
+        return res.status(400).json({ result: 'puuid가 필요합니다.' });
+      }
+      const groupList = await userController.getGroupList(puuid);
       return res.status(groupList.status).json({ result: groupList.result });
     } catch (e) {
       logger.error(e);
-      return res.status(500);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
 
   route.get('/getInfo', async (req, res, next) => {
     const { groupId } = req.query;
     try {
-      const tokenId = req.headers.riottokenid;
-      const accountId = await tokenController.getAccountId(tokenId);
-      const userInfo = await userController.getInfo(groupId, accountId);
+      const puuid = req.headers.puuid;
+      if (!puuid) {
+        return res.status(400).json({ result: 'puuid가 필요합니다.' });
+      }
+      const userInfo = await userController.getInfo(groupId, puuid);
       return res.status(userInfo.status).json({ result: userInfo.result });
     } catch (e) {
       logger.error(e);
-      return res.status(500);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
 

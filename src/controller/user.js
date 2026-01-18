@@ -3,34 +3,6 @@ const { logger } = require('../loaders/logger');
 const { getCustomGames } = require('../services/riot-api');
 const { getRatingTier } = require('../services/user');
 
-module.exports.login = async (name, puuid, token) => {
-  let found = await models.token.findOne({
-    where: {
-      accountId: puuid,
-    },
-  });
-
-  const tokenData = {
-    name,
-    accountId: puuid,
-    token,
-  };
-
-  try {
-    if (!found) {
-      const created = await models.token.create(tokenData);
-      return { result: created, status: 200 };
-    } else if (found.token !== token || found.name !== name) {
-      await found.update(tokenData);
-    }
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: found || e.message, status: 501 };
-  }
-
-  return { result: found, status: 200 };
-};
-
 module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
   try {
     const until = new Date(new Date().getFullYear(), 0);
@@ -154,15 +126,15 @@ module.exports.getRating = async (groupId, puuid) => {
   }
 };
 
-module.exports.getInfo = async (groupId, accountId) => {
+module.exports.getInfo = async (groupId, puuid) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
-  if (!accountId) return { result: 'invalid accountId', status: 501 };
+  if (!puuid) return { result: 'invalid puuid', status: 501 };
 
   try {
     const userInfo = await models.user.findOne({
       where: {
         groupId,
-        accountId,
+        puuid,
       },
       raw: true,
     });
@@ -176,7 +148,7 @@ module.exports.getInfo = async (groupId, accountId) => {
     );
 
     const summonerInfo = await models.summoner.findOne({
-      where: { accountId },
+      where: { puuid },
       raw: true,
     });
 
@@ -184,15 +156,15 @@ module.exports.getInfo = async (groupId, accountId) => {
       return { result: 'summoner is not exist', status: 501 };
     }
 
-    const championScore = await models.userChampionScore.findAll({
-      where: {
-        groupId,
-        accountId,
-      },
-      raw: true,
-    });
+    // const championScore = await models.userChampionScore.findAll({
+    //   where: {
+    //     groupId,
+    //     puuid,
+    //   },
+    //   raw: true,
+    // });
 
-    return { result: { userInfo, summonerInfo, championScore }, status: 200 };
+    return { result: { userInfo, summonerInfo }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
