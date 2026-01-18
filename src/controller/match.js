@@ -546,7 +546,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId) => {
         const name = await getSummonerName(puuid);
         const tier = formatTier(rating);
 
-        players.push({ name, rating: Math.round(rating), tier });
+        players.push({ puuid, name, rating: Math.round(rating), tier });
         totalRating += rating;
         validCount++;
       }
