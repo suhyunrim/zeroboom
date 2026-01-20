@@ -1,0 +1,6 @@
+# 개발용: MySQL만 실행, 앱은 로컬에서 npm run dev로 실행
+# 사용법: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  db:
+    restart: "no"

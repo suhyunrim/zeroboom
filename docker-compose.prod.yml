@@ -1,0 +1,53 @@
+# 프로덕션용: MySQL + App + Nginx 전체 실행
+#
+# 초기 설정 (SSL 인증서 발급 전):
+#   ./scripts/init-ssl.sh 실행
+#
+# 실행:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  db:
+    restart: unless-stopped
+
+  app:
+    container_name: zeroboom-bot
+    build: .
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      SERVICE_PORT: 3000
+      DATABASE_HOST: db
+      DATABASE_PORT: 3306
+      DATABASE_NAME: ${DATABASE_NAME:-mydb}
+      DATABASE_USER: ${DATABASE_USER:-zeroboom}
+      DATABASE_PASS: ${DATABASE_PASS:-zeroboompass}
+      RIOT_API_KEY: ${RIOT_API_KEY}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    container_name: zeroboom-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - app
+
+  certbot:
+    image: certbot/certbot
+    container_name: zeroboom-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"

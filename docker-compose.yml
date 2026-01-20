@@ -1,14 +1,17 @@
-version: '3.1'
-
 services:
   db:
-    image: mysql
+    image: mysql:8.0
+    container_name: zeroboom-db
     environment:
-      - MYSQL_RANDOM_ROOT_PASSWORD=yes
+      MYSQL_ROOT_PASSWORD: ${DATABASE_PASS:-rootpassword}
+      MYSQL_DATABASE: ${DATABASE_NAME:-mydb}
     command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3307:3306"
     volumes:
-      - ./docker/data=/var/lib/mysql
-        
-  app:
-    container_name: zeroboom-bot
-    build: .
+      - ./docker/data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

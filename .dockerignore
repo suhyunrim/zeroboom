@@ -1,5 +1,11 @@
 LICENSE
 README.md
 doc
-Dockerfile
 src/client
+node_modules
+.env
+.env*
+docker
+.git
+.gitignore
+*.md
