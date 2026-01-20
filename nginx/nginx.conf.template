@@ -27,7 +27,7 @@ http {
     # HTTP -> HTTPS 리다이렉트
     server {
         listen 80;
-        server_name _;
+        server_name ${DOMAIN} www.${DOMAIN};
 
         # Let's Encrypt 인증용
         location /.well-known/acme-challenge/ {
@@ -42,10 +42,10 @@ http {
     # HTTPS 서버
     server {
         listen 443 ssl;
-        server_name _;
+        server_name ${DOMAIN} www.${DOMAIN};
 
-        ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+        ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
 
         # SSL 설정
         ssl_protocols TLSv1.2 TLSv1.3;
