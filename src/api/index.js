@@ -4,6 +4,7 @@ const chat = require('./routes/chat');
 const group = require('./routes/group');
 const user = require('./routes/user');
 const match = require('./routes/match');
+const dashboard = require('./routes/dashboard');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -16,6 +17,7 @@ module.exports = () => {
   group(app);
   user(app);
   match(app);
+  dashboard(app);
 
   //v2
   groupsV2(app);
