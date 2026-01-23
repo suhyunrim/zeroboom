@@ -1,8 +1,12 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const groupController = require('../controller/group');
 const { getRatingTier } = require('../services/user');
 const { getLOLNickname } = require('../utils/pick-users-utils');
+
+// URL에 프로토콜이 없으면 자동으로 http:// 추가
+const rawUrl = process.env.FRONTED_URL;
+const FRONTEND_URL = rawUrl && !rawUrl.startsWith('http') ? `http://${rawUrl}` : rawUrl;
 
 exports.run = async (groupName, interaction) => {
   const nickname = interaction.member.nickname || interaction.user.username;
@@ -67,7 +71,21 @@ exports.run = async (groupName, interaction) => {
         { name: '승률', value: `\`${winRate}%\``, inline: true },
       );
 
-    return { embeds: [embed] };
+    const response = { embeds: [embed] };
+
+    // FRONTEND_URL이 설정되어 있으면 버튼 추가
+    if (FRONTEND_URL) {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setEmoji('📊')
+          .setLabel('상세 전적 보기')
+          .setStyle(ButtonStyle.Link)
+          .setURL(FRONTEND_URL),
+      );
+      response.components = [row];
+    }
+
+    return response;
   } catch (e) {
     console.error(e);
     return '전적 조회 중 오류가 발생했습니다.';
