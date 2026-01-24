@@ -25,7 +25,7 @@ exports.run = async (groupName, interaction) => {
     // 소환사 정보 가져오기
     const summoner = await models.summoner.findOne({
       where: {
-        simplifiedName: lolNickname.toLowerCase().replace(' ', ''),
+        simplifiedName: lolNickname.toLowerCase().replace(/ /g, ''),
       },
     });
 

@@ -28,14 +28,14 @@ const generateSummonerData = async (name) => {
     profileIconId: summonerResult.profileIconId,
     revisionDate: summonerResult.revisionDate,
     summonerLevel: summonerResult.summonerLevel,
-    simplifiedName: name.toLowerCase().replace(' ', ''),
+    simplifiedName: name.toLowerCase().replace(/ /g, ''),
   };
 };
 
 module.exports.getSummonerByName = async (name) => {
   let found = await models.summoner.findOne({
     where: {
-      simplifiedName: name.toLowerCase().replace(' ', ''),
+      simplifiedName: name.toLowerCase().replace(/ /g, ''),
     },
   });
 
@@ -91,7 +91,7 @@ module.exports.getPositions = async (name) => {
   const result = [];
   let found = await models.summoner.findOne({
     where: {
-      simplifiedName: name.toLowerCase().replace(' ', ''),
+      simplifiedName: name.toLowerCase().replace(/ /g, ''),
     },
   });
 
