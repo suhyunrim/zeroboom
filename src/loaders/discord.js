@@ -155,6 +155,17 @@ module.exports = async (app) => {
                 mainMessage: reply, // 메인 메시지 참조 저장
               });
             } else {
+              // 바로 매칭생성 버튼인 경우 matches Map에 데이터 저장
+              if (action === 'match' && output.match) {
+                const group = await models.group.findOne({
+                  where: { discordGuildId: interaction.guildId },
+                });
+                if (group) {
+                  for (let i = 0; i < output.match.length; ++i) {
+                    matches.set(`${group.groupName}/${output.time}/${i}`, output.match[i]);
+                  }
+                }
+              }
               await interaction.reply(output);
             }
           }
@@ -243,6 +254,13 @@ module.exports = async (app) => {
         const matchMakeCommand = commandList.get('매칭생성');
         const result = await matchMakeCommand.run(group.groupName, fakeInteraction);
 
+        // matches Map에 데이터 저장 (1~3번 버튼 동작을 위해)
+        if (result.match) {
+          for (let i = 0; i < result.match.length; ++i) {
+            matches.set(`${group.groupName}/${result.time}/${i}`, result.match[i]);
+          }
+        }
+
         await interaction.update({ components: [] });
         await interaction.followUp(result);
         return;
@@ -266,17 +284,22 @@ module.exports = async (app) => {
         return;
       }
 
-      // 기타 명령어의 버튼 (매칭생성 등)
-      let command;
-      if (interaction.message.interaction) {
-        command = commandList.get(interaction.message.interaction.commandName);
-      }
-
-      if (command) {
+      // 매칭생성 버튼 (customId 형식: groupName/time/index)
+      const slashSplit = interaction.customId.split('/');
+      if (slashSplit.length === 3) {
         const match = matches.get(interaction.customId);
-        const output = await command.reactButton(interaction, match);
-        if (output) {
-          await interaction.reply(output);
+        if (match) {
+          const matchMakeCommand = commandList.get('매칭생성');
+          if (matchMakeCommand) {
+            const output = await matchMakeCommand.reactButton(interaction, match);
+            if (output) {
+              await interaction.reply(output);
+            }
+            return;
+          }
+        } else {
+          await interaction.reply({ content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.', ephemeral: true });
+          return;
         }
       }
     } catch (e) {
