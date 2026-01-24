@@ -5,7 +5,7 @@ const { getRatingTier } = require('../services/user');
 const { getLOLNickname } = require('../utils/pick-users-utils');
 
 // URL에 프로토콜이 없으면 자동으로 http:// 추가
-const rawUrl = process.env.FRONTED_URL;
+const rawUrl = process.env.FRONTEND_URL;
 const FRONTEND_URL = rawUrl && !rawUrl.startsWith('http') ? `http://${rawUrl}` : rawUrl;
 
 exports.run = async (groupName, interaction) => {
