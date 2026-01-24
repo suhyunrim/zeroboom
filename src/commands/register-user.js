@@ -15,7 +15,7 @@ exports.conf = {
   aliases: ['유저등록', 'ru'],
   args: [
     ['user', '디스코드유저', '디스코드 유저를 멘션해주세요.', true],
-    ['string', '닉네임', '롤 닉네임을 입력해주세요.', true],
+    ['string', '롤닉네임', '롤 닉네임을 입력해주세요.', true],
     ['string', '티어', '티어를 입력해주세요. (ex. G1)', true],
   ],
 };
@@ -23,5 +23,5 @@ exports.conf = {
 exports.help = {
   name: 'register-user',
   description: 'register user.',
-  usage: '/유저등록 @디스코드유저 닉네임 티어',
+  usage: '/유저등록 @디스코드유저 롤닉네임 티어',
 };
