@@ -266,6 +266,7 @@ module.exports = async (app) => {
           fakeOptions.push({
             name: `유저${index + 1}`,
             value: value,
+            discordId: memberData?.discordId || null,
           });
         }
 

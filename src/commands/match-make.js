@@ -12,28 +12,38 @@ exports.run = async (groupName, interaction) => {
   const team2 = new Array();
   const groups = new Map();
 
+  // discordIdMap 수집 (fakeInteraction에서 전달된 경우)
+  const discordIdMap = interaction.options.discordIdMap || {};
+
   interaction.options.data.forEach(function(optionData) {
     const userInfo = optionData.value.split('@');
+    const summonerName = userInfo[0];
+
+    // optionData에 discordId가 있으면 매핑에 추가
+    if (optionData.discordId) {
+      discordIdMap[summonerName] = optionData.discordId;
+    }
+
     if (userInfo.length == 1) {
-      userPool.push(userInfo[0]);
+      userPool.push(summonerName);
       return;
     }
 
     if (userInfo[1] == 1) {
-      team1.push(userInfo[0]);
+      team1.push(summonerName);
     } else if (userInfo[1] == 2) {
-      team2.push(userInfo[0]);
+      team2.push(summonerName);
     } else {
       if (groups.has(userInfo[1])) {
-        groups.get(userInfo[1]).push(userInfo[0]);
+        groups.get(userInfo[1]).push(summonerName);
       } else {
-        groups.set(userInfo[1], [userInfo[0]]);
+        groups.set(userInfo[1], [summonerName]);
       }
-      userPool.push(userInfo[0]);
+      userPool.push(summonerName);
     }
   });
 
-  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 100);
+  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 100, discordIdMap);
   if (typeof(result.result) == 'string') {
     return result.result;
   }

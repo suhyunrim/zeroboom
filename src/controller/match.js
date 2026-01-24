@@ -123,6 +123,7 @@ module.exports.generateMatch = async (
   team2Names,
   userPool,
   matchCount,
+  discordIdMap = {},
 ) => {
   try {
     if (team1Names.length + team2Names.length + userPool.length !== 10) {
@@ -156,6 +157,26 @@ module.exports.generateMatch = async (
     let summoners = {};
 
     const getUserModel = async (summonerName) => {
+      // discordId가 있으면 먼저 그걸로 조회 시도
+      const discordId = discordIdMap[summonerName];
+      if (discordId) {
+        const userByDiscord = await models.user.findOne({
+          where: { groupId: group.id, discordId },
+        });
+        if (userByDiscord) {
+          const summonerByPuuid = await models.summoner.findOne({
+            where: { puuid: userByDiscord.puuid },
+          });
+          if (summonerByPuuid) {
+            if (!summoners[summonerByPuuid.puuid]) {
+              summoners[summonerByPuuid.puuid] = summonerByPuuid;
+            }
+            return userByDiscord;
+          }
+        }
+      }
+
+      // discordId로 못 찾으면 기존 방식으로 조회
       const result = await summonerController.getSummonerByName(summonerName);
 
       if (result.status !== 200) {

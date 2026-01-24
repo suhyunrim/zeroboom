@@ -424,6 +424,7 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
         fakeOptions.push({
           name: `유저${index + 1}`,
           value: actualName,
+          discordId: memberData?.discordId || null,
         });
       }
 
