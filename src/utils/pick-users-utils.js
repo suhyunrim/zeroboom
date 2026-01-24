@@ -68,10 +68,10 @@ function findSpecialCharAfterIndex(str, index) {
  */
 const getLOLNickname = (nickname) => {
   const sharpIndex = nickname.indexOf('#');
-  if (sharpIndex === -1) return nickname;
+  if (sharpIndex === -1) return nickname.trim();
   const specialCharIndex1 = findSpecialCharBeforeIndex(nickname, sharpIndex);
   const specialCharIndex2 = findSpecialCharAfterIndex(nickname, sharpIndex);
-  return nickname.substring(specialCharIndex1 + 1, specialCharIndex2);
+  return nickname.substring(specialCharIndex1 + 1, specialCharIndex2).trim();
 };
 
 /**
