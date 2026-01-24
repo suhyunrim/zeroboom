@@ -68,6 +68,7 @@ module.exports = async (app) => {
             // 결과 모드 데이터 저장
             pickUsersData.set(timeKey, {
               pickedUsers: output.pickedUsers,
+              pickedMembersData: output.pickedMembersData,
               commandStr: output.commandStr,
             });
           }
@@ -121,6 +122,7 @@ module.exports = async (app) => {
             const newTimeKey = output.components[0].components[0].data.custom_id.split('|')[1];
             pickUsersData.set(newTimeKey, {
               pickedUsers: output.pickedUsers,
+              pickedMembersData: output.pickedMembersData,
               commandStr: output.commandStr,
             });
           }
@@ -151,6 +153,7 @@ module.exports = async (app) => {
               pickUsersData.set(timeKey, {
                 ...data,
                 isPositionMode: true,
+                pickedMembersData: output.pickedMembersData || data.pickedMembersData,
                 positionData: output.positionData,
                 mainMessage: reply, // 메인 메시지 참조 저장
               });
@@ -213,35 +216,6 @@ module.exports = async (app) => {
           return;
         }
 
-        // 팀/포지션 정보 기반으로 매칭 생성
-        const fakeOptions = data.pickedUsers.map((nickname, index) => {
-          const pData = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
-          let value = nickname;
-
-          if (pData.team === '1팀') {
-            // 1팀 고정
-            value = `${nickname}@1`;
-          } else if (pData.team === '2팀') {
-            // 2팀 고정
-            value = `${nickname}@2`;
-          } else if (pData.position !== '상관X') {
-            // 랜덤팀이지만 포지션 지정됨 → 같은 포지션은 다른 팀으로 나뉨
-            value = `${nickname}@${pData.position}`;
-          }
-
-          return {
-            name: `유저${index + 1}`,
-            value: value,
-          };
-        });
-
-        const fakeInteraction = {
-          ...interaction,
-          options: {
-            data: fakeOptions,
-          },
-        };
-
         const group = await models.group.findOne({
           where: { discordGuildId: interaction.guildId },
         });
@@ -250,6 +224,56 @@ module.exports = async (app) => {
           await interaction.update({ content: '그룹 정보를 찾을 수 없습니다.', components: [] });
           return;
         }
+
+        // 팀/포지션 정보 기반으로 매칭 생성
+        // discordId로 실제 소환사 이름을 조회하여 fakeOptions 생성
+        const fakeOptions = [];
+        for (let index = 0; index < data.pickedUsers.length; index++) {
+          const parsedNickname = data.pickedUsers[index];
+          const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
+          let actualName = parsedNickname;
+
+          // discordId가 있으면 DB에서 실제 소환사 이름 조회
+          if (memberData && memberData.discordId) {
+            const userData = await models.user.findOne({
+              where: { groupId: group.id, discordId: memberData.discordId },
+            });
+            if (userData) {
+              const summonerData = await models.summoner.findOne({
+                where: { puuid: userData.puuid },
+              });
+              if (summonerData) {
+                actualName = summonerData.name;
+              }
+            }
+          }
+
+          const pData = data.positionData[parsedNickname] || { team: '랜덤팀', position: '상관X' };
+          let value = actualName;
+
+          if (pData.team === '1팀') {
+            // 1팀 고정
+            value = `${actualName}@1`;
+          } else if (pData.team === '2팀') {
+            // 2팀 고정
+            value = `${actualName}@2`;
+          } else if (pData.position !== '상관X') {
+            // 랜덤팀이지만 포지션 지정됨 → 같은 포지션은 다른 팀으로 나뉨
+            value = `${actualName}@${pData.position}`;
+          }
+
+          fakeOptions.push({
+            name: `유저${index + 1}`,
+            value: value,
+          });
+        }
+
+        const fakeInteraction = {
+          ...interaction,
+          options: {
+            data: fakeOptions,
+          },
+        };
 
         const matchMakeCommand = commandList.get('매칭생성');
         const result = await matchMakeCommand.run(group.groupName, fakeInteraction);

@@ -95,12 +95,22 @@ exports.reactButton = async (interaction, match) => {
   for (let i = 0; i < 2; ++i) {
     const startIndex = i * 5;
     for (let j = startIndex; j < startIndex + 5; ++j) {
+      const memberName = members[j];
+
       const summonerData = await models.summoner.findOne({
-        where: { name: members[j] },
+        where: { name: memberName },
       });
+      if (!summonerData) {
+        return { content: `소환사 정보를 찾을 수 없습니다: ${memberName}`, ephemeral: true };
+      }
+
       const userData = await models.user.findOne({
         where: { groupId: group.id, puuid: summonerData.puuid },
       });
+      if (!userData) {
+        return { content: `유저 정보를 찾을 수 없습니다: ${memberName}`, ephemeral: true };
+      }
+
       const rating = userData.defaultRating + userData.additionalRating;
       teams[i].push({
         name: `${summonerData.name} (${getTierName(rating).charAt(0)}${getTierStep(rating)} ${getTierPoint(rating)}LP)`,

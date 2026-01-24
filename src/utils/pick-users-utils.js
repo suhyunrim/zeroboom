@@ -81,7 +81,7 @@ const getMemberInfo = (member) => {
   const nickname = member.nickname != null ? member.nickname : member.user.username;
   const lolNickname = getLOLNickname(nickname);
   return {
-    id: member.id,
+    discordId: member.id,
     nickname,
     lolNickname,
   };
@@ -209,6 +209,11 @@ const executePick = async (interaction, data) => {
   const unpickedMembers = shuffled.slice(PICK_COUNT);
 
   const pickedNicknames = pickedMembers.map((m) => m.lolNickname);
+  // discordId와 lolNickname을 매핑
+  const pickedMembersData = pickedMembers.map((m) => ({
+    discordId: m.discordId,
+    lolNickname: m.lolNickname,
+  }));
   const commandStr = pickedMembers.map((m, index) => `유저${index + 1}:${m.lolNickname}`);
   const unpickedNicknames = unpickedMembers.map((m) => m.lolNickname);
 
@@ -230,6 +235,7 @@ const executePick = async (interaction, data) => {
     content: message,
     components: [row],
     pickedUsers: pickedNicknames,
+    pickedMembersData,
     commandStr: `/매칭생성 ${commandStr.join(' ')}`,
   };
 };
@@ -385,18 +391,6 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
     }
 
     if (action === 'match') {
-      const fakeOptions = data.pickedUsers.map((name, index) => ({
-        name: `유저${index + 1}`,
-        value: name,
-      }));
-
-      const fakeInteraction = {
-        ...interaction,
-        options: {
-          data: fakeOptions,
-        },
-      };
-
       const group = await models.group.findOne({
         where: { discordGuildId: interaction.guildId },
       });
@@ -404,6 +398,41 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
       if (!group) {
         return { content: '그룹 정보를 찾을 수 없습니다.', ephemeral: true };
       }
+
+      // discordId로 실제 소환사 이름을 조회하여 fakeOptions 생성
+      const fakeOptions = [];
+      for (let index = 0; index < data.pickedUsers.length; index++) {
+        const parsedName = data.pickedUsers[index];
+        const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
+        let actualName = parsedName;
+
+        // discordId가 있으면 DB에서 실제 소환사 이름 조회
+        if (memberData && memberData.discordId) {
+          const userData = await models.user.findOne({
+            where: { groupId: group.id, discordId: memberData.discordId },
+          });
+          if (userData) {
+            const summonerData = await models.summoner.findOne({
+              where: { puuid: userData.puuid },
+            });
+            if (summonerData) {
+              actualName = summonerData.name;
+            }
+          }
+        }
+
+        fakeOptions.push({
+          name: `유저${index + 1}`,
+          value: actualName,
+        });
+      }
+
+      const fakeInteraction = {
+        ...interaction,
+        options: {
+          data: fakeOptions,
+        },
+      };
 
       const result = await matchMake.run(group.groupName, fakeInteraction);
       return result;
@@ -422,6 +451,7 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
         content: '',
         isPositionMode: true,
         pickedUsers: data.pickedUsers,
+        pickedMembersData: data.pickedMembersData,
         positionData,
       };
     }

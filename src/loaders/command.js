@@ -33,6 +33,11 @@ class CommandList {
 						option.setName(argument[1])
 								.setDescription(argument[2])
 								.setRequired(isRequired));
+				} else if (argument[0] == 'user') {
+					slashCommand.addUserOption(option =>
+						option.setName(argument[1])
+								.setDescription(argument[2])
+								.setRequired(isRequired));
 				}
 			}
 			ret.push(slashCommand);

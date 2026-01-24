@@ -54,6 +54,15 @@ exports.run = async (groupName, interaction) => {
     return getLOLNickname(nickname);
   });
 
+  // discordId와 lolNickname을 매핑
+  const pickedMembersData = pickedUsers.map((member) => {
+    const nickname = member.nickname != null ? member.nickname : member.user.username;
+    return {
+      discordId: member.id,
+      lolNickname: getLOLNickname(nickname),
+    };
+  });
+
   const commandStr = pickedUsers.map((member, index) => {
     const nickname = member.nickname != null ? member.nickname : member.user.username;
     return `유저${index + 1}:${getLOLNickname(nickname)}`;
@@ -85,6 +94,7 @@ exports.run = async (groupName, interaction) => {
     components: [row],
     fetchReply: true,
     pickedUsers: pickedNicknames,
+    pickedMembersData,
     commandStr: `/매칭생성 ${commandStr.join(' ')}`,
   };
 };

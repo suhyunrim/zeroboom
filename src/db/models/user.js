@@ -16,6 +16,9 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         primaryKey: true,
       },
+      discordId: {
+        type: DataTypes.STRING,
+      },
       win: {
         type: DataTypes.INTEGER,
       },

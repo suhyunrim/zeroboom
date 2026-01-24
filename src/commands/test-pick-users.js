@@ -37,8 +37,14 @@ const getTestMembers = async (groupName) => {
     where: { puuid: puuids },
   });
 
+  // puuid -> discordId 매핑 생성
+  const discordIdMap = {};
+  users.forEach((u) => {
+    discordIdMap[u.puuid] = u.discordId;
+  });
+
   const memberList = summoners.map((s) => ({
-    id: s.puuid,
+    discordId: discordIdMap[s.puuid] || null,
     nickname: s.name,
     lolNickname: s.name,
   }));

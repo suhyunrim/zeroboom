@@ -60,7 +60,7 @@ const getRating = (tier) => {
   return rating + tierMultiplier * 25;
 };
 
-const registerUser = async (groupName, summonerName, tier) => {
+const registerUser = async (groupName, summonerName, tier, discordId = null) => {
   if (!groupName) return { result: 'invalid group name', status: 501 };
 
   if (!summonerName) return { result: 'invalid summoner name', status: 501 };
@@ -85,6 +85,7 @@ const registerUser = async (groupName, summonerName, tier) => {
       puuid: summoner.puuid,
       groupId: group.id,
       defaultRating: getRating(tier ? tier : summoner.rankTier),
+      discordId: discordId,
     });
   } catch (e) {
     logger.error(e.stack);
