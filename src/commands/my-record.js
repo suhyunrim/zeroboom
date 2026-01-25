@@ -9,6 +9,7 @@ const rawUrl = process.env.FRONTEND_URL;
 const FRONTEND_URL = rawUrl && !rawUrl.startsWith('http') ? `http://${rawUrl}` : rawUrl;
 
 exports.run = async (groupName, interaction) => {
+  const discordId = interaction.user.id;
   const nickname = interaction.member.nickname || interaction.user.username;
   const lolNickname = getLOLNickname(nickname);
 
@@ -22,28 +23,50 @@ exports.run = async (groupName, interaction) => {
       return '그룹 정보를 찾을 수 없습니다.';
     }
 
-    // 소환사 정보 가져오기
-    const summoner = await models.summoner.findOne({
-      where: {
-        simplifiedName: lolNickname.toLowerCase().replace(/ /g, ''),
-      },
-    });
+    let summoner;
+    let userInfo;
 
-    if (!summoner) {
-      return `**${lolNickname}** 소환사를 찾을 수 없습니다.`;
-    }
-
-    // 유저 정보 가져오기
-    const userInfo = await models.user.findOne({
+    // 1. discordId로 먼저 찾기
+    userInfo = await models.user.findOne({
       where: {
         groupId: group.id,
-        puuid: summoner.puuid,
+        discordId: discordId,
       },
     });
+
+    if (userInfo) {
+      // discordId로 찾은 경우, puuid로 summoner 조회
+      summoner = await models.summoner.findOne({
+        where: { puuid: userInfo.puuid },
+      });
+    } else {
+      // 2. discordId로 못 찾으면 기존 방식 (롤 닉네임으로)
+      summoner = await models.summoner.findOne({
+        where: {
+          simplifiedName: lolNickname.toLowerCase().replace(/ /g, ''),
+        },
+      });
+
+      if (summoner) {
+        userInfo = await models.user.findOne({
+          where: {
+            groupId: group.id,
+            puuid: summoner.puuid,
+          },
+        });
+      }
+    }
+
+    if (!summoner) {
+      return `**${lolNickname}** 소환사를 찾을 수 없습니다. 디스코드 연결 또는 닉네임을 확인해주세요.`;
+    }
 
     if (!userInfo) {
       return `**${lolNickname}**님은 이 그룹에 등록되어 있지 않습니다.`;
     }
+
+    // discordId로 찾은 경우 실제 소환사명 사용
+    const displayName = summoner.name;
 
     // 랭킹 가져오기
     const rankingResult = await groupController.getRanking(groupName);
@@ -61,7 +84,7 @@ exports.run = async (groupName, interaction) => {
     // Embed 생성
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle(`${lolNickname}`)
+      .setTitle(`${displayName}`)
       .addFields(
         { name: '티어', value: `\`${tier}\``, inline: true },
         { name: '레이팅', value: `\`${totalRating}\``, inline: true },
