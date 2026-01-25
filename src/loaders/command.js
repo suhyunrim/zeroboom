@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require('discord.js');
 const { logger } = require('./logger');
 const fs = require('fs').promises;
 
+const prefix = process.env.COMMAND_PREFIX || '';
+
 class CommandList {
 	commands;
 	constructor() {
@@ -13,14 +15,16 @@ class CommandList {
 	}
 
 	get(commandName) {
-		return this.commands.find(elem => elem.conf.aliases[0] == commandName);
+		// prefix 제거하고 찾기
+		const name = prefix ? commandName.replace(prefix, '') : commandName;
+		return this.commands.find(elem => elem.conf.aliases[0] == name);
 	}
 
 	getSlashCommands() {
 		const ret = [];
 		for (let command of this.commands) {
 			const commandName = command.conf.aliases[0]; // 일단 첫번째 커맨드만
-			const slashCommand = new SlashCommandBuilder().setName(commandName).setDescription(command.help.description);
+			const slashCommand = new SlashCommandBuilder().setName(prefix + commandName).setDescription(command.help.description);
 			for (let argument of command.conf.args) {
 				const isRequired = argument[3] !== false; // 기본값은 true
 				if (argument[0] == 'string') {
