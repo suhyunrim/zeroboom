@@ -84,7 +84,8 @@ const getTierStep = (rating) => {
       return 1;
     }
 
-    return Math.ceil((100 - (rating - tierRating)) / 25);
+    // 0~24: 4 (IV), 25~49: 3 (III), 50~74: 2 (II), 75~99: 1 (I)
+    return 4 - Math.floor((rating - tierRating) / 25);
   }
 }
 exports.getTierStep = getTierStep;
@@ -98,6 +99,7 @@ const formatTier = (rating) => {
   }
 
   const step = getTierStep(rating);
-  return `${tierName} ${tierSteps[step - 1] || 'IV'}`;
+  // step: 4=IV, 3=III, 2=II, 1=I → tierSteps[4-step]
+  return `${tierName} ${tierSteps[4 - step] || 'IV'}`;
 };
 exports.formatTier = formatTier;
