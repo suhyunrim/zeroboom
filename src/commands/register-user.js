@@ -2,7 +2,7 @@ const { registerUser } = require('../services/user');
 
 exports.run = async (groupName, interaction) => {
   const discordUser = interaction.options.getUser('디스코드유저');
-  const summonerName = interaction.options.getString('닉네임');
+  const summonerName = interaction.options.getString('롤닉네임');
   const tier = interaction.options.getString('티어');
   const discordId = discordUser ? discordUser.id : null;
   const ret = await registerUser(groupName, summonerName, tier, discordId);

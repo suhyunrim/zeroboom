@@ -2,7 +2,7 @@ const models = require('../db/models');
 
 exports.run = async (groupName, interaction) => {
   const discordUser = interaction.options.getUser('디스코드유저');
-  const summonerName = interaction.options.getString('닉네임');
+  const summonerName = interaction.options.getString('롤닉네임');
 
   if (!discordUser) {
     return '디스코드 유저를 멘션해주세요.';
@@ -51,7 +51,7 @@ exports.conf = {
   aliases: ['유저디코연결'],
   args: [
     ['user', '디스코드유저', '연결할 디스코드 유저를 멘션해주세요.', true],
-    ['string', '닉네임', '롤 닉네임을 입력해주세요.', true],
+    ['string', '롤닉네임', '롤 닉네임을 입력해주세요.', true],
   ],
 };
 
