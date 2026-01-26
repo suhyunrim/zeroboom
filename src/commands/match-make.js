@@ -34,10 +34,11 @@ exports.run = async (groupName, interaction) => {
     } else if (userInfo[1] == 2) {
       team2.push(summonerName);
     } else {
+      const simplifiedName = summonerName.replaceAll(' ', '');
       if (groups.has(userInfo[1])) {
-        groups.get(userInfo[1]).push(summonerName);
+        groups.get(userInfo[1]).push(simplifiedName);
       } else {
-        groups.set(userInfo[1], [summonerName]);
+        groups.set(userInfo[1], [simplifiedName]);
       }
       userPool.push(summonerName);
     }
@@ -64,6 +65,10 @@ exports.run = async (groupName, interaction) => {
 
   if (result.status !== 200) {
     return result.result;
+  }
+
+  if (result.result.length === 0) {
+    return '포지션 조건을 만족하는 매칭 조합이 없습니다. 포지션 설정을 조정해주세요.';
   }
 
   // 디스코드 버튼은 한번에 최대 5개만 삽입 가능해서 3개씩 두줄로 처리 (by zeroboom)
