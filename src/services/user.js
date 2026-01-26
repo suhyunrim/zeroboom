@@ -87,6 +87,11 @@ const registerUser = async (groupName, summonerName, tier, discordId = null) => 
       defaultRating: getRating(tier ? tier : summoner.rankTier),
       discordId: discordId,
     });
+
+    // 포지션 정보 수집 (비동기로 처리, 실패해도 등록은 완료)
+    summonerController.getPositions(summonerName).catch((e) => {
+      logger.error(`포지션 수집 실패 [${summonerName}]: ${e.message}`);
+    });
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };

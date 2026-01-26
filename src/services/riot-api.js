@@ -18,15 +18,22 @@ const getMatchIdsFromSummonerName = async (summonerName, beginIndex, count = 20)
 }
 exports.getMatchIdsFromSummonerName = getMatchIdsFromSummonerName;
 
-const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20) => {
+const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20, queue = null) => {
+  const params = {
+    api_key: RIOT_API_KEY,
+    start: beginIndex,
+    count,
+  };
+
+  // queue가 지정되면 해당 큐만 필터링 (420: 솔로랭크)
+  if (queue) {
+    params.queue = queue;
+  }
+
   const result = await axios({
     method:'get',
     url:`https://asia.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`,
-    params: {
-      api_key: RIOT_API_KEY,
-      start: beginIndex,
-      count,
-    }
+    params,
   });
 
   if (result.status !== 200)

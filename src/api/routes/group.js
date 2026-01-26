@@ -7,6 +7,9 @@ const { logger } = require('../../loaders/logger');
 const groupController = require('../../controller/group');
 const tokenController = require('../../controller/token');
 const userController = require('../../controller/user');
+const summonerController = require('../../controller/summoner');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 module.exports = (app) => {
   app.use('/group', route);
@@ -78,6 +81,84 @@ module.exports = (app) => {
     } catch (e) {
       logger.error(e);
       return res.status(500);
+    }
+  });
+
+  // 특정 그룹의 모든 소환사 포지션 갱신
+  route.post('/update-positions', async (req, res) => {
+    const { groupName } = req.body;
+
+    if (!groupName) {
+      return res.status(400).json({ result: 'groupName이 필요합니다.' });
+    }
+
+    try {
+      const group = await models.group.findOne({ where: { groupName } });
+      if (!group) {
+        return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+      }
+
+      // 해당 그룹의 유저들 조회
+      const users = await models.user.findAll({
+        where: { groupId: group.id },
+      });
+
+      const puuids = users.map((u) => u.puuid);
+
+      const summoners = await models.summoner.findAll({
+        where: { puuid: puuids },
+      });
+
+      logger.info(`[${groupName}] 포지션 업데이트 시작 - ${summoners.length}명`);
+
+      // 즉시 응답 (백그라운드에서 처리)
+      // 1명당 약 2.5분 (100매치 × 1.5초)
+      const estimatedMinutes = Math.ceil(summoners.length * 2.5);
+      res.status(200).json({
+        result: `${summoners.length}명의 포지션 업데이트를 시작합니다. 완료까지 약 ${estimatedMinutes}분 소요 예정.`,
+      });
+
+      // 백그라운드에서 포지션 업데이트
+      let successCount = 0;
+      let skipCount = 0;
+      const failList = [];
+
+      for (let i = 0; i < summoners.length; i++) {
+        const summoner = summoners[i];
+        const progress = `[${groupName}] [${i + 1}/${summoners.length}]`;
+
+        if (!summoner.name) {
+          failList.push({ name: summoner.puuid, reason: '소환사 이름 없음' });
+          continue;
+        }
+
+        try {
+          const positionResult = await summonerController.getPositions(summoner.name);
+          if (positionResult.skipped) {
+            skipCount++;
+            logger.info(`${progress} ${summoner.name} 스킵 (갱신 불필요)`);
+            continue;
+          }
+          successCount++;
+          logger.info(`${progress} ${summoner.name} 완료`);
+        } catch (e) {
+          failList.push({ name: summoner.name, reason: e.message });
+          logger.error(`${progress} ${summoner.name} 실패: ${e.message}`);
+        }
+
+        // API 호출한 경우에만 rate limit 방지 대기
+        if (i < summoners.length - 1) {
+          await sleep(2000);
+        }
+      }
+
+      logger.info(`[${groupName}] 포지션 업데이트 완료 - 성공: ${successCount}, 스킵: ${skipCount}, 실패: ${failList.length}`);
+      if (failList.length > 0) {
+        logger.info(`[${groupName}] 실패 목록:\n${failList.map((f) => `  - ${f.name}: ${f.reason}`).join('\n')}`);
+      }
+    } catch (e) {
+      logger.error(e);
+      // 이미 응답을 보냈으므로 여기서는 로그만
     }
   });
 }

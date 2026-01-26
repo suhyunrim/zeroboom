@@ -1,7 +1,9 @@
 const moment = require('moment');
 const models = require('../db/models');
-const { getSummonerByName, getRankDataByPuuid, getMatchIds, getMatchData } = require('../services/riot-api');
+const { getSummonerByName, getRankDataByPuuid, getMatchIdsFromPuuid, getMatchData } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isExpired = (time) => {
   if (!time) {
@@ -110,18 +112,25 @@ module.exports.getPositions = async (name) => {
       await found.update(summonerData);
     }
 
-    if (!isExpired(found.positionUpdatedAt)) {
+    if (!isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
       result.push([found.mainPosition, found.mainPositionRate]);
       result.push([found.subPosition, found.subPositionRate]);
+      return { result, status: 200, skipped: true };
     } else {
-      const matchids = await getMatchIds(name, 50);
+      const SOLO_RANKED_QUEUE = 420;
+      const matchids = await getMatchIdsFromPuuid(found.puuid, 0, 100, SOLO_RANKED_QUEUE);
       for (let i = 0; i < matchids.length; ++i) {
         const matchData = await getMatchData(matchids[i]);
-        const summonerData = matchData.info.participants.find((elem) => elem.summonerId == found.puuid);
-        if (!summonerData.teamPosition) {
+        const summonerData = matchData.info.participants.find((elem) => elem.puuid == found.puuid);
+        if (!summonerData || !summonerData.teamPosition)
           continue;
-        }
+
         positions[summonerData.teamPosition]++;
+
+        // API rate limit 방지 - 1500ms 대기
+        if (i < matchids.length - 1) {
+          await sleep(1500);
+        }
       }
 
       let totalMatchCount = 0;
@@ -135,13 +144,17 @@ module.exports.getPositions = async (name) => {
         return second[1] - first[1];
       });
 
-      const mainPositionRate = (sorted[0][1] / totalMatchCount) * 100;
-      const subPositionRate = (sorted[1][1] / totalMatchCount) * 100;
+      const mainPositionRate = totalMatchCount > 0
+        ? parseFloat(((sorted[0][1] / totalMatchCount) * 100).toFixed(2))
+        : 0;
+      const subPositionRate = totalMatchCount > 0
+        ? parseFloat(((sorted[1][1] / totalMatchCount) * 100).toFixed(2))
+        : 0;
 
       found.set({
-        mainPosition: sorted[0][0],
+        mainPosition: sorted[0][0] || null,
         mainPositionRate: mainPositionRate,
-        subPosition: sorted[1][0],
+        subPosition: sorted[1][0] || null,
         subPositionRate: subPositionRate,
         positionUpdatedAt: moment(),
       });
