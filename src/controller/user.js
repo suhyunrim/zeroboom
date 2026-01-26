@@ -1,4 +1,5 @@
 const models = require('../db/models');
+const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const { getCustomGames } = require('../services/riot-api');
 const { getRatingTier } = require('../services/user');
@@ -82,6 +83,29 @@ module.exports.getGroupList = async (puuid) => {
         win: userInfo.win,
         lose: userInfo.lose,
       });
+    }
+
+    // 최근 매치가 있는 그룹을 첫 번째로 정렬
+    if (result.length > 1) {
+      const latestMatch = await models.match.findOne({
+        where: {
+          groupId: groupIds,
+          [Op.or]: [
+            { team1: { [Op.like]: `%${puuid}%` } },
+            { team2: { [Op.like]: `%${puuid}%` } },
+          ],
+        },
+        order: [['createdAt', 'DESC']],
+        raw: true,
+      });
+
+      if (latestMatch) {
+        result.sort((a, b) => {
+          if (a.groupId === latestMatch.groupId) return -1;
+          if (b.groupId === latestMatch.groupId) return 1;
+          return 0;
+        });
+      }
     }
   } catch (e) {
     logger.error(e.stack);
