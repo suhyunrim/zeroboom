@@ -19,6 +19,9 @@ const matchMake = (preOrganizationTeam1, preOrganizationTeam2, userPool, count) 
 	}
 
 	var pop = userPool.pop();
+	// 양팀 모두 비어있으면 첫 유저를 team1에 고정하여 미러 중복 방지
+	var isFirstPick = preOrganizationTeam1.length === 0 && preOrganizationTeam2.length === 0;
+
 	if(preOrganizationTeam1.length < 5)
 	{
 		preOrganizationTeam1.push(pop);
@@ -26,7 +29,7 @@ const matchMake = (preOrganizationTeam1, preOrganizationTeam2, userPool, count) 
 		preOrganizationTeam1.pop();
 	}
 
-	if(preOrganizationTeam2.length < 5)
+	if(!isFirstPick && preOrganizationTeam2.length < 5)
 	{
 		preOrganizationTeam2.push(pop);
 		ret = ret.concat(matchMake(preOrganizationTeam1, preOrganizationTeam2, userPool, -1));
