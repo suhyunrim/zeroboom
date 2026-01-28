@@ -134,16 +134,10 @@ const buildToggleButtons = (memberList, excludedNames, timeKey) => {
 };
 
 /**
- * 결과 버튼 생성 (복사/매칭생성/포지션)
+ * 결과 버튼 생성 (매칭생성/포지션)
  */
 const buildResultButtons = (time) => {
   return new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`pickUsers|${time}|copy`)
-        .setLabel('📋 명령어 복사')
-        .setStyle(ButtonStyle.Secondary),
-    )
     .addComponents(
       new ButtonBuilder()
         .setCustomId(`pickUsers|${time}|match`)
