@@ -49,10 +49,63 @@ exports.run = async (groupName, interaction) => {
     return result.result;
   }
 
+  // 그룹 정보 조회
+  const group = await models.group.findOne({ where: { groupName } });
+
+  // 소환사별 레이팅 정보 캐시
+  const ratingCache = {};
+  const getRatingInfo = async (summonerName) => {
+    if (ratingCache[summonerName]) return ratingCache[summonerName];
+
+    const summonerData = await models.summoner.findOne({ where: { name: summonerName } });
+    if (!summonerData) return { name: summonerName, rating: 500 };
+
+    const userData = await models.user.findOne({
+      where: { groupId: group.id, puuid: summonerData.puuid },
+    });
+    if (!userData) return { name: summonerName, rating: 500 };
+
+    const rating = userData.defaultRating + userData.additionalRating;
+    ratingCache[summonerName] = { name: summonerName, rating };
+    return ratingCache[summonerName];
+  };
+
+  // 각 매치의 팀원들에게 티어 정보 추가 및 내림차순 정렬
+  for (const match of result.result) {
+    const team1WithRating = await Promise.all(match.team1.map(getRatingInfo));
+    const team2WithRating = await Promise.all(match.team2.map(getRatingInfo));
+
+    team1WithRating.sort((a, b) => b.rating - a.rating);
+    team2WithRating.sort((a, b) => b.rating - a.rating);
+
+    const formatTierDisplay = (name, rating) => {
+      const tierName = getTierName(rating);
+      const tierStep = getTierStep(rating);
+      const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
+      if (isHighTier) {
+        const tierPoint = getTierPoint(rating);
+        const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
+        return `[${tierAbbr} ${tierPoint}LP]${name}`;
+      }
+      return `[${tierName.charAt(0)}${tierStep}]${name}`;
+    };
+
+    match.team1 = team1WithRating.map(({ name, rating }) => formatTierDisplay(name, rating));
+    match.team2 = team2WithRating.map(({ name, rating }) => formatTierDisplay(name, rating));
+
+    // 평균 레이팅 계산
+    match.team1AvgRating = team1WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
+    match.team2AvgRating = team2WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
+
+    // 원본 이름 보존 (버튼 클릭 시 사용)
+    match.team1Names = team1WithRating.map(({ name }) => name);
+    match.team2Names = team2WithRating.map(({ name }) => name);
+  }
+
   result.result = result.result.filter((elem) => {
     for (let [key, value] of groups) {
-      const team1Simplified = elem.team1.map(elem => elem.replaceAll(' ', ''));
-      const team2Simplified = elem.team2.map(elem => elem.replaceAll(' ', ''));
+      const team1Simplified = elem.team1Names.map(name => name.replaceAll(' ', ''));
+      const team2Simplified = elem.team2Names.map(name => name.replaceAll(' ', ''));
       if ((team1Simplified.includes(value[0]) && team1Simplified.includes(value[1])) || (team2Simplified.includes(value[0]) && team2Simplified.includes(value[1]))) {
         return false;
       }
@@ -106,7 +159,7 @@ exports.reactButton = async (interaction, match) => {
     where: { discordGuildId: interaction.guildId },
   });
 
-  const members = [...match.team1, ...match.team2];
+  const members = [...(match.team1Names || match.team1), ...(match.team2Names || match.team2)];
   for (let i = 0; i < 2; ++i) {
     const startIndex = i * 5;
     for (let j = startIndex; j < startIndex + 5; ++j) {
@@ -127,8 +180,14 @@ exports.reactButton = async (interaction, match) => {
       }
 
       const rating = userData.defaultRating + userData.additionalRating;
+      const tierName = getTierName(rating);
+      const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
+      const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
+      const tierDisplay = isHighTier
+        ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
+        : `[${tierName.charAt(0)}${getTierStep(rating)}]`;
       teams[i].push({
-        name: `${summonerData.name} (${getTierName(rating).charAt(0)}${getTierStep(rating)} ${getTierPoint(rating)}LP)`,
+        name: `${tierDisplay}${summonerData.name}`,
         rating: rating,
       });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
