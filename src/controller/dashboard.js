@@ -136,6 +136,26 @@ module.exports.getDashboardStats = async (groupId) => {
       }
     }
 
+    // 만료되지 않은 외부 기록 합산 (이번 달 범위 내)
+    const externalRecords = await models.externalRecord.findAll({
+      where: {
+        groupId,
+        expiresAt: { [Op.gt]: now },
+        createdAt: { [Op.between]: [monthStart, monthEnd] },
+      },
+      raw: true,
+    });
+
+    for (const record of externalRecords) {
+      const puuid = record.puuid;
+      if (!userStats[puuid]) {
+        userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [] };
+      }
+      userStats[puuid].games += (record.win || 0) + (record.lose || 0);
+      userStats[puuid].wins += record.win || 0;
+      userStats[puuid].losses += record.lose || 0;
+    }
+
     // 1. 최다 판수 유저
     const mostGamesUser = Object.entries(userStats).reduce(
       (max, [puuid, stats]) => (stats.games > (max?.games || 0) ? { puuid, ...stats } : max),

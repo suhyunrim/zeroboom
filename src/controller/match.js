@@ -349,6 +349,25 @@ module.exports.calculateRating = async (groupName) => {
     apply(team2, match.winTeam == 2, team2Delta, match.createdAt);
   }
 
+  // 만료되지 않은 외부 기록의 win/lose 합산 (레이팅은 변경하지 않음)
+  const externalRecords = await models.externalRecord.findAll({
+    where: {
+      groupId: group.id,
+      expiresAt: { [Op.gt]: new Date() },
+    },
+  });
+
+  for (const record of externalRecords) {
+    const user = users[String(record.puuid)];
+    if (user) {
+      user.win += record.win;
+      user.lose += record.lose;
+      if (!user.latestMatchDate || record.createdAt > user.latestMatchDate) {
+        user.latestMatchDate = record.createdAt;
+      }
+    }
+  }
+
   for (const user of Object.values(users)) {
     await user.update(user.dataValues);
   }

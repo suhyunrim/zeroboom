@@ -96,11 +96,39 @@ module.exports.getRanking = async (groupName) => {
     },
   });
 
-  users = users.filter((elem) => elem.win + elem.lose >= RankingMinumumMatchCount);
+  // 만료되지 않은 외부 기록 조회
+  const externalRecords = await models.externalRecord.findAll({
+    where: {
+      groupId: group.id,
+      expiresAt: { [Op.gt]: new Date() },
+    },
+  });
 
-  users.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
+  // puuid별 외부 기록 합산
+  const externalStats = {};
+  for (const record of externalRecords) {
+    if (!externalStats[record.puuid]) {
+      externalStats[record.puuid] = { win: 0, lose: 0 };
+    }
+    externalStats[record.puuid].win += record.win || 0;
+    externalStats[record.puuid].lose += record.lose || 0;
+  }
 
-  const userIds = users.map((elem) => elem.puuid);
+  // 외부 기록을 포함한 win/lose 계산
+  const userStats = users.map((user) => {
+    const ext = externalStats[user.puuid] || { win: 0, lose: 0 };
+    return {
+      ...user.dataValues,
+      totalWin: user.win + ext.win,
+      totalLose: user.lose + ext.lose,
+    };
+  });
+
+  let filteredUsers = userStats.filter((elem) => elem.totalWin + elem.totalLose >= RankingMinumumMatchCount);
+
+  filteredUsers.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
+
+  const userIds = filteredUsers.map((elem) => elem.puuid);
   const summoners = await models.summoner.findAll({
     where: { puuid: userIds },
   });
@@ -109,14 +137,14 @@ module.exports.getRanking = async (groupName) => {
     return obj;
   }, {});
 
-  let result = users.map((elem, index) => {
+  let result = filteredUsers.map((elem, index) => {
     return {
       puuid: elem.puuid,
       ranking: index + 1,
       rating: elem.defaultRating + elem.additionalRating,
-      win: elem.win,
-      lose: elem.lose,
-      winRate: Math.ceil((elem.win / (elem.win + elem.lose)) * 100),
+      win: elem.totalWin,
+      lose: elem.totalLose,
+      winRate: Math.ceil((elem.totalWin / (elem.totalWin + elem.totalLose)) * 100),
     };
   });
 
