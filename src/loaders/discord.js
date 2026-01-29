@@ -158,6 +158,15 @@ module.exports = async (app) => {
                 positionData: output.positionData,
                 mainMessage: reply, // 메인 메시지 참조 저장
               });
+            } else if (output.isPositionMatchMode) {
+              // 포지션 매칭 모드 데이터 저장
+              pickUsersData.set(String(output.time), {
+                isPositionMatchMode: true,
+                positionMatches: output.positionMatches,
+                playerDataMap: output.playerDataMap,
+                groupId: output.groupId,
+              });
+              await interaction.reply(output);
             } else {
               // 바로 매칭생성 버튼인 경우 matches Map에 데이터 저장
               if (action === 'match' && output.match) {
@@ -176,6 +185,112 @@ module.exports = async (app) => {
         } else {
           await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
         }
+        return;
+      }
+
+      // posMatch 버튼 (포지션 매칭 선택)
+      if (split[0] === 'posMatch') {
+        const timeKey = split[1];
+        const index = Number(split[2]);
+        const data = pickUsersData.get(timeKey);
+
+        if (!data || !data.isPositionMatchMode) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const { positionMatches, playerDataMap, groupId } = data;
+        const selectedMatch = positionMatches[index];
+
+        if (!selectedMatch) {
+          await interaction.reply({ content: '매칭 데이터를 찾을 수 없습니다.', ephemeral: true });
+          return;
+        }
+
+        const po = selectedMatch.positionOptimization;
+
+        // DB에 매치 생성
+        const teamsForDB = [[], []];
+        for (const assignment of po.teamA.assignments) {
+          const playerData = playerDataMap[assignment.playerName];
+          teamsForDB[0].push([playerData.puuid, assignment.playerName]);
+        }
+        for (const assignment of po.teamB.assignments) {
+          const playerData = playerDataMap[assignment.playerName];
+          teamsForDB[1].push([playerData.puuid, assignment.playerName]);
+        }
+
+        const matchQueryResult = await models.match.create({
+          groupId: groupId,
+          team1: teamsForDB[0],
+          team2: teamsForDB[1],
+        });
+
+        // 결과 메시지
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+        const { getTierName, getTierStep, getTierPoint } = require('../utils/tierUtils');
+
+        const positionAbbr = { TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', SUPPORT: 'SUP' };
+        const typeEmoji = { MAIN: '🟢', SUB: '🟡', OFF: '🔴' };
+
+        const formatTeam = (teamResult) => {
+          let totalRating = 0;
+          const lines = teamResult.assignments.map(a => {
+            const playerData = playerDataMap[a.playerName];
+            const rating = playerData?.rating || 500;
+            totalRating += rating;
+            const tierName = getTierName(rating);
+            const tierStep = getTierStep(rating);
+            const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
+            const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
+            const tierDisplay = isHighTier
+              ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
+              : `[${tierName.charAt(0)}${tierStep}]`;
+            return `${typeEmoji[a.assignmentType]}\`${tierDisplay}[${positionAbbr[a.position]}]${a.playerName}\``;
+          });
+          const avgRating = totalRating / 5;
+          return { lines: lines.join('\n'), avgRating };
+        };
+
+        const team1Result = formatTeam(po.teamA);
+        const team2Result = formatTeam(po.teamB);
+
+        // 평균 티어 포맷 함수
+        const formatAvgTier = (avgRating) => {
+          const tierName = getTierName(avgRating);
+          const tierStep = getTierStep(avgRating);
+          const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
+          const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
+          return isHighTier
+            ? `[${tierAbbr} ${getTierPoint(avgRating)}LP]`
+            : `[${tierName.charAt(0)}${tierStep}]`;
+        };
+
+        const embed = new EmbedBuilder()
+          .setColor('#00ff00')
+          .setTitle('🧪 포지션 매칭 확정!')
+          .setDescription(`**[${interaction.member.nickname}]**님이 Plan ${index + 1}을 선택했습니다.\n🟢 메인 / 🟡 서브 / 🔴 오프`)
+          .addFields(
+            { name: `🐶 1팀 (${(selectedMatch.team1WinRate * 100).toFixed(1)}%) ${formatAvgTier(team1Result.avgRating)}`, value: team1Result.lines, inline: true },
+            { name: `🐱 2팀 (${((1 - selectedMatch.team1WinRate) * 100).toFixed(1)}%) ${formatAvgTier(team2Result.avgRating)}`, value: team2Result.lines, inline: true },
+          );
+
+        const buttons = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${matchQueryResult.gameId}|1`)
+              .setLabel('🐶팀 승리!')
+              .setStyle(ButtonStyle.Success),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${matchQueryResult.gameId}|2`)
+              .setLabel('🐱팀 승리!')
+              .setStyle(ButtonStyle.Danger),
+          );
+
+        await interaction.update({ components: [] });
+        await interaction.followUp({ embeds: [embed], components: [buttons] });
         return;
       }
 
