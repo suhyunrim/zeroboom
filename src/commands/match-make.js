@@ -4,7 +4,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 
-const MAX_MATCH_COUNT = 3
+const MAX_MATCH_COUNT = 6
 
 exports.run = async (groupName, interaction) => {
   const userPool = new Array();
@@ -113,6 +113,29 @@ exports.run = async (groupName, interaction) => {
 
     return true;
   });
+
+  // 한 명만 다른 케이스 제외 (최소 2명 이상 차이나는 매칭만 선택)
+  const filteredResults = [];
+  for (const match of result.result) {
+    const team1Set = new Set(match.team1Names);
+    let isDuplicate = false;
+
+    for (const selected of filteredResults) {
+      const selectedTeam1Set = new Set(selected.team1Names);
+      // team1 기준 공통 멤버 수 계산
+      const commonCount = [...team1Set].filter(name => selectedTeam1Set.has(name)).length;
+      // 4명 공통 = 1명만 다름 → 제외
+      if (commonCount === 4) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      filteredResults.push(match);
+    }
+  }
+  result.result = filteredResults;
 
   result.result = result.result.slice(0, MAX_MATCH_COUNT);
 
