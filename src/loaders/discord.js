@@ -289,7 +289,7 @@ module.exports = async (app) => {
               .setStyle(ButtonStyle.Danger),
           );
 
-        await interaction.update({ components: [] });
+        await interaction.deferUpdate();
         await interaction.followUp({ embeds: [embed], components: [buttons] });
         return;
       }
