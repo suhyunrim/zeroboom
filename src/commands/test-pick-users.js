@@ -71,7 +71,7 @@ exports.run = async (groupName, interaction) => {
     fetchReply: true,
     isToggleMode: true,
     memberList,
-    excludedNames: [],
+    excludedIds: [],
     groupName,
     channelName,
   };

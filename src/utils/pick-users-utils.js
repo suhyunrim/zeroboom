@@ -89,14 +89,17 @@ const getMemberInfo = (member) => {
 
 /**
  * 토글 UI 버튼 생성
+ * @param {Array} memberList - 멤버 목록
+ * @param {Array} excludedIds - 제외된 discordId 목록
+ * @param {string} timeKey - 타임키
  */
-const buildToggleButtons = (memberList, excludedNames, timeKey) => {
+const buildToggleButtons = (memberList, excludedIds, timeKey) => {
   const rows = [];
   let currentRow = new ActionRowBuilder();
   let buttonCount = 0;
 
   for (const member of memberList) {
-    const isExcluded = excludedNames.includes(member.lolNickname);
+    const isExcluded = excludedIds.includes(member.discordId);
     const emoji = isExcluded ? '❌' : '✅';
     const style = isExcluded ? ButtonStyle.Secondary : ButtonStyle.Success;
 
@@ -104,9 +107,10 @@ const buildToggleButtons = (memberList, excludedNames, timeKey) => {
       ? member.lolNickname.substring(0, 12) + '...'
       : member.lolNickname;
 
+    // customId에 discordId 사용 (특수문자 문제 방지)
     currentRow.addComponents(
       new ButtonBuilder()
-        .setCustomId(`pickToggle|${timeKey}|${member.lolNickname}`)
+        .setCustomId(`pickToggle|${timeKey}|${member.discordId}`)
         .setLabel(`${emoji} ${displayName}`)
         .setStyle(style),
     );
@@ -169,25 +173,27 @@ const buildToggleMessage = (channelName, memberCount, includedCount) => {
 
 /**
  * 토글 버튼 처리
+ * @param {Object} data - { memberList, excludedIds, channelName }
+ * @param {string} memberId - 토글할 멤버의 discordId
  */
-const handleToggle = async (interaction, data, memberName, buildToggleButtonsFn = buildToggleButtons) => {
-  const excludedNames = [...data.excludedNames];
-  const memberIndex = excludedNames.indexOf(memberName);
+const handleToggle = async (interaction, data, memberId, buildToggleButtonsFn = buildToggleButtons) => {
+  const excludedIds = [...(data.excludedIds || data.excludedNames || [])];
+  const memberIndex = excludedIds.indexOf(memberId);
 
   if (memberIndex === -1) {
-    excludedNames.push(memberName);
+    excludedIds.push(memberId);
   } else {
-    excludedNames.splice(memberIndex, 1);
+    excludedIds.splice(memberIndex, 1);
   }
 
-  const includedCount = data.memberList.length - excludedNames.length;
+  const includedCount = data.memberList.length - excludedIds.length;
   const timeKey = interaction.customId.split('|')[1];
-  const rows = buildToggleButtonsFn(data.memberList, excludedNames, timeKey);
+  const rows = buildToggleButtonsFn(data.memberList, excludedIds, timeKey);
 
   return {
     content: buildToggleMessage(data.channelName, data.memberList.length, includedCount),
     components: rows,
-    excludedNames,
+    excludedIds,
   };
 };
 
@@ -195,7 +201,8 @@ const handleToggle = async (interaction, data, memberName, buildToggleButtonsFn 
  * 최종 뽑기 실행
  */
 const executePick = async (interaction, data) => {
-  const includedMembers = data.memberList.filter((m) => !data.excludedNames.includes(m.lolNickname));
+  const excludedIds = data.excludedIds || data.excludedNames || [];
+  const includedMembers = data.memberList.filter((m) => !excludedIds.includes(m.discordId));
 
   if (includedMembers.length < PICK_COUNT) {
     return {

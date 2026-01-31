@@ -61,7 +61,7 @@ module.exports = async (app) => {
             pickUsersData.set(timeKey, {
               isToggleMode: true,
               memberList: output.memberList,
-              excludedNames: output.excludedNames,
+              excludedIds: output.excludedIds || [],
               groupName: output.groupName,
               channelName: output.channelName,
             });
@@ -104,7 +104,7 @@ module.exports = async (app) => {
       // pickToggle 버튼 (토글 모드)
       if (split[0] === 'pickToggle') {
         const timeKey = split[1];
-        const memberName = split[2];
+        const memberId = split[2];
         const data = pickUsersData.get(timeKey);
 
         if (!data || !data.isToggleMode) {
@@ -115,7 +115,7 @@ module.exports = async (app) => {
         // 인원뽑기 또는 테스트_인원뽑기 명령어 사용
         const pickUsersCommand = commandList.get('인원뽑기') || commandList.get('테스트_인원뽑기');
 
-        if (memberName === 'start') {
+        if (memberId === 'start') {
           // 뽑기 시작
           const output = await pickUsersCommand.executePick(interaction, data);
           if (output.pickedUsers) {
@@ -129,10 +129,10 @@ module.exports = async (app) => {
           }
           await interaction.update(output);
         } else {
-          // 멤버 토글
-          const output = await pickUsersCommand.handleToggle(interaction, data, memberName);
+          // 멤버 토글 (memberId = discordId)
+          const output = await pickUsersCommand.handleToggle(interaction, data, memberId);
           // 업데이트된 제외 목록 저장
-          data.excludedNames = output.excludedNames;
+          data.excludedIds = output.excludedIds;
           pickUsersData.set(timeKey, data);
           await interaction.update(output);
         }
