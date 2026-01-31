@@ -5,6 +5,44 @@ const { logger } = require('../loaders/logger');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 429 에러 시 재시도하는 래퍼 함수
+ * @param {Function} fn - 실행할 함수
+ * @param {number} maxRetries - 최대 재시도 횟수
+ * @param {number} baseDelay - 기본 대기 시간 (ms)
+ * @returns {Promise<any>}
+ */
+const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 2000) => {
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      const status = e.response?.status || e.status;
+
+      if (status === 429) {
+        // Retry-After 헤더가 있으면 사용, 없으면 지수 백오프
+        const retryAfter = e.response?.headers?.['retry-after'];
+        const waitTime = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : baseDelay * Math.pow(2, attempt);
+
+        logger.warn(`429 Rate Limited. ${attempt + 1}/${maxRetries + 1} 재시도, ${waitTime}ms 대기`);
+
+        if (attempt < maxRetries) {
+          await sleep(waitTime);
+          continue;
+        }
+      }
+
+      // 429가 아니거나 재시도 횟수 초과 시 에러 throw
+      throw e;
+    }
+  }
+  throw lastError;
+};
+
 const isExpired = (time) => {
   if (!time) {
     return true;
@@ -81,7 +119,15 @@ module.exports.getSummonerByName = async (name) => {
   return { result: found, status: 200 };
 };
 
-module.exports.getPositions = async (name) => {
+/**
+ * 소환사 포지션 조회/업데이트
+ * @param {string} name - 소환사명
+ * @param {Object} options - { force: false }
+ * @param {boolean} options.force - true면 캐시 무시하고 강제 업데이트
+ * @returns {Promise<Object>}
+ */
+module.exports.getPositions = async (name, options = {}) => {
+  const { force = false } = options;
   const result = [];
   let found = await models.summoner.findOne({
     where: {
@@ -104,8 +150,8 @@ module.exports.getPositions = async (name) => {
       await found.update(summonerData);
     }
 
-    // 7일 이내이고 데이터가 있으면 캐시 반환
-    if (!isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
+    // 7일 이내이고 데이터가 있으면 캐시 반환 (force가 아닐 때만)
+    if (!force && !isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
       result.push([found.mainPosition, found.mainPositionRate]);
       result.push([found.subPosition, found.subPositionRate]);
       return { result, status: 200, skipped: true };
@@ -140,22 +186,34 @@ module.exports.getPositions = async (name) => {
 
     // 새 매치들의 포지션 카운트
     let processedCount = 0;
+    let errorCount = 0;
     for (let i = 0; i < newMatchIds.length; ++i) {
-      const matchData = await getMatchData(newMatchIds[i]);
-      const summonerData = matchData.info.participants.find((elem) => elem.puuid == found.puuid);
-      if (!summonerData || !summonerData.teamPosition)
-        continue;
+      try {
+        const matchData = await retryWithBackoff(() => getMatchData(newMatchIds[i]));
+        const summonerData = matchData.info.participants.find((elem) => elem.puuid == found.puuid);
+        if (!summonerData || !summonerData.teamPosition)
+          continue;
 
-      const position = summonerData.teamPosition.toLowerCase();
-      if (positionStats[position] !== undefined) {
-        positionStats[position]++;
-        processedCount++;
+        const position = summonerData.teamPosition.toLowerCase();
+        if (positionStats[position] !== undefined) {
+          positionStats[position]++;
+          processedCount++;
+        }
+      } catch (e) {
+        errorCount++;
+        const status = e.response?.status || e.status;
+        logger.warn(`[${name}] 매치 ${newMatchIds[i]} 조회 실패 (status: ${status}): ${e.message}`);
+        // 개별 매치 실패는 건너뛰고 계속 진행
       }
 
       // API rate limit 방지 - 1500ms 대기
       if (i < newMatchIds.length - 1) {
         await sleep(1500);
       }
+    }
+
+    if (errorCount > 0) {
+      logger.warn(`[${name}] ${errorCount}개 매치 조회 실패, ${processedCount}개 성공`);
     }
 
     // lastMatchId 업데이트 (가장 최신 매치)
@@ -221,4 +279,87 @@ module.exports.getAccountIdByName = async (name) => {
   }
 
   return;
+};
+
+/**
+ * 최근 활동 유저들의 포지션 일괄 업데이트 (배치 처리용)
+ * @param {Object} options
+ * @param {number} options.withinDays - 최근 N일 이내 활동 유저 (기본: 30)
+ * @param {boolean} options.force - 캐시 무시 여부 (기본: false)
+ * @param {number} options.delayBetweenSummoners - 소환사 간 대기 시간 ms (기본: 3000)
+ * @returns {Promise<Object>} { success: [], failed: [], skipped: [], notFound: [] }
+ */
+module.exports.updateActiveUsersPositions = async (options = {}) => {
+  const { withinDays = 30, force = false, delayBetweenSummoners = 3000 } = options;
+  const { Op } = require('sequelize');
+
+  const results = {
+    success: [],
+    failed: [],
+    skipped: [],
+    notFound: [],
+  };
+
+  // 최근 N일 이내 활동한 유저 조회 (중복 puuid 제거)
+  const cutoffDate = moment().subtract(withinDays, 'days').toDate();
+  const activeUsers = await models.user.findAll({
+    where: {
+      updatedAt: { [Op.gte]: cutoffDate },
+    },
+    attributes: ['puuid'],
+    group: ['puuid'],
+  });
+
+  const puuids = activeUsers.map(u => u.puuid);
+  logger.info(`[배치] 최근 ${withinDays}일 내 활동 유저: ${puuids.length}명`);
+
+  // puuid로 소환사 정보 조회
+  const summoners = await models.summoner.findAll({
+    where: { puuid: puuids },
+  });
+
+  const summonerMap = new Map(summoners.map(s => [s.puuid, s]));
+
+  logger.info(`[배치] 포지션 업데이트 시작: ${summoners.length}명`);
+
+  for (let i = 0; i < puuids.length; i++) {
+    const puuid = puuids[i];
+    const summoner = summonerMap.get(puuid);
+    const progress = `[${i + 1}/${puuids.length}]`;
+
+    if (!summoner) {
+      results.notFound.push({ puuid });
+      logger.warn(`${progress} [${puuid}] 소환사 정보 없음`);
+      continue;
+    }
+
+    const name = summoner.name;
+
+    try {
+      const result = await module.exports.getPositions(name, { force });
+
+      if (result.skipped) {
+        results.skipped.push({ name, reason: '캐시 유효' });
+        logger.info(`${progress} [${name}] 스킵 (캐시 유효)`);
+      } else if (result.status === 200) {
+        results.success.push({ name, result: result.result });
+        logger.info(`${progress} [${name}] 성공: ${JSON.stringify(result.result)}`);
+      } else {
+        results.failed.push({ name, error: result.result });
+        logger.warn(`${progress} [${name}] 실패: ${result.result}`);
+      }
+    } catch (e) {
+      results.failed.push({ name, error: e.message });
+      logger.error(`${progress} [${name}] 에러: ${e.message}`);
+    }
+
+    // 소환사 간 대기 (마지막이 아닐 때만)
+    if (i < puuids.length - 1) {
+      await sleep(delayBetweenSummoners);
+    }
+  }
+
+  logger.info(`[배치] 포지션 업데이트 완료: 성공 ${results.success.length}, 실패 ${results.failed.length}, 스킵 ${results.skipped.length}, 미발견 ${results.notFound.length}`);
+
+  return results;
 };
