@@ -51,6 +51,9 @@ module.exports = (sequelize, DataTypes) => {
       positionUpdatedAt: {
         type: DataTypes.DATE,
       },
+      positionStats: {
+        type: DataTypes.JSON,
+      },
     },
     {},
   );
