@@ -661,7 +661,7 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   }
 
   fields.push({
-    name: '📋 유저 포지션',
+    name: '📋 유저 포지션 (최근 솔랭 100판 기준 포지션 비율)',
     value: positionLines.join('\n'),
     inline: false,
   });
