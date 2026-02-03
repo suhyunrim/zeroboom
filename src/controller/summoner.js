@@ -1,6 +1,6 @@
 const moment = require('moment');
 const models = require('../db/models');
-const { getSummonerByName, getRankDataByPuuid, getMatchIdsFromPuuid, getMatchData } = require('../services/riot-api');
+const { getSummonerByName, getRankDataByPuuid, getMatchIdsFromPuuid, getMatchData, getAccountByPuuid } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,17 +58,20 @@ const generateSummonerData = async (name) => {
   const leagueResult = await getRankDataByPuuid(summonerResult.puuid);
   const soloRankData = leagueResult.find((elem) => elem.queueType == 'RANKED_SOLO_5x5');
 
+  // Riot API에서 가져온 실제 닉네임 사용
+  const actualName = summonerResult.riotId || name;
+
   return {
     encryptedAccountId: summonerResult.accountId,
     puuid: summonerResult.puuid,
-    name,
+    name: actualName,
     rankTier: soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED',
     rankWin: soloRankData ? soloRankData.wins : 0,
     rankLose: soloRankData ? soloRankData.losses : 0,
     profileIconId: summonerResult.profileIconId,
     revisionDate: summonerResult.revisionDate,
     summonerLevel: summonerResult.summonerLevel,
-    simplifiedName: name.toLowerCase().replace(/ /g, ''),
+    simplifiedName: actualName.toLowerCase().replace(/ /g, ''),
   };
 };
 
@@ -157,6 +160,18 @@ module.exports.getPositions = async (name, options = {}) => {
       return { result, status: 200, skipped: true };
     }
 
+    // 포지션 업데이트 시 닉네임도 갱신 (puuid로 Riot API 조회)
+    let updatedName = null;
+    try {
+      const accountData = await getAccountByPuuid(found.puuid);
+      if (accountData.riotId && accountData.riotId !== found.name) {
+        updatedName = accountData.riotId;
+        logger.info(`[${name}] 닉네임 변경 감지: ${found.name} -> ${updatedName}`);
+      }
+    } catch (e) {
+      logger.warn(`[${name}] 닉네임 갱신 실패: ${e.message}`);
+    }
+
     const SOLO_RANKED_QUEUE = 420;
     const matchIds = await getMatchIdsFromPuuid(found.puuid, 0, 100, SOLO_RANKED_QUEUE);
 
@@ -239,14 +254,22 @@ module.exports.getPositions = async (name, options = {}) => {
       ? parseFloat(((sorted[1][1] / totalMatchCount) * 100).toFixed(2))
       : 0;
 
-    found.set({
+    const updateData = {
       mainPosition: sorted[0][0] || null,
       mainPositionRate: mainPositionRate,
       subPosition: sorted[1][0] || null,
       subPositionRate: subPositionRate,
       positionStats: positionStats,
       positionUpdatedAt: moment(),
-    });
+    };
+
+    // 닉네임 변경이 있으면 함께 업데이트
+    if (updatedName) {
+      updateData.name = updatedName;
+      updateData.simplifiedName = updatedName.toLowerCase().replace(/ /g, '');
+    }
+
+    found.set(updateData);
     await found.save();
 
     logger.info(`[${name}] 포지션 업데이트: 새 매치 ${processedCount}개 처리, 총 ${totalMatchCount}판`);

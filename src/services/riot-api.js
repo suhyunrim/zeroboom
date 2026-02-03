@@ -89,10 +89,37 @@ const getSummonerByName = async (summonerName) => {
     }
   });
 
+  // RSO에서 가져온 실제 닉네임 정보 추가
+  result.data.riotId = `${rsoResult.data.gameName}#${rsoResult.data.tagLine}`;
+
   return result.data;
 };
 
 exports.getSummonerByName = getSummonerByName;
+
+const getAccountByPuuid = async (puuid) => {
+  const rsoResult = await axios({
+    method: 'get',
+    url: `https://asia.api.riotgames.com/riot/account/v1/accounts/by-puuid/${puuid}`,
+    params: {
+      api_key: RIOT_API_KEY,
+    }
+  });
+
+  if (rsoResult.status !== 200)
+    throw new Error(
+      `riotAPI.getAccountByPuuid(${puuid}) => ${rsoResult.status}`,
+    );
+
+  return {
+    puuid: rsoResult.data.puuid,
+    gameName: rsoResult.data.gameName,
+    tagLine: rsoResult.data.tagLine,
+    riotId: `${rsoResult.data.gameName}#${rsoResult.data.tagLine}`,
+  };
+};
+
+exports.getAccountByPuuid = getAccountByPuuid;
 
 const getRankDataByPuuid = async (puuid) => {
   const result = await axios({
