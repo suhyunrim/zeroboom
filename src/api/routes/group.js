@@ -8,6 +8,7 @@ const groupController = require('../../controller/group');
 const tokenController = require('../../controller/token');
 const userController = require('../../controller/user');
 const summonerController = require('../../controller/summoner');
+const matchController = require('../../controller/match');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -159,6 +160,36 @@ module.exports = (app) => {
     } catch (e) {
       logger.error(e);
       // 이미 응답을 보냈으므로 여기서는 로그만
+    }
+  });
+
+  // 그룹 전체 레이팅 재계산 (정합성 리프레시)
+  route.post('/recalculate-rating', async (req, res) => {
+    const { groupName } = req.body;
+
+    if (!groupName) {
+      return res.status(400).json({ result: 'groupName이 필요합니다.' });
+    }
+
+    try {
+      const group = await models.group.findOne({ where: { groupName } });
+      if (!group) {
+        return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+      }
+
+      logger.info(`[${groupName}] 레이팅 재계산 시작`);
+
+      const result = await matchController.calculateRating(groupName);
+
+      if (result.status === 200) {
+        logger.info(`[${groupName}] 레이팅 재계산 완료`);
+        return res.status(200).json({ result: '레이팅 재계산이 완료되었습니다.' });
+      } else {
+        return res.status(result.status || 500).json({ result: result.result });
+      }
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
     }
   });
 }
