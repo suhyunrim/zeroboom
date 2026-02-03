@@ -409,6 +409,7 @@ module.exports = async (app) => {
 
       // winCommand 버튼 체크
       if (split[0] === 'winCommand') {
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const group = await models.group.findOne({
           where: { discordGuildId: interaction.guildId },
         });
@@ -417,11 +418,48 @@ module.exports = async (app) => {
         });
         const winTeam = Number(split[2]);
         await matchData.update({ winTeam });
-        await matchController.calculateRating(group.groupName);
+        await matchController.applyMatchResult(matchData.gameId);
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
+
+        // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
+        const changeButton = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`changeWinCommand|${split[1]}`)
+              .setLabel('승/패 변경하기')
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+        // 먼저 reply로 응답
         await interaction.reply(
-          `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다. (by ${interaction.member.nickname})`,
+          `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.\n(by ${interaction.member.nickname})`,
         );
+        // 원본 메시지의 버튼 변경
+        await interaction.message.edit({ components: [changeButton] });
+        return;
+      }
+
+      // changeWinCommand 버튼 체크 (승/패 변경하기)
+      if (split[0] === 'changeWinCommand') {
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+        const gameId = split[1];
+
+        // 다시 승/패 버튼 표시
+        const buttons = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${gameId}|1`)
+              .setLabel('🐶팀 승리!')
+              .setStyle(ButtonStyle.Success),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${gameId}|2`)
+              .setLabel('🐱팀 승리!')
+              .setStyle(ButtonStyle.Danger),
+          );
+
+        await interaction.update({ components: [buttons] });
         return;
       }
 
