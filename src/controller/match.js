@@ -359,6 +359,87 @@ module.exports.calculateRating = async (groupName) => {
   };
 };
 
+// 단일 매치 결과 적용 (10명만 업데이트)
+module.exports.applyMatchResult = async (gameId) => {
+  const matchData = await models.match.findOne({
+    where: { gameId },
+  });
+
+  if (!matchData) return { result: 'match not found', status: 404 };
+  if (!matchData.winTeam) return { result: 'winTeam not set', status: 400 };
+
+  const team1Data = matchData.team1; // [[puuid, name], ...]
+  const team2Data = matchData.team2;
+
+  // 매치 참가자들의 유저 정보 조회
+  const allPuuids = [...team1Data.map(p => p[0]), ...team2Data.map(p => p[0])];
+  const users = await models.user.findAll({
+    where: {
+      groupId: matchData.groupId,
+      puuid: allPuuids,
+    },
+  });
+
+  const userMap = {};
+  for (const user of users) {
+    userMap[user.puuid] = user;
+  }
+
+  // 팀별 평균 레이팅 계산
+  const getTeamAvgRating = (teamData) => {
+    let total = 0;
+    let count = 0;
+    for (const [puuid] of teamData) {
+      const user = userMap[puuid];
+      if (user) {
+        total += user.defaultRating + user.additionalRating;
+        count++;
+      }
+    }
+    return count > 0 ? total / count : 500;
+  };
+
+  const team1AvgRating = getTeamAvgRating(team1Data);
+  const team2AvgRating = getTeamAvgRating(team2Data);
+
+  // 레이팅 변화 계산
+  let team1Delta, team2Delta;
+  if (matchData.winTeam === 1) {
+    team1Delta = ratingCalculator.newRatingIfWon(team1AvgRating, team2AvgRating) - team1AvgRating;
+    team2Delta = ratingCalculator.newRatingIfLost(team2AvgRating, team1AvgRating) - team2AvgRating;
+  } else {
+    team1Delta = ratingCalculator.newRatingIfLost(team1AvgRating, team2AvgRating) - team1AvgRating;
+    team2Delta = ratingCalculator.newRatingIfWon(team2AvgRating, team1AvgRating) - team2AvgRating;
+  }
+
+  // 각 유저 업데이트
+  for (const [puuid] of team1Data) {
+    const user = userMap[puuid];
+    if (user) {
+      const isWin = matchData.winTeam === 1;
+      await user.update({
+        win: user.win + (isWin ? 1 : 0),
+        lose: user.lose + (isWin ? 0 : 1),
+        additionalRating: user.additionalRating + team1Delta,
+      });
+    }
+  }
+
+  for (const [puuid] of team2Data) {
+    const user = userMap[puuid];
+    if (user) {
+      const isWin = matchData.winTeam === 2;
+      await user.update({
+        win: user.win + (isWin ? 1 : 0),
+        lose: user.lose + (isWin ? 0 : 1),
+        additionalRating: user.additionalRating + team2Delta,
+      });
+    }
+  }
+
+  return { result: 'success', status: 200 };
+};
+
 module.exports.getMatchHistory = async (groupName, from, to) => {
   if (!groupName) return { status: 900, result: 'invalid group name' };
 
