@@ -162,8 +162,8 @@ module.exports.getDashboardStats = async (groupId) => {
       null
     );
 
-    // 2. N판 이상 최고 승률 (최소 5판)
-    const MIN_GAMES_FOR_WINRATE = 5;
+    // 2. N판 이상 최고 승률 (전체 판수의 10%, 최소 3판, 최대 15판)
+    const MIN_GAMES_FOR_WINRATE = Math.max(3, Math.min(15, Math.round(matches.length * 0.1)));
     const bestWinRateUser = Object.entries(userStats)
       .filter(([, stats]) => stats.games >= MIN_GAMES_FOR_WINRATE)
       .map(([puuid, stats]) => ({
@@ -199,8 +199,8 @@ module.exports.getDashboardStats = async (groupId) => {
       }))
       .sort((a, b) => b.streak - a.streak)[0] || null;
 
-    // 4. N판 이상 2인 조합 최고 승률 (최소 3판)
-    const MIN_GAMES_FOR_DUO = 3;
+    // 4. N판 이상 2인 조합 최고 승률 (전체 판수의 5%, 최소 2판, 최대 8판)
+    const MIN_GAMES_FOR_DUO = Math.max(2, Math.min(8, Math.round(matches.length * 0.05)));
     const bestDuo = Object.values(duoStats)
       .filter((duo) => duo.games >= MIN_GAMES_FOR_DUO)
       .map((duo) => ({
