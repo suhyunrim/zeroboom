@@ -17,6 +17,7 @@ const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 const { formatTier } = require('../utils/tierUtils');
+const { getKSTYearStart, getKSTIsoWeekday, daysAgo } = require('../utils/timeUtils');
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
@@ -33,7 +34,7 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
     });
     const until = latestGameCreation
       ? latestGameCreation.gameCreation
-      : new Date(new Date().getFullYear(), 0);
+      : getKSTYearStart();
     const matches = await getCustomGames(tokenId, accountId, until);
     const matchIds = matches.map((elem) => elem.gameId);
     const matchIdsInDB = (
@@ -470,7 +471,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     where: {
       groupId: group.id,
       latestMatchDate: {
-        [Op.gte]: moment().subtract(60, 'days').toDate()
+        [Op.gte]: daysAgo(60)
       }
     },
   });
@@ -505,7 +506,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
       const name = nameCache[puuid];
       matchPlayCountMap[name] = (matchPlayCountMap[name] || 0) + 1;
 
-      const weekDay = moment(match.createdAt).isoWeekday();
+      const weekDay = getKSTIsoWeekday(match.createdAt);
       if (weekDay == 3 || weekDay == 7) {
         fixedMatchPlayCountMap[name] = (fixedMatchPlayCountMap[name] || 0) + 1;
       }

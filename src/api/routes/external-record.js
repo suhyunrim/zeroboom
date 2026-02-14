@@ -2,6 +2,7 @@ const { Router } = require('express');
 const models = require('../../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
+const { addDays } = require('../../utils/timeUtils');
 
 const route = Router();
 
@@ -25,8 +26,7 @@ module.exports = (app) => {
     }
 
     try {
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + expireDays);
+      const expiresAt = addDays(new Date(), expireDays);
 
       const record = await models.externalRecord.create({
         puuid,

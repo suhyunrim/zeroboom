@@ -1,6 +1,7 @@
 const models = require('../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
+const { getKSTYear, getKSTMonth, getKSTMonthRange, getKSTHours } = require('../utils/timeUtils');
 
 /**
  * 대시보드 통계 조회
@@ -17,12 +18,10 @@ module.exports.getDashboardStats = async (groupId, month) => {
       year = y;
       mon = m - 1; // 0-indexed
     } else {
-      const now = new Date();
-      year = now.getFullYear();
-      mon = now.getMonth();
+      year = getKSTYear();
+      mon = getKSTMonth();
     }
-    const monthStart = new Date(year, mon, 1);
-    const monthEnd = new Date(year, mon + 1, 0, 23, 59, 59);
+    const { start: monthStart, end: monthEnd } = getKSTMonthRange(year, mon);
 
     // 이번 달 완료된 매치 조회
     const matches = await models.match.findAll({
@@ -83,8 +82,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
       const winTeam = match.winTeam;
       const createdAt = match.createdAt;
       const hasSnapshot = team1[0] && team1[0].length >= 3;
-      const kstDate = new Date(new Date(createdAt).getTime() + 9 * 60 * 60 * 1000);
-      const matchHour = kstDate.getUTCHours();
+      const matchHour = getKSTHours(createdAt);
       const isLateNight = matchHour >= 0 && matchHour < 6;
 
       // 팀 내 최저 레이팅 유저 찾기 (다크호스 계산용)
