@@ -4,6 +4,10 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 
+const POSITION_ABBR = {
+  TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', UTILITY: 'SUP',
+};
+
 const MAX_MATCH_COUNT = 6
 
 exports.run = async (groupName, interaction) => {
@@ -58,15 +62,15 @@ exports.run = async (groupName, interaction) => {
     if (ratingCache[summonerName]) return ratingCache[summonerName];
 
     const summonerData = await models.summoner.findOne({ where: { name: summonerName } });
-    if (!summonerData) return { name: summonerName, rating: 500 };
+    if (!summonerData) return { name: summonerName, rating: 500, position: null };
 
     const userData = await models.user.findOne({
       where: { groupId: group.id, puuid: summonerData.puuid },
     });
-    if (!userData) return { name: summonerName, rating: 500 };
+    if (!userData) return { name: summonerName, rating: 500, position: summonerData.mainPosition };
 
     const rating = userData.defaultRating + userData.additionalRating;
-    ratingCache[summonerName] = { name: summonerName, rating };
+    ratingCache[summonerName] = { name: summonerName, rating, position: summonerData.mainPosition };
     return ratingCache[summonerName];
   };
 
@@ -78,20 +82,21 @@ exports.run = async (groupName, interaction) => {
     team1WithRating.sort((a, b) => b.rating - a.rating);
     team2WithRating.sort((a, b) => b.rating - a.rating);
 
-    const formatTierDisplay = (name, rating) => {
+    const formatTierDisplay = (name, rating, position) => {
       const tierName = getTierName(rating);
       const tierStep = getTierStep(rating);
+      const posTag = `[${POSITION_ABBR[position] || position || '??'}]`;
       const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
       if (isHighTier) {
         const tierPoint = getTierPoint(rating);
         const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-        return `[${tierAbbr} ${tierPoint}LP]${name}`;
+        return `[${tierAbbr} ${tierPoint}LP]${posTag}${name}`;
       }
-      return `[${tierName.charAt(0)}${tierStep}]${name}`;
+      return `[${tierName.charAt(0)}${tierStep}]${posTag}${name}`;
     };
 
-    match.team1 = team1WithRating.map(({ name, rating }) => formatTierDisplay(name, rating));
-    match.team2 = team2WithRating.map(({ name, rating }) => formatTierDisplay(name, rating));
+    match.team1 = team1WithRating.map(({ name, rating, position }) => formatTierDisplay(name, rating, position));
+    match.team2 = team2WithRating.map(({ name, rating, position }) => formatTierDisplay(name, rating, position));
 
     // 평균 레이팅 계산
     match.team1AvgRating = team1WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
@@ -209,8 +214,9 @@ exports.reactButton = async (interaction, match) => {
       const tierDisplay = isHighTier
         ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
         : `[${tierName.charAt(0)}${getTierStep(rating)}]`;
+      const posTag = `[${POSITION_ABBR[summonerData.mainPosition] || summonerData.mainPosition || '??'}]`;
       teams[i].push({
-        name: `${tierDisplay}${summonerData.name}`,
+        name: `${tierDisplay}${posTag}${summonerData.name}`,
         rating: rating,
       });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);

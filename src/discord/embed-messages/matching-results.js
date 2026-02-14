@@ -16,8 +16,26 @@ const formatAvgTier = (avgRating) => {
   return `[평균 ${tierName.charAt(0)}${tierStep}]`;
 };
 
+// 한글/이모지 등 double-width 문자를 고려한 시각적 너비 계산
+const visualWidth = (str) => {
+  let width = 0;
+  for (const char of str) {
+    const code = char.codePointAt(0);
+    width += code > 0x7F ? 2 : 1;
+  }
+  return width;
+};
+
+const TARGET_WIDTH = 28;
+// U+2800 (Braille Pattern Blank) — 디스코드에서 공백으로 렌더링되지만 축소되지 않는 문자
+const INVISIBLE_SPACE = '\u2800';
+
 const format = (idx, team, winRate, emoji, avgRating = 0) => {
-  let message = `\`${emoji}${team[0]}\`\n\`${emoji}${team[1]}\`\n\`${emoji}${team[2]}\`\n\`${emoji}${team[3]}\`\n\`${emoji}${team[4]}\``;
+  let message = team.map((name) => {
+    const content = emoji + name;
+    const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
+    return `\`${content}\`` + INVISIBLE_SPACE.repeat(padding);
+  }).join('\n');
   const avgTierStr = formatAvgTier(avgRating);
   return {
     name: `**Plan ${idx}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}`,
