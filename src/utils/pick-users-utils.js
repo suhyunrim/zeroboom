@@ -159,6 +159,12 @@ const buildResultButtons = (time) => {
         .setCustomId(`pickUsers|${time}|positionMatch`)
         .setLabel('🧪 포지션 매칭생성')
         .setStyle(ButtonStyle.Secondary),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pickUsers|${time}|copy`)
+        .setLabel('📋 명령어 복사')
+        .setStyle(ButtonStyle.Secondary),
     );
 };
 
@@ -224,15 +230,14 @@ const executePick = async (interaction, data) => {
   const commandStr = pickedMembers.map((m, index) => `유저${index + 1}:${m.lolNickname}`);
   const unpickedNicknames = unpickedMembers.map((m) => m.lolNickname);
 
-  let message = `**${data.channelName}**에서 **${includedMembers.length}명** 중 **${PICK_COUNT}명**을 뽑습니다!
+  let message = `🎲 **${data.channelName}**에서 **${includedMembers.length}명** 중 **${PICK_COUNT}명**을 뽑습니다!
 
-   \`🎉 축하합니다! 🎉\`
-   :robot:: /매칭생성 ${commandStr.join(' ')}`;
+🎉 **축하합니다!** 🎉
+
+✅ **통과** : ${pickedNicknames.join(', ')}`;
 
   if (unpickedNicknames.length > 0) {
-    message += `
-    ---------------------------------------
-    ❌: ${unpickedNicknames.join(',')}`;
+    message += `\n\n❌ **탈락** : ${unpickedNicknames.join(', ')}`;
   }
 
   const time = Date.now();

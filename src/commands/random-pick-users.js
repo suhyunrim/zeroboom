@@ -73,17 +73,14 @@ exports.run = async (groupName, interaction) => {
     return getLOLNickname(nickname);
   });
 
-  let message = `**${interaction.member.voice.channel.name}** 채널에서 **${
-    members.size
-  }명** 중 **${PICK_COUNT}명**을 뽑습니다!
+  let message = `🎲 **${interaction.member.voice.channel.name}**에서 **${members.size}명** 중 **${PICK_COUNT}명**을 뽑습니다!
 
-   \`🎉 축하합니다! 🎉\`
-   :robot:: /매칭생성 ${commandStr.join(' ')}`;
+🎉 **축하합니다!** 🎉
+
+✅ **통과** : ${pickedNicknames.join(', ')}`;
 
   if (unpickedNicknames.length > 0) {
-    message += `
-    ---------------------------------------
-    ❌: ${unpickedNicknames.join(',')} (다음 뽑기 때 확정으로 뽑히게 됩니다)`;
+    message += `\n\n❌ **탈락** : ${unpickedNicknames.join(', ')}\n> 다음 뽑기 때 확정으로 포함됩니다.`;
   }
 
   const time = Date.now();
