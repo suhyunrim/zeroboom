@@ -48,6 +48,9 @@ module.exports.getDashboardStats = async (groupId, month) => {
           bestDuo: null,
           mostRivalry: null,
           topNewcomer: null,
+          topRatingRiser: null,
+          nightOwl: null,
+          darkHorse: null,
         },
         status: 200,
       };
@@ -68,7 +71,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
     };
 
     // 유저별 통계 집계
-    const userStats = {}; // { puuid: { games, wins, losses, matchHistory: [{won: bool, createdAt}] } }
+    const userStats = {}; // { puuid: { games, wins, losses, matchHistory, firstRating, lastRating } }
     // 듀오 통계 (같은 팀)
     const duoStats = {}; // { "puuid1|puuid2": { games, wins } }
     // 라이벌 통계 (상대 팀)
@@ -79,16 +82,39 @@ module.exports.getDashboardStats = async (groupId, month) => {
       const team2 = JSON.parse(match.team2);
       const winTeam = match.winTeam;
       const createdAt = match.createdAt;
+      const hasSnapshot = team1[0] && team1[0].length >= 3;
+      const matchHour = new Date(createdAt).getHours();
+      const isLateNight = matchHour >= 0 && matchHour < 6;
+
+      // 팀 내 최저 레이팅 유저 찾기 (다크호스 계산용)
+      let team1MinPuuid = null;
+      let team2MinPuuid = null;
+      if (hasSnapshot) {
+        let team1MinRating = Infinity;
+        for (const [puuid, , rating] of team1) {
+          if (rating < team1MinRating) { team1MinRating = rating; team1MinPuuid = puuid; }
+        }
+        let team2MinRating = Infinity;
+        for (const [puuid, , rating] of team2) {
+          if (rating < team2MinRating) { team2MinRating = rating; team2MinPuuid = puuid; }
+        }
+      }
 
       // team1 유저 통계
-      for (const [puuid] of team1) {
+      for (const player of team1) {
+        const puuid = player[0];
+        const rating = hasSnapshot ? player[2] : null;
         if (!userStats[puuid]) {
-          userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [] };
+          userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [], firstRating: rating, lastRating: rating, lateNightGames: 0, darkHorseWins: 0, darkHorseGames: 0 };
         }
         userStats[puuid].games++;
+        if (isLateNight) userStats[puuid].lateNightGames++;
+        if (puuid === team1MinPuuid) userStats[puuid].darkHorseGames++;
+        if (rating !== null) userStats[puuid].lastRating = rating;
         if (winTeam === 1) {
           userStats[puuid].wins++;
           userStats[puuid].matchHistory.push({ won: true, createdAt });
+          if (puuid === team1MinPuuid) userStats[puuid].darkHorseWins++;
         } else {
           userStats[puuid].losses++;
           userStats[puuid].matchHistory.push({ won: false, createdAt });
@@ -96,14 +122,20 @@ module.exports.getDashboardStats = async (groupId, month) => {
       }
 
       // team2 유저 통계
-      for (const [puuid] of team2) {
+      for (const player of team2) {
+        const puuid = player[0];
+        const rating = hasSnapshot ? player[2] : null;
         if (!userStats[puuid]) {
-          userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [] };
+          userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [], firstRating: rating, lastRating: rating, lateNightGames: 0, darkHorseWins: 0, darkHorseGames: 0 };
         }
         userStats[puuid].games++;
+        if (isLateNight) userStats[puuid].lateNightGames++;
+        if (puuid === team2MinPuuid) userStats[puuid].darkHorseGames++;
+        if (rating !== null) userStats[puuid].lastRating = rating;
         if (winTeam === 2) {
           userStats[puuid].wins++;
           userStats[puuid].matchHistory.push({ won: true, createdAt });
+          if (puuid === team2MinPuuid) userStats[puuid].darkHorseWins++;
         } else {
           userStats[puuid].losses++;
           userStats[puuid].matchHistory.push({ won: false, createdAt });
@@ -250,6 +282,42 @@ module.exports.getDashboardStats = async (groupId, month) => {
       }))
       .sort((a, b) => b.games - a.games)[0] || null;
 
+    // 7. 이달의 레이팅 상승왕 (firstRating → lastRating 변화량이 가장 큰 유저)
+    const topRatingRiser = Object.entries(userStats)
+      .filter(([, stats]) => stats.firstRating !== null && stats.lastRating !== null)
+      .map(([puuid, stats]) => ({
+        puuid,
+        ratingChange: stats.lastRating - stats.firstRating,
+        startRating: stats.firstRating,
+        endRating: stats.lastRating,
+        games: stats.games,
+      }))
+      .sort((a, b) => b.ratingChange - a.ratingChange)[0] || null;
+
+    // 8. 새벽 전사 (새벽 0~6시 경기 비율이 가장 높은 유저, 전체 판수의 10% 이상만)
+    const MIN_GAMES_FOR_LATE_NIGHT = Math.max(2, Math.round(matches.length * 0.1));
+    const nightOwl = Object.entries(userStats)
+      .filter(([, stats]) => stats.lateNightGames > 0 && stats.games >= MIN_GAMES_FOR_LATE_NIGHT)
+      .map(([puuid, stats]) => ({
+        puuid,
+        lateNightGames: stats.lateNightGames,
+        games: stats.games,
+        lateNightRate: (stats.lateNightGames / stats.games) * 100,
+      }))
+      .sort((a, b) => b.lateNightRate - a.lateNightRate || b.lateNightGames - a.lateNightGames)[0] || null;
+
+    // 9. 다크호스 (팀 내 최저 레이팅이었는데 팀이 이긴 횟수가 가장 많은 유저)
+    const darkHorse = Object.entries(userStats)
+      .filter(([, stats]) => stats.darkHorseGames > 0 && stats.darkHorseWins > stats.darkHorseGames / 2)
+      .map(([puuid, stats]) => ({
+        puuid,
+        darkHorseWins: stats.darkHorseWins,
+        darkHorseGames: stats.darkHorseGames,
+        darkHorseWinRate: (stats.darkHorseWins / stats.darkHorseGames) * 100,
+        games: stats.games,
+      }))
+      .sort((a, b) => b.darkHorseWins - a.darkHorseWins || b.darkHorseWinRate - a.darkHorseWinRate)[0] || null;
+
     // 결과 조합
     const result = {
       month: `${year}-${String(mon + 1).padStart(2, '0')}`,
@@ -319,6 +387,38 @@ module.exports.getDashboardStats = async (groupId, month) => {
             name: await getName(topNewcomer.puuid),
             games: topNewcomer.games,
             firstMatchDate: topNewcomer.firstMatchDate,
+          }
+        : null,
+      topRatingRiser: topRatingRiser
+        ? {
+            type: 'top_rating_riser',
+            puuid: topRatingRiser.puuid,
+            name: await getName(topRatingRiser.puuid),
+            ratingChange: topRatingRiser.ratingChange,
+            startRating: topRatingRiser.startRating,
+            endRating: topRatingRiser.endRating,
+            games: topRatingRiser.games,
+          }
+        : null,
+      nightOwl: nightOwl
+        ? {
+            type: 'night_owl',
+            puuid: nightOwl.puuid,
+            name: await getName(nightOwl.puuid),
+            lateNightGames: nightOwl.lateNightGames,
+            games: nightOwl.games,
+            lateNightRate: Number(nightOwl.lateNightRate.toFixed(1)),
+          }
+        : null,
+      darkHorse: darkHorse
+        ? {
+            type: 'dark_horse',
+            puuid: darkHorse.puuid,
+            name: await getName(darkHorse.puuid),
+            darkHorseWins: darkHorse.darkHorseWins,
+            darkHorseGames: darkHorse.darkHorseGames,
+            darkHorseWinRate: Number(darkHorse.darkHorseWinRate.toFixed(1)),
+            games: darkHorse.games,
           }
         : null,
     };
