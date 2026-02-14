@@ -412,6 +412,18 @@ module.exports.applyMatchResult = async (gameId) => {
     team2Delta = ratingCalculator.newRatingIfWon(team2AvgRating, team1AvgRating) - team2AvgRating;
   }
 
+  // 레이팅 스냅샷 생성 (반영 전 레이팅 저장)
+  const team1WithRating = team1Data.map(([puuid, name]) => {
+    const user = userMap[puuid];
+    const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
+    return [puuid, name, rating];
+  });
+  const team2WithRating = team2Data.map(([puuid, name]) => {
+    const user = userMap[puuid];
+    const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
+    return [puuid, name, rating];
+  });
+
   // 각 유저 업데이트
   for (const [puuid] of team1Data) {
     const user = userMap[puuid];
@@ -436,6 +448,9 @@ module.exports.applyMatchResult = async (gameId) => {
       });
     }
   }
+
+  // 레이팅 스냅샷을 매치에 저장
+  await matchData.update({ team1: team1WithRating, team2: team2WithRating });
 
   return { result: 'success', status: 200 };
 };
@@ -594,125 +609,122 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
   }
 }
 
-module.exports.getMatchHistoryByGroupId = async (groupId) => {
+module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, search = null) => {
   const group = await models.group.findByPk(groupId);
   if (!group) {
     return { status: 404, result: { error: 'Group not found' } };
   }
 
-  // 해당 그룹의 모든 유저 조회
-  const groupUsers = await models.user.findAll({
-    where: { groupId: group.id },
-  });
+  // 검색 조건 구성
+  const whereCondition = {
+    groupId: group.id,
+    winTeam: { [Op.ne]: null },
+  };
 
-  // 유저별 현재 레이팅 상태 초기화 (defaultRating에서 시작)
-  const userRatings = {};
-  for (const user of groupUsers) {
-    userRatings[user.puuid] = user.defaultRating;
+  if (search) {
+    const likeSearch = `%${search}%`;
+    whereCondition[Op.or] = [
+      { team1: { [Op.like]: likeSearch } },
+      { team2: { [Op.like]: likeSearch } },
+    ];
   }
 
-  // 해당 그룹의 완료된 모든 매치를 시간순(오래된 순)으로 조회
+  // 전체 매치 수 조회
+  const total = await models.match.count({ where: whereCondition });
+
+  // 페이지네이션 적용 (최신순)
+  const offset = (page - 1) * limit;
   const matches = await models.match.findAll({
-    where: {
-      groupId: group.id,
-      winTeam: { [Op.ne]: null },
-    },
-    order: [['createdAt', 'ASC']],
+    where: whereCondition,
+    order: [['createdAt', 'DESC']],
+    limit,
+    offset,
   });
 
   // 소환사 이름 캐시
   const summonerCache = {};
   const getSummonerName = async (puuid) => {
     if (!summonerCache[puuid]) {
-      const summoner = await models.summoner.findOne({ where: { puuid } });
+      const summoner = await models.summoner.findOne({ where: { puuid }, attributes: ['name'], raw: true });
       summonerCache[puuid] = summoner ? summoner.name : 'Unknown';
     }
     return summonerCache[puuid];
   };
 
-  // 매치별 스냅샷 저장
   const matchSnapshots = [];
 
   for (const match of matches) {
-    const team1Data = match.team1; // [[puuid, savedRating], ...]
+    const team1Data = match.team1;
     const team2Data = match.team2;
+    const hasRatingSnapshot = team1Data[0] && team1Data[0].length >= 3;
 
-    // 팀 플레이어 정보 구성 (현재 시점의 레이팅 사용)
-    const buildTeamPlayers = async (teamData) => {
-      const players = [];
-      let totalRating = 0;
-      let validCount = 0;
-
-      for (const [puuid] of teamData) {
-        const rating = userRatings[puuid] ?? 500; // 그룹에 없는 유저는 기본값 500
-        const name = await getSummonerName(puuid);
-        const tier = formatTier(rating);
-
-        players.push({ puuid, name, rating: Math.round(rating), tier });
-        totalRating += rating;
-        validCount++;
-      }
-
-      return {
-        players,
-        avgRating: validCount > 0 ? Math.round(totalRating / validCount) : 0,
+    if (hasRatingSnapshot) {
+      // 저장된 레이팅 스냅샷 사용
+      const buildTeamFromSnapshot = async (teamData) => {
+        const players = [];
+        let totalRating = 0;
+        for (const [puuid, name, rating] of teamData) {
+          players.push({ puuid, name, rating, tier: formatTier(rating) });
+          totalRating += rating;
+        }
+        return {
+          players,
+          avgRating: players.length > 0 ? Math.round(totalRating / players.length) : 0,
+        };
       };
-    };
 
-    const team1 = await buildTeamPlayers(team1Data);
-    const team2 = await buildTeamPlayers(team2Data);
+      const team1 = await buildTeamFromSnapshot(team1Data);
+      const team2 = await buildTeamFromSnapshot(team2Data);
 
-    // 레이팅 증감 계산
-    const team1AvgRating = team1.avgRating;
-    const team2AvgRating = team2.avgRating;
+      // ratingChange는 팀 평균에서 계산
+      let team1RatingChange, team2RatingChange;
+      if (match.winTeam === 1) {
+        team1RatingChange = ratingCalculator.newRatingIfWon(team1.avgRating, team2.avgRating) - team1.avgRating;
+        team2RatingChange = ratingCalculator.newRatingIfLost(team2.avgRating, team1.avgRating) - team2.avgRating;
+      } else {
+        team1RatingChange = ratingCalculator.newRatingIfLost(team1.avgRating, team2.avgRating) - team1.avgRating;
+        team2RatingChange = ratingCalculator.newRatingIfWon(team2.avgRating, team1.avgRating) - team2.avgRating;
+      }
 
-    let team1RatingChange, team2RatingChange;
-    if (match.winTeam === 1) {
-      team1RatingChange = ratingCalculator.newRatingIfWon(team1AvgRating, team2AvgRating) - team1AvgRating;
-      team2RatingChange = ratingCalculator.newRatingIfLost(team2AvgRating, team1AvgRating) - team2AvgRating;
+      matchSnapshots.push({
+        gameId: match.gameId,
+        createdAt: match.createdAt,
+        winTeam: match.winTeam,
+        team1: { players: team1.players, avgRating: team1.avgRating, ratingChange: Math.round(team1RatingChange) },
+        team2: { players: team2.players, avgRating: team2.avgRating, ratingChange: Math.round(team2RatingChange) },
+      });
     } else {
-      team1RatingChange = ratingCalculator.newRatingIfLost(team1AvgRating, team2AvgRating) - team1AvgRating;
-      team2RatingChange = ratingCalculator.newRatingIfWon(team2AvgRating, team1AvgRating) - team2AvgRating;
-    }
+      // 스냅샷 없는 기존 매치 — 이름만 표시 (레이팅 정보 없음)
+      const buildTeamFallback = async (teamData) => {
+        const players = [];
+        for (const [puuid, name] of teamData) {
+          const resolvedName = name || await getSummonerName(puuid);
+          players.push({ puuid, name: resolvedName, rating: null, tier: null });
+        }
+        return { players, avgRating: null };
+      };
 
-    // 스냅샷 저장
-    matchSnapshots.push({
-      gameId: match.gameId,
-      createdAt: match.createdAt,
-      winTeam: match.winTeam,
-      team1: {
-        players: team1.players,
-        avgRating: team1.avgRating,
-        ratingChange: Math.round(team1RatingChange),
-      },
-      team2: {
-        players: team2.players,
-        avgRating: team2.avgRating,
-        ratingChange: Math.round(team2RatingChange),
-      },
-    });
+      const team1 = await buildTeamFallback(team1Data);
+      const team2 = await buildTeamFallback(team2Data);
 
-    // 유저별 레이팅 업데이트 (다음 매치를 위해)
-    for (const [puuid] of team1Data) {
-      if (userRatings[puuid] !== undefined) {
-        userRatings[puuid] += team1RatingChange;
-      }
-    }
-    for (const [puuid] of team2Data) {
-      if (userRatings[puuid] !== undefined) {
-        userRatings[puuid] += team2RatingChange;
-      }
+      matchSnapshots.push({
+        gameId: match.gameId,
+        createdAt: match.createdAt,
+        winTeam: match.winTeam,
+        team1: { players: team1.players, avgRating: null, ratingChange: null },
+        team2: { players: team2.players, avgRating: null, ratingChange: null },
+      });
     }
   }
-
-  // 최근 순으로 정렬
-  matchSnapshots.reverse();
 
   return {
     status: 200,
     result: {
       matches: matchSnapshots,
-      total: matchSnapshots.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     },
   };
 };

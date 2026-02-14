@@ -11,7 +11,7 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
       },
       team1: {
-        type: DataTypes.STRING(512),
+        type: DataTypes.STRING(1024),
         get: function() {
             return JSON.parse(this.getDataValue('team1'));
         }, 
@@ -21,7 +21,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       team2: {
-        type: DataTypes.STRING(512),
+        type: DataTypes.STRING(1024),
         get: function() {
             return JSON.parse(this.getDataValue('team2'));
         }, 

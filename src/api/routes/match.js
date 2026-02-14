@@ -59,10 +59,16 @@ module.exports = (app) => {
       [Segments.PARAMS]: Joi.object({
         groupId: Joi.number().integer().required(),
       }),
+      [Segments.QUERY]: Joi.object({
+        page: Joi.number().integer().min(1).default(1),
+        limit: Joi.number().integer().min(1).max(100).default(20),
+        search: Joi.string().trim().max(50).allow('').optional(),
+      }),
     }),
     async (req, res) => {
       const { groupId } = req.params;
-      const result = await controller.getMatchHistoryByGroupId(groupId);
+      const { page, limit, search } = req.query;
+      const result = await controller.getMatchHistoryByGroupId(groupId, Number(page) || 1, Number(limit) || 20, search || null);
       return res.status(result.status).json(result.result);
     },
   );
