@@ -83,7 +83,8 @@ module.exports.getDashboardStats = async (groupId, month) => {
       const winTeam = match.winTeam;
       const createdAt = match.createdAt;
       const hasSnapshot = team1[0] && team1[0].length >= 3;
-      const matchHour = new Date(createdAt).getHours();
+      const kstDate = new Date(new Date(createdAt).getTime() + 9 * 60 * 60 * 1000);
+      const matchHour = kstDate.getUTCHours();
       const isLateNight = matchHour >= 0 && matchHour < 6;
 
       // 팀 내 최저 레이팅 유저 찾기 (다크호스 계산용)
