@@ -294,10 +294,10 @@ module.exports = async (app) => {
         return;
       }
 
-      // posEditUser 버튼 (유저별 설정 버튼)
+      // posEditUser 버튼 (유저별 설정 버튼, customId에 인덱스 사용)
       if (split[0] === 'posEditUser') {
         const timeKey = split[1];
-        const nickname = split[2];
+        const userIndex = Number(split[2]);
         const data = pickUsersData.get(timeKey);
 
         if (!data) {
@@ -305,6 +305,7 @@ module.exports = async (app) => {
           return;
         }
 
+        const nickname = data.pickedUsers[userIndex];
         const pickUsersCommand = commandList.get('인원뽑기');
 
         // 메인 UI 먼저 업데이트 (현재 상태 반영)
@@ -316,7 +317,7 @@ module.exports = async (app) => {
         pickUsersData.set(timeKey, data);
 
         // ephemeral로 개인 설정창 표시
-        const editUI = pickUsersCommand.buildUserEditUI(nickname, data.positionData, timeKey);
+        const editUI = pickUsersCommand.buildUserEditUI(userIndex, nickname, data.positionData, timeKey);
         await interaction.followUp(editUI);
         return;
       }
@@ -497,10 +498,10 @@ module.exports = async (app) => {
     try {
       const split = interaction.customId.split('|');
 
-      // posSelectTeam SelectMenu (팀 선택)
+      // posSelectTeam SelectMenu (팀 선택, customId에 인덱스 사용)
       if (split[0] === 'posSelectTeam') {
         const timeKey = split[1];
-        const nickname = split[2];
+        const userIndex = Number(split[2]);
         const selectedTeam = interaction.values[0];
         const data = pickUsersData.get(timeKey);
 
@@ -508,6 +509,8 @@ module.exports = async (app) => {
           await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
           return;
         }
+
+        const nickname = data.pickedUsers[userIndex];
 
         // 데이터 업데이트
         data.positionData[nickname].team = selectedTeam;
@@ -528,10 +531,10 @@ module.exports = async (app) => {
         return;
       }
 
-      // posSelectPos SelectMenu (포지션 선택)
+      // posSelectPos SelectMenu (포지션 선택, customId에 인덱스 사용)
       if (split[0] === 'posSelectPos') {
         const timeKey = split[1];
-        const nickname = split[2];
+        const userIndex = Number(split[2]);
         const selectedPosition = interaction.values[0];
         const data = pickUsersData.get(timeKey);
 
@@ -539,6 +542,8 @@ module.exports = async (app) => {
           await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
           return;
         }
+
+        const nickname = data.pickedUsers[userIndex];
 
         // 데이터 업데이트
         data.positionData[nickname].position = selectedPosition;

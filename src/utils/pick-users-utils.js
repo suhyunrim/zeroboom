@@ -315,7 +315,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
   const rows = [];
 
-  // 유저 버튼 (한 줄에 5개씩)
+  // 유저 버튼 (한 줄에 5개씩, customId에 인덱스 사용 — 특수문자 문제 방지)
   for (let start = 0; start < pickedUsers.length; start += 5) {
     const slice = pickedUsers.slice(start, start + 5);
     const row = new ActionRowBuilder().addComponents(
@@ -323,7 +323,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
         const globalIdx = start + idx;
         const displayName = nickname.length > 12 ? nickname.substring(0, 10) + '..' : nickname;
         return new ButtonBuilder()
-          .setCustomId(`posEditUser|${timeKey}|${nickname}`)
+          .setCustomId(`posEditUser|${timeKey}|${globalIdx}`)
           .setLabel(`${globalIdx + 1}. ${displayName}`)
           .setStyle(ButtonStyle.Secondary);
       })
@@ -347,8 +347,12 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
 /**
  * 개별 유저 설정 UI (ephemeral)
+ * @param {number} userIndex - pickedUsers 배열 인덱스
+ * @param {string} nickname - 표시용 닉네임
+ * @param {Object} positionData - 포지션 데이터
+ * @param {string} timeKey - 타임키
  */
-const buildUserEditUI = (nickname, positionData, timeKey) => {
+const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
   const data = positionData[nickname];
 
   const teamEmoji = TEAM_EMOJI[data.team];
@@ -357,7 +361,7 @@ const buildUserEditUI = (nickname, positionData, timeKey) => {
   const content = `**⚙️ ${nickname} 설정**\n\n현재: ${teamEmoji} ${data.team} / ${posEmoji} ${data.position}`;
 
   const teamSelect = new StringSelectMenuBuilder()
-    .setCustomId(`posSelectTeam|${timeKey}|${nickname}`)
+    .setCustomId(`posSelectTeam|${timeKey}|${userIndex}`)
     .setPlaceholder(data.team ? `현재: ${data.team}` : '팀 선택')
     .addOptions([
       { label: '랜덤팀', value: '랜덤팀', emoji: '🎲', description: '자동으로 팀 배정' },
@@ -366,7 +370,7 @@ const buildUserEditUI = (nickname, positionData, timeKey) => {
     ]);
 
   const positionSelect = new StringSelectMenuBuilder()
-    .setCustomId(`posSelectPos|${timeKey}|${nickname}`)
+    .setCustomId(`posSelectPos|${timeKey}|${userIndex}`)
     .setPlaceholder(data.position ? `현재: ${data.position}` : '포지션 선택')
     .addOptions([
       { label: '상관X', value: '상관X', emoji: '🎲', description: '자동으로 포지션 배정' },
