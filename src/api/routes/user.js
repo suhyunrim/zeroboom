@@ -58,9 +58,9 @@ module.exports = (app) => {
   });
 
   route.get('/getInfo', async (req, res, next) => {
-    const { groupId } = req.query;
+    const { groupId, puuid: queryPuuid } = req.query;
     try {
-      const puuid = req.headers.puuid;
+      const puuid = queryPuuid || req.headers.puuid;
       if (!puuid) {
         return res.status(400).json({ result: 'puuid가 필요합니다.' });
       }
