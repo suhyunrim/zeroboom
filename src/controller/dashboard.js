@@ -226,44 +226,27 @@ module.exports.getDashboardStats = async (groupId, month) => {
     // 6. 신규 참가자 최다 판수 (해당 월 말 기준 3주 이내에 첫 매치한 유저)
     const threeWeeksAgo = new Date(monthEnd.getTime() - 21 * 24 * 60 * 60 * 1000);
 
-    // 그룹 내 모든 완료된 매치에서 각 유저의 첫 매치 날짜 조회
-    const allMatches = await models.match.findAll({
+    // users 테이블의 firstMatchDate로 신규 참가자 판별
+    const newcomers = await models.user.findAll({
       where: {
         groupId,
-        winTeam: { [Op.ne]: null },
+        firstMatchDate: { [Op.gte]: threeWeeksAgo },
       },
-      attributes: ['team1', 'team2', 'createdAt'],
-      order: [['createdAt', 'ASC']],
+      attributes: ['puuid', 'firstMatchDate'],
       raw: true,
     });
 
-    // 각 유저의 첫 매치 날짜 계산
-    const firstMatchDateMap = {}; // { puuid: Date }
-    for (const match of allMatches) {
-      const team1 = JSON.parse(match.team1);
-      const team2 = JSON.parse(match.team2);
-      const createdAt = new Date(match.createdAt);
-
-      for (const [puuid] of [...team1, ...team2]) {
-        if (!firstMatchDateMap[puuid]) {
-          firstMatchDateMap[puuid] = createdAt;
-        }
-      }
+    const newcomerMap = {};
+    for (const u of newcomers) {
+      newcomerMap[u.puuid] = u.firstMatchDate;
     }
 
-    // 첫 매치가 최근 3주 이내인 유저 필터링
-    const newUserPuuids = new Set(
-      Object.entries(firstMatchDateMap)
-        .filter(([, date]) => date >= threeWeeksAgo)
-        .map(([puuid]) => puuid)
-    );
-
     const topNewcomer = Object.entries(userStats)
-      .filter(([puuid]) => newUserPuuids.has(puuid))
+      .filter(([puuid]) => newcomerMap[puuid])
       .map(([puuid, stats]) => ({
         puuid,
         games: stats.games,
-        firstMatchDate: firstMatchDateMap[puuid],
+        firstMatchDate: newcomerMap[puuid],
       }))
       .sort((a, b) => b.games - a.games)[0] || null;
 

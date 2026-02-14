@@ -425,15 +425,18 @@ module.exports.applyMatchResult = async (gameId) => {
   });
 
   // 각 유저 업데이트
+  const now = new Date();
   for (const [puuid] of team1Data) {
     const user = userMap[puuid];
     if (user) {
       const isWin = matchData.winTeam === 1;
-      await user.update({
+      const updateData = {
         win: user.win + (isWin ? 1 : 0),
         lose: user.lose + (isWin ? 0 : 1),
         additionalRating: user.additionalRating + team1Delta,
-      });
+      };
+      if (!user.firstMatchDate) updateData.firstMatchDate = now;
+      await user.update(updateData);
     }
   }
 
@@ -441,11 +444,13 @@ module.exports.applyMatchResult = async (gameId) => {
     const user = userMap[puuid];
     if (user) {
       const isWin = matchData.winTeam === 2;
-      await user.update({
+      const updateData = {
         win: user.win + (isWin ? 1 : 0),
         lose: user.lose + (isWin ? 0 : 1),
         additionalRating: user.additionalRating + team2Delta,
-      });
+      };
+      if (!user.firstMatchDate) updateData.firstMatchDate = now;
+      await user.update(updateData);
     }
   }
 

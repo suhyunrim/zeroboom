@@ -39,6 +39,9 @@ module.exports = (sequelize, DataTypes) => {
       latestMatchDate: {
         type: DataTypes.DATE,
       },
+      firstMatchDate: {
+        type: DataTypes.DATE,
+      },
       revisionDate: {
         type: DataTypes.DATE,
       },
