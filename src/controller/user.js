@@ -3,10 +3,11 @@ const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const { getCustomGames } = require('../services/riot-api');
 const { getRatingTier } = require('../services/user');
+const { getKSTYearStart } = require('../utils/timeUtils');
 
 module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
   try {
-    const until = new Date(new Date().getFullYear(), 0);
+    const until = getKSTYearStart();
     const riotMatches = await getCustomGames(tokenId, accountId, until);
 
     const riotMatchIds = riotMatches.map((elem) => elem.gameId);
@@ -196,12 +197,15 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   const opponentStats = {}; // { puuid: { games, myWins, myLosses } }
   // 매치 히스토리 (연승/연패 및 최근 N판 용)
   const matchHistory = []; // [{ won: bool, createdAt }]
+  // 레이팅 히스토리
+  const ratingHistory = []; // [{ rating, createdAt, won }]
 
   for (const match of matches) {
     const team1 = JSON.parse(match.team1);
     const team2 = JSON.parse(match.team2);
     const winTeam = match.winTeam;
     const createdAt = match.createdAt;
+    const hasSnapshot = team1[0] && team1[0].length >= 3;
 
     const team1Puuids = team1.map(([puuid]) => puuid);
     const team2Puuids = team2.map(([puuid]) => puuid);
@@ -216,6 +220,15 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
 
     const myWon = winTeam === myTeam;
     matchHistory.push({ won: myWon, createdAt });
+
+    // 레이팅 스냅샷에서 내 레이팅 추출
+    if (hasSnapshot) {
+      const myTeamData = myTeam === 1 ? team1 : team2;
+      const myPlayer = myTeamData.find(([puuid]) => puuid === myPuuid);
+      if (myPlayer) {
+        ratingHistory.push({ rating: myPlayer[2], createdAt, won: myWon });
+      }
+    }
 
     // 같은 팀 멤버 통계
     const myTeamPuuids = myTeam === 1 ? team1Puuids : team2Puuids;
@@ -373,6 +386,22 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     };
   })();
 
+  // 레이팅 히스토리: 최근 100판, 같은 날짜는 마지막 매치 기준으로 그룹핑
+  const recentRatingHistory = ratingHistory.slice(-100);
+  const dailyRatingMap = new Map(); // date string -> rating
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+  for (const entry of recentRatingHistory) {
+    const kstDate = new Date(new Date(entry.createdAt).getTime() + KST_OFFSET_MS);
+    const dateKey = `${kstDate.getUTCFullYear()}-${String(kstDate.getUTCMonth() + 1).padStart(2, '0')}-${String(kstDate.getUTCDate()).padStart(2, '0')}`;
+    dailyRatingMap.set(dateKey, entry.rating); // 시간순이므로 마지막 값이 그날의 최종 레이팅
+  }
+
+  const dailyRatingHistory = Array.from(dailyRatingMap.entries()).map(([date, rating]) => ({
+    date,
+    rating,
+  }));
+
   return {
     topTeammates,
     topOpponents,
@@ -384,6 +413,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     maxLoseStreak,
     bestOpponent,
     worstOpponent,
+    ratingHistory: dailyRatingHistory,
   };
 };
 
