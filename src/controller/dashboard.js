@@ -3,16 +3,26 @@ const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 
 /**
- * 이번 달 대시보드 통계 조회
+ * 대시보드 통계 조회
  * @param {number} groupId - 그룹 ID
+ * @param {string} [month] - 조회할 월 (YYYY-MM 형식, 미지정 시 이번 달)
  * @returns {Promise<Object>} 대시보드 데이터
  */
-module.exports.getDashboardStats = async (groupId) => {
+module.exports.getDashboardStats = async (groupId, month) => {
   try {
-    // 이번 달 시작/끝 날짜 계산
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    // 조회 대상 월 계산
+    let year, mon;
+    if (month) {
+      const [y, m] = month.split('-').map(Number);
+      year = y;
+      mon = m - 1; // 0-indexed
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      mon = now.getMonth();
+    }
+    const monthStart = new Date(year, mon, 1);
+    const monthEnd = new Date(year, mon + 1, 0, 23, 59, 59);
 
     // 이번 달 완료된 매치 조회
     const matches = await models.match.findAll({
@@ -30,7 +40,7 @@ module.exports.getDashboardStats = async (groupId) => {
     if (matches.length === 0) {
       return {
         result: {
-          month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+          month: `${year}-${String(mon + 1).padStart(2, '0')}`,
           totalMatches: 0,
           mostGames: null,
           bestWinRate: null,
@@ -136,11 +146,11 @@ module.exports.getDashboardStats = async (groupId) => {
       }
     }
 
-    // 만료되지 않은 외부 기록 합산 (이번 달 범위 내)
+    // 만료되지 않은 외부 기록 합산 (해당 월 범위 내, 해당 월 말 기준으로 만료 여부 판단)
     const externalRecords = await models.externalRecord.findAll({
       where: {
         groupId,
-        expiresAt: { [Op.gt]: now },
+        expiresAt: { [Op.gt]: monthEnd },
         createdAt: { [Op.between]: [monthStart, monthEnd] },
       },
       raw: true,
@@ -213,8 +223,8 @@ module.exports.getDashboardStats = async (groupId) => {
     // 5. 상대 전적 최다 판수
     const mostRivalry = Object.values(rivalryStats).sort((a, b) => b.games - a.games)[0] || null;
 
-    // 6. 신규 참가자 최다 판수 (첫 매치가 최근 3주 이내인 유저)
-    const threeWeeksAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
+    // 6. 신규 참가자 최다 판수 (해당 월 말 기준 3주 이내에 첫 매치한 유저)
+    const threeWeeksAgo = new Date(monthEnd.getTime() - 21 * 24 * 60 * 60 * 1000);
 
     // 그룹 내 모든 완료된 매치에서 각 유저의 첫 매치 날짜 조회
     const allMatches = await models.match.findAll({
@@ -259,7 +269,7 @@ module.exports.getDashboardStats = async (groupId) => {
 
     // 결과 조합
     const result = {
-      month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+      month: `${year}-${String(mon + 1).padStart(2, '0')}`,
       totalMatches: matches.length,
       mostGames: mostGamesUser
         ? {
