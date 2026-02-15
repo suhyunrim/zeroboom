@@ -361,7 +361,8 @@ module.exports.calculateRating = async (groupName) => {
 };
 
 // 단일 매치 결과 적용 (10명만 업데이트)
-module.exports.applyMatchResult = async (gameId) => {
+// previousWinTeam: 이전에 적용된 승리팀 (null이면 첫 적용)
+module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   const matchData = await models.match.findOne({
     where: { gameId },
   });
@@ -369,8 +370,9 @@ module.exports.applyMatchResult = async (gameId) => {
   if (!matchData) return { result: 'match not found', status: 404 };
   if (!matchData.winTeam) return { result: 'winTeam not set', status: 400 };
 
-  const team1Data = matchData.team1; // [[puuid, name], ...]
+  const team1Data = matchData.team1; // [[puuid, name], ...] 또는 [[puuid, name, rating], ...]
   const team2Data = matchData.team2;
+  const hasSnapshot = team1Data[0] && team1Data[0].length >= 3;
 
   // 매치 참가자들의 유저 정보 조회
   const allPuuids = [...team1Data.map(p => p[0]), ...team2Data.map(p => p[0])];
@@ -386,8 +388,18 @@ module.exports.applyMatchResult = async (gameId) => {
     userMap[user.puuid] = user;
   }
 
-  // 팀별 평균 레이팅 계산
-  const getTeamAvgRating = (teamData) => {
+  // 스냅샷 레이팅 기반 팀 평균 계산
+  const getSnapshotAvgRating = (teamData) => {
+    let total = 0;
+    let count = 0;
+    for (const [puuid, , rating] of teamData) {
+      if (userMap[puuid]) { total += rating; count++; }
+    }
+    return count > 0 ? total / count : 500;
+  };
+
+  // 현재 레이팅 기반 팀 평균 계산
+  const getCurrentAvgRating = (teamData) => {
     let total = 0;
     let count = 0;
     for (const [puuid] of teamData) {
@@ -400,10 +412,55 @@ module.exports.applyMatchResult = async (gameId) => {
     return count > 0 ? total / count : 500;
   };
 
-  const team1AvgRating = getTeamAvgRating(team1Data);
-  const team2AvgRating = getTeamAvgRating(team2Data);
+  // === 이전 결과 되돌리기 ===
+  if (previousWinTeam && hasSnapshot) {
+    const snapTeam1Avg = getSnapshotAvgRating(team1Data);
+    const snapTeam2Avg = getSnapshotAvgRating(team2Data);
 
-  // 레이팅 변화 계산
+    let oldTeam1Delta, oldTeam2Delta;
+    if (previousWinTeam === 1) {
+      oldTeam1Delta = ratingCalculator.newRatingIfWon(snapTeam1Avg, snapTeam2Avg) - snapTeam1Avg;
+      oldTeam2Delta = ratingCalculator.newRatingIfLost(snapTeam2Avg, snapTeam1Avg) - snapTeam2Avg;
+    } else {
+      oldTeam1Delta = ratingCalculator.newRatingIfLost(snapTeam1Avg, snapTeam2Avg) - snapTeam1Avg;
+      oldTeam2Delta = ratingCalculator.newRatingIfWon(snapTeam2Avg, snapTeam1Avg) - snapTeam2Avg;
+    }
+
+    for (const [puuid] of team1Data) {
+      const user = userMap[puuid];
+      if (user) {
+        const wasWin = previousWinTeam === 1;
+        await user.update({
+          win: user.win - (wasWin ? 1 : 0),
+          lose: user.lose - (wasWin ? 0 : 1),
+          additionalRating: user.additionalRating - oldTeam1Delta,
+        });
+      }
+    }
+
+    for (const [puuid] of team2Data) {
+      const user = userMap[puuid];
+      if (user) {
+        const wasWin = previousWinTeam === 2;
+        await user.update({
+          win: user.win - (wasWin ? 1 : 0),
+          lose: user.lose - (wasWin ? 0 : 1),
+          additionalRating: user.additionalRating - oldTeam2Delta,
+        });
+      }
+    }
+
+    // userMap 갱신 (되돌린 값 반영)
+    for (const user of Object.values(userMap)) {
+      await user.reload();
+    }
+  }
+
+  // === 새 결과 적용 ===
+  // 스냅샷이 있으면 원래 시점의 레이팅으로 delta 계산, 없으면 현재 레이팅 사용
+  const team1AvgRating = hasSnapshot ? getSnapshotAvgRating(team1Data) : getCurrentAvgRating(team1Data);
+  const team2AvgRating = hasSnapshot ? getSnapshotAvgRating(team2Data) : getCurrentAvgRating(team2Data);
+
   let team1Delta, team2Delta;
   if (matchData.winTeam === 1) {
     team1Delta = ratingCalculator.newRatingIfWon(team1AvgRating, team2AvgRating) - team1AvgRating;
@@ -413,17 +470,20 @@ module.exports.applyMatchResult = async (gameId) => {
     team2Delta = ratingCalculator.newRatingIfWon(team2AvgRating, team1AvgRating) - team2AvgRating;
   }
 
-  // 레이팅 스냅샷 생성 (반영 전 레이팅 저장)
-  const team1WithRating = team1Data.map(([puuid, name]) => {
-    const user = userMap[puuid];
-    const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
-    return [puuid, name, rating];
-  });
-  const team2WithRating = team2Data.map(([puuid, name]) => {
-    const user = userMap[puuid];
-    const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
-    return [puuid, name, rating];
-  });
+  // 레이팅 스냅샷 생성 (첫 적용 시에만)
+  if (!hasSnapshot) {
+    const team1WithRating = team1Data.map(([puuid, name]) => {
+      const user = userMap[puuid];
+      const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
+      return [puuid, name, rating];
+    });
+    const team2WithRating = team2Data.map(([puuid, name]) => {
+      const user = userMap[puuid];
+      const rating = user ? Math.round(user.defaultRating + user.additionalRating) : 500;
+      return [puuid, name, rating];
+    });
+    await matchData.update({ team1: team1WithRating, team2: team2WithRating });
+  }
 
   // 각 유저 업데이트
   const now = new Date();
@@ -454,9 +514,6 @@ module.exports.applyMatchResult = async (gameId) => {
       await user.update(updateData);
     }
   }
-
-  // 레이팅 스냅샷을 매치에 저장
-  await matchData.update({ team1: team1WithRating, team2: team2WithRating });
 
   return { result: 'success', status: 200 };
 };

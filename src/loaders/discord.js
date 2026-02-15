@@ -417,9 +417,10 @@ module.exports = async (app) => {
         const matchData = await models.match.findOne({
           where: { gameId: Number(split[1]) },
         });
+        const previousWinTeam = matchData.winTeam; // 이전 승리팀 저장 (되돌리기용)
         const winTeam = Number(split[2]);
         await matchData.update({ winTeam });
-        await matchController.applyMatchResult(matchData.gameId);
+        await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
 
         // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
