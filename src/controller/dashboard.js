@@ -50,6 +50,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
           topRatingRiser: null,
           nightOwl: null,
           darkHorse: null,
+          honorKing: null,
         },
         status: 200,
       };
@@ -317,6 +318,26 @@ module.exports.getDashboardStats = async (groupId, month) => {
       }))
       .sort((a, b) => b.darkHorseWins - a.darkHorseWins || b.darkHorseWinRate - a.darkHorseWinRate)[0] || null;
 
+    // 10. 명예왕 (해당 월 가장 많이 MVP 투표를 받은 유저)
+    const honorVotes = await models.honor_vote.findAll({
+      where: {
+        groupId,
+        createdAt: { [Op.between]: [monthStart, monthEnd] },
+      },
+      raw: true,
+    });
+
+    const honorCounts = {};
+    for (const vote of honorVotes) {
+      if (!honorCounts[vote.targetPuuid]) {
+        honorCounts[vote.targetPuuid] = 0;
+      }
+      honorCounts[vote.targetPuuid]++;
+    }
+
+    const honorKingEntry = Object.entries(honorCounts)
+      .sort((a, b) => b[1] - a[1])[0] || null;
+
     // 결과 조합
     const result = {
       month: `${year}-${String(mon + 1).padStart(2, '0')}`,
@@ -418,6 +439,14 @@ module.exports.getDashboardStats = async (groupId, month) => {
             darkHorseGames: darkHorse.darkHorseGames,
             darkHorseWinRate: Number(darkHorse.darkHorseWinRate.toFixed(1)),
             games: darkHorse.games,
+          }
+        : null,
+      honorKing: honorKingEntry
+        ? {
+            type: 'honor_king',
+            puuid: honorKingEntry[0],
+            name: await getName(honorKingEntry[0]),
+            votes: honorKingEntry[1],
           }
         : null,
     };

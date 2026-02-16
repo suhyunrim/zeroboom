@@ -3,7 +3,27 @@ const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
 const matchController = require('../controller/match');
+const honorController = require('../controller/honor');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
+
+function formatHonorResults(results, session) {
+  if (!results || results.length === 0) {
+    return '**🏆 명예 투표 종료** - 투표 결과가 없습니다.';
+  }
+  let text = '**🏆 명예 투표 결과**\n';
+  for (const teamNum of [1, 2]) {
+    const teamEmoji = teamNum === 1 ? '🐶' : '🐱';
+    const teamResults = results.filter(r => r.teamNumber === teamNum);
+    if (teamResults.length > 0) {
+      const sorted = teamResults.sort((a, b) => b.votes - a.votes);
+      const mvp = sorted[0];
+      const allPlayers = [...session.team1, ...session.team2];
+      const mvpName = (allPlayers.find(p => p.puuid === mvp.targetPuuid) || {}).name || '알 수 없음';
+      text += `${teamEmoji}팀 MVP: **${mvpName}** (${mvp.votes}표)\n`;
+    }
+  }
+  return text;
+}
 
 module.exports = async (app) => {
   const client = new Client({
@@ -18,6 +38,7 @@ module.exports = async (app) => {
 
   const matches = new Map();
   const pickUsersData = new Map();
+  const honorVoteSessions = new Map();
 
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
@@ -438,6 +459,113 @@ module.exports = async (app) => {
         );
         // 원본 메시지의 버튼 변경
         await interaction.message.edit({ components: [changeButton] });
+
+        // 명예 투표 버튼 전송
+        const team1Data = matchData.team1;
+        const team2Data = matchData.team2;
+        const voteSession = {
+          gameId: matchData.gameId,
+          groupId: group.id,
+          team1: team1Data.map(p => ({ puuid: p[0], name: p[1] })),
+          team2: team2Data.map(p => ({ puuid: p[0], name: p[1] })),
+          voters: new Set(),
+        };
+        honorVoteSessions.set(matchData.gameId, voteSession);
+
+        const honorButton = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`honorVoteStart|${matchData.gameId}`)
+              .setLabel('🏆 명예 투표하기')
+              .setStyle(ButtonStyle.Primary),
+          );
+
+        const honorMessage = await interaction.channel.send({
+          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!',
+          components: [honorButton],
+        });
+
+        // 12시간 후 자동 마감
+        setTimeout(async () => {
+          const session = honorVoteSessions.get(matchData.gameId);
+          if (session) {
+            honorVoteSessions.delete(matchData.gameId);
+            try {
+              const results = await honorController.getVoteResults(matchData.gameId);
+              await honorMessage.edit({
+                content: formatHonorResults(results, session),
+                components: [],
+              });
+            } catch (e) {
+              logger.error(e);
+            }
+          }
+        }, 12 * 60 * 60 * 1000);
+
+        return;
+      }
+
+      // honorVoteStart 버튼 체크 (명예 투표하기)
+      if (split[0] === 'honorVoteStart') {
+        const { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+        const gameId = Number(split[1]);
+        const session = honorVoteSessions.get(gameId);
+
+        if (!session) {
+          await interaction.reply({ content: '투표가 이미 마감되었습니다.', ephemeral: true });
+          return;
+        }
+
+        // 투표자 식별
+        const voterUser = await models.user.findOne({
+          where: { groupId: session.groupId, discordId: interaction.user.id },
+        });
+
+        if (!voterUser) {
+          await interaction.reply({ content: '등록되지 않은 사용자입니다.', ephemeral: true });
+          return;
+        }
+
+        const voterPuuid = voterUser.puuid;
+
+        // 매치 참가자인지 확인
+        const inTeam1 = session.team1.find(p => p.puuid === voterPuuid);
+        const inTeam2 = session.team2.find(p => p.puuid === voterPuuid);
+
+        if (!inTeam1 && !inTeam2) {
+          await interaction.reply({ content: '참가한 사람만 투표할 수 있습니다.', ephemeral: true });
+          return;
+        }
+
+        // 이미 투표했는지 확인
+        if (session.voters.has(voterPuuid)) {
+          await interaction.reply({ content: '이미 투표하셨습니다.', ephemeral: true });
+          return;
+        }
+
+        // 같은 팀원만 표시 (자기 자신 제외)
+        const myTeam = inTeam1 ? session.team1 : session.team2;
+        const myTeamNumber = inTeam1 ? 1 : 2;
+        const teammates = myTeam.filter(p => p.puuid !== voterPuuid);
+
+        const selectMenu = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`honorVote|${gameId}|${myTeamNumber}`)
+            .setPlaceholder('MVP를 선택하세요!')
+            .addOptions(
+              teammates.map(p =>
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(p.name)
+                  .setValue(p.puuid),
+              ),
+            ),
+        );
+
+        await interaction.reply({
+          content: '같은 팀에서 MVP를 선택해주세요!',
+          components: [selectMenu],
+          ephemeral: true,
+        });
         return;
       }
 
@@ -445,6 +573,10 @@ module.exports = async (app) => {
       if (split[0] === 'changeWinCommand') {
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const gameId = split[1];
+
+        // 기존 투표 세션 및 DB 데이터 삭제
+        honorVoteSessions.delete(Number(gameId));
+        await honorController.deleteVotesByGameId(Number(gameId));
 
         // 다시 승/패 버튼 표시
         const buttons = new ActionRowBuilder()
@@ -498,6 +630,68 @@ module.exports = async (app) => {
 
     try {
       const split = interaction.customId.split('|');
+
+      // honorVote SelectMenu (명예 투표)
+      if (split[0] === 'honorVote') {
+        const gameId = Number(split[1]);
+        const teamNumber = Number(split[2]);
+        const selectedPuuid = interaction.values[0];
+        const session = honorVoteSessions.get(gameId);
+
+        if (!session) {
+          await interaction.update({ content: '투표가 이미 마감되었습니다.', components: [] });
+          return;
+        }
+
+        // 투표자 식별
+        const voterUser = await models.user.findOne({
+          where: { groupId: session.groupId, discordId: interaction.user.id },
+        });
+
+        if (!voterUser) {
+          await interaction.update({ content: '등록되지 않은 사용자입니다.', components: [] });
+          return;
+        }
+
+        const voterPuuid = voterUser.puuid;
+
+        // 중복 투표 방지
+        if (session.voters.has(voterPuuid)) {
+          await interaction.update({ content: '이미 투표하셨습니다.', components: [] });
+          return;
+        }
+
+        // DB에 투표 기록
+        const result = await honorController.castVote(gameId, session.groupId, voterPuuid, selectedPuuid, teamNumber);
+
+        if (result.status === 200) {
+          session.voters.add(voterPuuid);
+          const targetPlayer = [...session.team1, ...session.team2].find(p => p.puuid === selectedPuuid);
+          const targetName = (targetPlayer && targetPlayer.name) || '알 수 없음';
+          await interaction.update({ content: `✅ **${targetName}**에게 투표 완료!`, components: [] });
+
+          // 10명 전원 투표 시 조기 마감
+          if (session.voters.size >= 10) {
+            honorVoteSessions.delete(gameId);
+            const results = await honorController.getVoteResults(gameId);
+            // 투표 버튼 메시지 찾아서 결과로 교체
+            const messages = await interaction.channel.messages.fetch({ limit: 20 });
+            const honorMsg = messages.find(m =>
+              m.author.id === interaction.client.user.id &&
+              m.content.includes('명예 투표'),
+            );
+            if (honorMsg) {
+              await honorMsg.edit({
+                content: formatHonorResults(results, session),
+                components: [],
+              });
+            }
+          }
+        } else {
+          await interaction.update({ content: result.result, components: [] });
+        }
+        return;
+      }
 
       // posSelectTeam SelectMenu (팀 선택, customId에 인덱스 사용)
       if (split[0] === 'posSelectTeam') {

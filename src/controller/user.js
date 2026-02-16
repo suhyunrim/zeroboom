@@ -465,7 +465,11 @@ module.exports.getInfo = async (groupId, puuid) => {
     // 상세 통계 계산
     const detailedStats = await calculateDetailedStats(groupId, puuid);
 
-    return { result: { userInfo, summonerInfo, detailedStats }, status: 200 };
+    // 명예 통계
+    const honorController = require('./honor');
+    const honorStats = await honorController.getHonorStats(groupId, puuid);
+
+    return { result: { userInfo, summonerInfo, detailedStats, honorStats }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
