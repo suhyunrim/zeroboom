@@ -152,8 +152,7 @@ module.exports.getRating = async (groupId, puuid) => {
 };
 
 // 상세 통계 계산 상수
-const MIN_GAMES_FOR_BEST_TEAMMATE = 3; // 베스트 팀원 최소 판수
-const MIN_GAMES_FOR_BEST_OPPONENT = 2; // 상대 전적 최소 판수
+const TOP_N_FOR_BEST_STATS = 10; // 자주 만난 상위 N명 내에서 승률 기준 선정
 const RECENT_GAMES_COUNT = 10; // 최근 N판 승률 계산용
 
 /**
@@ -293,10 +292,11 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
       }))
   );
 
-  // 3. 같은 팀 N판 이상 중 승률 제일 높은 사람
+  // 3. 자주 함께한 Top N명 중 승률 제일 높은 사람
   const bestTeammate = await (async () => {
     const candidates = Object.entries(teammateStats)
-      .filter(([, stats]) => stats.games >= MIN_GAMES_FOR_BEST_TEAMMATE)
+      .sort((a, b) => b[1].games - a[1].games)
+      .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
         ...stats,
@@ -340,10 +340,11 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     }
   }
 
-  // 6. 상대 전적 제일 좋은 사람 (내 승률 기준 최고, 최소 2판 이상)
+  // 6. 자주 상대한 Top N명 중 상대 전적 제일 좋은 사람
   const bestOpponent = await (async () => {
     const candidates = Object.entries(opponentStats)
-      .filter(([, stats]) => stats.games >= MIN_GAMES_FOR_BEST_OPPONENT)
+      .sort((a, b) => b[1].games - a[1].games)
+      .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
         ...stats,
@@ -363,10 +364,11 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     };
   })();
 
-  // 7. 상대 전적 제일 안 좋은 사람 (내 승률 기준 최저, 최소 2판 이상)
+  // 7. 자주 상대한 Top N명 중 상대 전적 제일 안 좋은 사람
   const worstOpponent = await (async () => {
     const candidates = Object.entries(opponentStats)
-      .filter(([, stats]) => stats.games >= MIN_GAMES_FOR_BEST_OPPONENT)
+      .sort((a, b) => b[1].games - a[1].games)
+      .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
         ...stats,
