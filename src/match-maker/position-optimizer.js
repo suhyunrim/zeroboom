@@ -246,7 +246,7 @@ const validateHighRateDistribution = (team1Names, team2Names, playerDataMap) => 
   });
 
   Object.values(playerDataMap).forEach(p => {
-    if ((p.mainPositionRate || 0) >= 80 && p.mainPos) {
+    if ((p.mainPositionRate || 0) >= 80 && p.mainPos && positionHighRatePlayers[p.mainPos]) {
       positionHighRatePlayers[p.mainPos].push(p);
     }
   });

@@ -3,10 +3,14 @@ const { formatMatches, formatMatchWithRating } = require('../discord/embed-messa
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
+const { selectAllConcepts } = require('../match-maker/concept-scorers');
 
 const POSITION_ABBR = {
   TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', UTILITY: 'SUP',
 };
+
+// Riot API 포지션명 → position-optimizer 포지션명 변환
+const toOptimizerPos = (pos) => pos === 'UTILITY' ? 'SUPPORT' : pos;
 
 const MAX_MATCH_COUNT = 6
 
@@ -48,7 +52,7 @@ exports.run = async (groupName, interaction) => {
     }
   });
 
-  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 100, discordIdMap);
+  const result = await matchController.generateMatch(groupName, team1, team2, userPool, 999, discordIdMap);
   if (typeof(result.result) == 'string') {
     return result.result;
   }
@@ -62,15 +66,25 @@ exports.run = async (groupName, interaction) => {
     if (ratingCache[summonerName]) return ratingCache[summonerName];
 
     const summonerData = await models.summoner.findOne({ where: { name: summonerName } });
-    if (!summonerData) return { name: summonerName, rating: 500, position: null };
+    if (!summonerData) return { name: summonerName, rating: 500, position: null, win: 0, lose: 0, puuid: null, mainPositionRate: 0, subPosition: null, subPositionRate: 0 };
 
     const userData = await models.user.findOne({
       where: { groupId: group.id, puuid: summonerData.puuid },
     });
-    if (!userData) return { name: summonerName, rating: 500, position: summonerData.mainPosition };
+    if (!userData) return { name: summonerName, rating: 500, position: summonerData.mainPosition, win: 0, lose: 0, puuid: summonerData.puuid, mainPositionRate: summonerData.mainPositionRate || 0, subPosition: summonerData.subPosition, subPositionRate: summonerData.subPositionRate || 0 };
 
     const rating = userData.defaultRating + userData.additionalRating;
-    ratingCache[summonerName] = { name: summonerName, rating, position: summonerData.mainPosition };
+    ratingCache[summonerName] = {
+      name: summonerName,
+      rating,
+      position: summonerData.mainPosition,
+      win: userData.win || 0,
+      lose: userData.lose || 0,
+      puuid: summonerData.puuid,
+      mainPositionRate: summonerData.mainPositionRate || 0,
+      subPosition: summonerData.subPosition,
+      subPositionRate: summonerData.subPositionRate || 0,
+    };
     return ratingCache[summonerName];
   };
 
@@ -119,6 +133,9 @@ exports.run = async (groupName, interaction) => {
     return true;
   });
 
+  // 컨셉 매칭용 전체 매치 보존 (그룹 필터링만 적용된 상태)
+  const allMatches = [...result.result];
+
   // 한 명만 다른 케이스 제외 (최소 2명 이상 차이나는 매칭만 선택)
   const filteredResults = [];
   for (const match of result.result) {
@@ -158,10 +175,6 @@ exports.run = async (groupName, interaction) => {
   for (let i = 0; i < (result.result.length <= 3 ? 1 : 2); ++i) {
     rows.push(new ActionRowBuilder());
     for (let j = i * 3; j < Math.min(result.result.length, (i + 1) * 3); j++) {
-      const match = result.result[j];
-      // 버튼 interaction을 더 이쁘장하게 하는 법이 있을 것 같으나, 일단은 customId에 여러 정보를 실어보냄
-      // customId limit length가 100이어서 간략화 (by zeroboom)
-      const customeIdStr = `${j}|${match.team1WinRate.toFixed(4)}|${match.team1.join('|')}|${match.team2.join('|')}`;
       rows[i].addComponents(
         new ButtonBuilder()
           .setCustomId(`${groupName}/${time}/${j}`)
@@ -171,7 +184,7 @@ exports.run = async (groupName, interaction) => {
     }
   }
 
-  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true, match: result.result, time };
+  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true, match: result.result, allMatches, ratingCache, time };
 };
 
 exports.reactButton = async (interaction, match) => {
@@ -247,12 +260,63 @@ exports.reactButton = async (interaction, match) => {
         .setStyle(ButtonStyle.Danger),
     );
 
+  const label = match.conceptLabel
+    ? `${match.conceptEmoji} ${match.conceptLabel}`
+    : `Plan ${index + 1}`;
+
   const output = {
-    content: `**[${interaction.member.nickname}]님이 Plan ${index + 1}를 선택하였습니다!!**`,
-    embeds: [formatMatchWithRating(index, teams[0], teamRatings[0], teams[1], teamRatings[1], team1WinRate)],
+    content: `**[${interaction.member.nickname}]님이 [${match.conceptLabel || `Plan ${index + 1}`}]을 선택하였습니다!!**`,
+    embeds: [formatMatchWithRating(label, teams[0], teamRatings[0], teams[1], teamRatings[1], team1WinRate)],
     components: [buttons],
   };
   return output;
+};
+
+/**
+ * 컨셉 매칭 결과 생성
+ * @returns {{ embeds, components, conceptMatches } | { error: string }}
+ */
+exports.generateConceptMatches = (allMatches, ratingCache, groupName, time) => {
+  // ratingInfoMap, playerDataMap 구성
+  const ratingInfoMap = {};
+  const playerDataMap = {};
+  for (const [name, info] of Object.entries(ratingCache)) {
+    ratingInfoMap[name] = info;
+    playerDataMap[name] = {
+      puuid: info.puuid,
+      name: name,
+      rating: info.rating,
+      mainPos: toOptimizerPos(info.position),
+      subPos: toOptimizerPos(info.subPosition),
+      mainPositionRate: info.mainPositionRate,
+      subPositionRate: info.subPositionRate,
+    };
+  }
+
+  // 5개 컨셉별 최적 매치 선택
+  const conceptMatches = selectAllConcepts(allMatches, ratingInfoMap, playerDataMap);
+
+  if (conceptMatches.length === 0) {
+    return { error: '컨셉 매칭 조합을 생성할 수 없습니다.' };
+  }
+
+  // 컨셉 버튼 생성 (5개 = 1줄)
+  const row = new ActionRowBuilder();
+  for (let i = 0; i < conceptMatches.length; i++) {
+    const match = conceptMatches[i];
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${groupName}/${time}/concept_${i}`)
+        .setLabel(`${match.conceptEmoji} ${match.conceptLabel}`)
+        .setStyle(ButtonStyle.Primary),
+    );
+  }
+
+  return {
+    embeds: [formatMatches(conceptMatches)],
+    components: [row],
+    conceptMatches,
+  };
 };
 
 exports.conf = {

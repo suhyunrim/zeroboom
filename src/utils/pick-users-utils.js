@@ -145,7 +145,7 @@ const buildResultButtons = (time) => {
     .addComponents(
       new ButtonBuilder()
         .setCustomId(`pickUsers|${time}|match`)
-        .setLabel('🎮 바로 매칭생성')
+        .setLabel('🎮 바로 매칭 생성')
         .setStyle(ButtonStyle.Primary),
     )
     .addComponents(
@@ -157,8 +157,14 @@ const buildResultButtons = (time) => {
     .addComponents(
       new ButtonBuilder()
         .setCustomId(`pickUsers|${time}|positionMatch`)
-        .setLabel('🧪 포지션 매칭생성')
-        .setStyle(ButtonStyle.Secondary),
+        .setLabel('🧪 포지션 매칭 생성')
+        .setStyle(ButtonStyle.Primary),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pickUsers|${time}|conceptMatch`)
+        .setLabel('🎲 컨셉 매칭 생성')
+        .setStyle(ButtonStyle.Success),
     )
     .addComponents(
       new ButtonBuilder()
@@ -475,6 +481,60 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
 
     if (action === 'positionMatch') {
       return handlePositionMatch(interaction, data, models, matchMake);
+    }
+
+    if (action === 'conceptMatch') {
+      // 먼저 매칭 생성 (match와 동일한 로직)
+      const group = await models.group.findOne({
+        where: { discordGuildId: interaction.guildId },
+      });
+      if (!group) {
+        return { content: '그룹 정보를 찾을 수 없습니다.', ephemeral: true };
+      }
+
+      const fakeOptions = [];
+      for (let index = 0; index < data.pickedUsers.length; index++) {
+        const parsedName = data.pickedUsers[index];
+        const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
+        let actualName = parsedName;
+        if (memberData && memberData.discordId) {
+          const userData = await models.user.findOne({
+            where: { groupId: group.id, discordId: memberData.discordId },
+          });
+          if (userData) {
+            const summonerData = await models.summoner.findOne({
+              where: { puuid: userData.puuid },
+            });
+            if (summonerData) actualName = summonerData.name;
+          }
+        }
+        fakeOptions.push({
+          name: `유저${index + 1}`,
+          value: actualName,
+          discordId: memberData?.discordId || null,
+        });
+      }
+
+      const fakeInteraction = { ...interaction, options: { data: fakeOptions } };
+      const matchResult = await matchMake.run(group.groupName, fakeInteraction);
+      if (typeof matchResult === 'string' || !matchResult.allMatches) {
+        return matchResult;
+      }
+
+      // 컨셉 매칭 결과 생성
+      const conceptOutput = matchMake.generateConceptMatches(
+        matchResult.allMatches, matchResult.ratingCache, group.groupName, matchResult.time,
+      );
+      if (conceptOutput.error) {
+        return { content: conceptOutput.error, ephemeral: true };
+      }
+
+      return {
+        ...conceptOutput,
+        isConceptMatch: true,
+        groupName: group.groupName,
+        time: matchResult.time,
+      };
     }
   };
 };

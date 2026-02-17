@@ -37,6 +37,7 @@ module.exports = async (app) => {
   });
 
   const matches = new Map();
+  const conceptData = new Map(); // 컨셉 매칭용 데이터 (allMatches, ratingCache)
   const pickUsersData = new Map();
   const honorVoteSessions = new Map();
 
@@ -69,6 +70,14 @@ module.exports = async (app) => {
         if (command.conf.aliases[0] == '매칭생성') {
           for (let i = 0; i < output.match.length; ++i) {
             matches.set(`${groupName}/${output.time}/${i}`, output.match[i]);
+          }
+          // 컨셉 매칭용 데이터 저장
+          if (output.allMatches && output.ratingCache) {
+            conceptData.set(`${groupName}/${output.time}`, {
+              allMatches: output.allMatches,
+              ratingCache: output.ratingCache,
+              groupName,
+            });
           }
         }
 
@@ -188,6 +197,12 @@ module.exports = async (app) => {
                 groupId: output.groupId,
               });
               await interaction.reply(output);
+            } else if (output.isConceptMatch && output.conceptMatches) {
+              // 컨셉 매칭 버튼 결과
+              for (let i = 0; i < output.conceptMatches.length; i++) {
+                matches.set(`${output.groupName}/${output.time}/concept_${i}`, output.conceptMatches[i]);
+              }
+              await interaction.reply(output);
             } else {
               // 바로 매칭생성 버튼인 경우 matches Map에 데이터 저장
               if (action === 'match' && output.match) {
@@ -197,6 +212,14 @@ module.exports = async (app) => {
                 if (group) {
                   for (let i = 0; i < output.match.length; ++i) {
                     matches.set(`${group.groupName}/${output.time}/${i}`, output.match[i]);
+                  }
+                  // 컨셉 매칭용 데이터 저장
+                  if (output.allMatches && output.ratingCache) {
+                    conceptData.set(`${group.groupName}/${output.time}`, {
+                      allMatches: output.allMatches,
+                      ratingCache: output.ratingCache,
+                      groupName: group.groupName,
+                    });
                   }
                 }
               }
@@ -422,6 +445,14 @@ module.exports = async (app) => {
           for (let i = 0; i < result.match.length; ++i) {
             matches.set(`${group.groupName}/${result.time}/${i}`, result.match[i]);
           }
+          // 컨셉 매칭용 데이터 저장
+          if (result.allMatches && result.ratingCache) {
+            conceptData.set(`${group.groupName}/${result.time}`, {
+              allMatches: result.allMatches,
+              ratingCache: result.ratingCache,
+              groupName: group.groupName,
+            });
+          }
         }
 
         await interaction.update({ components: [] });
@@ -600,6 +631,31 @@ module.exports = async (app) => {
       // 매칭생성 버튼 (customId 형식: groupName/time/index)
       const slashSplit = interaction.customId.split('/');
       if (slashSplit.length === 3) {
+        // 컨셉 매칭 버튼 (customId: conceptMatch/groupName/time)
+        if (slashSplit[0] === 'conceptMatch') {
+          const groupName = slashSplit[1];
+          const time = slashSplit[2];
+          const data = conceptData.get(`${groupName}/${time}`);
+          if (!data) {
+            await interaction.reply({ content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.', ephemeral: true });
+            return;
+          }
+          const matchMakeCommand = commandList.get('매칭생성');
+          if (matchMakeCommand) {
+            const output = matchMakeCommand.generateConceptMatches(data.allMatches, data.ratingCache, groupName, time);
+            if (output.error) {
+              await interaction.reply({ content: output.error, ephemeral: true });
+              return;
+            }
+            // 컨셉 매치 데이터를 matches Map에 저장
+            for (let i = 0; i < output.conceptMatches.length; i++) {
+              matches.set(`${groupName}/${time}/concept_${i}`, output.conceptMatches[i]);
+            }
+            await interaction.update({ embeds: output.embeds, components: output.components });
+            return;
+          }
+        }
+
         const match = matches.get(interaction.customId);
         if (match) {
           const matchMakeCommand = commandList.get('매칭생성');

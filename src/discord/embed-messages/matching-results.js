@@ -30,7 +30,7 @@ const TARGET_WIDTH = 28;
 // U+2800 (Braille Pattern Blank) — 디스코드에서 공백으로 렌더링되지만 축소되지 않는 문자
 const INVISIBLE_SPACE = '\u2800';
 
-const format = (idx, team, winRate, emoji, avgRating = 0) => {
+const format = (label, team, winRate, emoji, avgRating = 0) => {
   let message = team.map((name) => {
     const content = emoji + name;
     const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
@@ -38,29 +38,35 @@ const format = (idx, team, winRate, emoji, avgRating = 0) => {
   }).join('\n');
   const avgTierStr = formatAvgTier(avgRating);
   return {
-    name: `**Plan ${idx}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}`,
+    name: `**${label}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}`,
     value: message,
     inline: true,
   };
 };
 
-module.exports.formatMatchWithRating = (idx, team1, team1Rating, team2, team2Rating, team1WinRate) => {
+module.exports.formatMatchWithRating = (label, team1, team1Rating, team2, team2Rating, team1WinRate) => {
   const fields = [];
-  fields.push(format(idx + 1, team1.map(elem => elem.name), team1WinRate, '🐶', team1Rating));
-  fields.push(format(idx + 1, team2.map(elem => elem.name), 1 - team1WinRate, '🐱', team2Rating));
+  fields.push(format(label, team1.map(elem => elem.name), team1WinRate, '🐶', team1Rating));
+  fields.push(format(label, team2.map(elem => elem.name), 1 - team1WinRate, '🐱', team2Rating));
   return new EmbedBuilder().addFields(fields);
 };
 
 module.exports.formatMatches = (matches) => {
   const fields = [];
 
-  matches.forEach(({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating }, idx) => {
-    if (fields.length !== 0) {
-      // 여백 삽입
+  matches.forEach(({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating, conceptLabel, conceptEmoji, conceptDesc }, idx) => {
+    if (conceptDesc) {
+      if (fields.length !== 0) {
+        fields.push({ name: '\u200B', value: '\u200B' });
+      }
+      fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '\u200B', inline: false });
+    } else if (fields.length !== 0) {
       fields.push({ name: '\u200B', value: '\u200B' });
     }
-    fields.push(format(idx + 1, team1, team1WinRate, '🐶', team1AvgRating));
-    fields.push(format(idx + 1, team2, 1 - team1WinRate, '🐱', team2AvgRating));
+    const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
+    const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
+    fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating));
+    fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating));
   });
 
   return new EmbedBuilder().addFields(fields);
