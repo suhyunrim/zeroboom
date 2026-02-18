@@ -26,7 +26,7 @@ function formatHonorResults(results, session) {
 
   let text = allVoted
     ? '**🎉✨ 전원 투표 완료! 명예 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n'
-    : `**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
+    : `**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
   for (const entry of sorted) {
     const name = (allPlayers.find(p => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
     text += `**${name}** - ${entry.votes}표\n`;
@@ -521,7 +521,7 @@ module.exports = async (app) => {
           );
 
         const honorMessage = await interaction.channel.send({
-          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n0명 투표했습니다! (0/10)',
+          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/10)',
           components: [honorButton],
         });
         voteSession.honorMessage = honorMessage;
