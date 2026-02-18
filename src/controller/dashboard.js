@@ -2,6 +2,7 @@ const models = require('../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const { getKSTYear, getKSTMonth, getKSTMonthRange, getKSTHours } = require('../utils/timeUtils');
+const { getHonorTitle } = require('./honor');
 
 /**
  * 대시보드 통계 조회
@@ -338,6 +339,14 @@ module.exports.getDashboardStats = async (groupId, month) => {
     const honorKingEntry = Object.entries(honorCounts)
       .sort((a, b) => b[1] - a[1])[0] || null;
 
+    // 명예왕의 누적 투표 수 조회 (칭호용)
+    let honorKingTotalVotes = 0;
+    if (honorKingEntry) {
+      honorKingTotalVotes = await models.honor_vote.count({
+        where: { groupId, targetPuuid: honorKingEntry[0] },
+      });
+    }
+
     // 결과 조합
     const result = {
       month: `${year}-${String(mon + 1).padStart(2, '0')}`,
@@ -447,6 +456,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
             puuid: honorKingEntry[0],
             name: await getName(honorKingEntry[0]),
             votes: honorKingEntry[1],
+            title: getHonorTitle(honorKingTotalVotes),
           }
         : null,
     };

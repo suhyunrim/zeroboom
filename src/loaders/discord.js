@@ -10,17 +10,26 @@ function formatHonorResults(results, session) {
   if (!results || results.length === 0) {
     return '**🏆 명예 투표 종료** - 투표 결과가 없습니다.';
   }
-  let text = '**🏆 명예 투표 결과**\n';
-  for (const teamNum of [1, 2]) {
-    const teamEmoji = teamNum === 1 ? '🐶' : '🐱';
-    const teamResults = results.filter(r => r.teamNumber === teamNum);
-    if (teamResults.length > 0) {
-      const sorted = teamResults.sort((a, b) => b.votes - a.votes);
-      const mvp = sorted[0];
-      const allPlayers = [...session.team1, ...session.team2];
-      const mvpName = (allPlayers.find(p => p.puuid === mvp.targetPuuid) || {}).name || '알 수 없음';
-      text += `${teamEmoji}팀 MVP: **${mvpName}** (${mvp.votes}표)\n`;
+  const allVoted = session.voters && session.voters.size >= 10;
+  const voteCount = session.voters ? session.voters.size : 0;
+  const allPlayers = [...session.team1, ...session.team2];
+
+  // 팀 구분 없이 득표순 내림차순 정렬
+  const merged = {};
+  for (const r of results) {
+    if (!merged[r.targetPuuid]) {
+      merged[r.targetPuuid] = { targetPuuid: r.targetPuuid, votes: 0 };
     }
+    merged[r.targetPuuid].votes += r.votes;
+  }
+  const sorted = Object.values(merged).sort((a, b) => b.votes - a.votes);
+
+  let text = allVoted
+    ? '**🎉✨ 전원 투표 완료! 명예 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n'
+    : `**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
+  for (const entry of sorted) {
+    const name = (allPlayers.find(p => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
+    text += `**${name}** - ${entry.votes}표\n`;
   }
   return text;
 }
@@ -512,9 +521,10 @@ module.exports = async (app) => {
           );
 
         const honorMessage = await interaction.channel.send({
-          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!',
+          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n0명 투표했습니다! (0/10)',
           components: [honorButton],
         });
+        voteSession.honorMessage = honorMessage;
 
         // 12시간 후 자동 마감
         setTimeout(async () => {
@@ -726,22 +736,19 @@ module.exports = async (app) => {
           const targetName = (targetPlayer && targetPlayer.name) || '알 수 없음';
           await interaction.update({ content: `✅ **${targetName}**에게 투표 완료!`, components: [] });
 
-          // 10명 전원 투표 시 조기 마감
-          if (session.voters.size >= 10) {
-            honorVoteSessions.delete(gameId);
-            const results = await honorController.getVoteResults(gameId);
-            // 투표 버튼 메시지 찾아서 결과로 교체
-            const messages = await interaction.channel.messages.fetch({ limit: 20 });
-            const honorMsg = messages.find(m =>
-              m.author.id === interaction.client.user.id &&
-              m.content.includes('명예 투표'),
-            );
-            if (honorMsg) {
-              await honorMsg.edit({
-                content: formatHonorResults(results, session),
-                components: [],
-              });
+          // 투표 현황 갱신
+          if (session.honorMessage) {
+            if (session.voters.size >= 10) {
+              // 전원 투표 보너스 지급
+              const allPlayers = [...session.team1, ...session.team2];
+              await honorController.grantFullVoteBonus(gameId, session.groupId, allPlayers);
+              honorVoteSessions.delete(gameId);
             }
+            const results = await honorController.getVoteResults(gameId);
+            await session.honorMessage.edit({
+              content: formatHonorResults(results, session),
+              components: session.voters.size >= 10 ? [] : undefined,
+            });
           }
         } else {
           await interaction.update({ content: result.result, components: [] });

@@ -41,17 +41,21 @@ module.exports = (app) => {
   });
 
   /**
-   * GET /api/honor/stats/:groupId/:puuid
+   * GET /api/honor/stats/:groupId/:puuid?since=YYYY-MM-DD
    * 특정 유저의 명예 통계
    */
   route.get('/stats/:groupId/:puuid', async (req, res) => {
     const { groupId, puuid } = req.params;
+    const { since } = req.query;
 
     if (!groupId || Number.isNaN(Number(groupId))) {
       return res.status(400).json({ result: 'invalid groupId', status: 400 });
     }
 
-    const stats = await honorController.getHonorStats(Number(groupId), puuid);
+    const options = {};
+    if (since) options.since = new Date(since);
+
+    const stats = await honorController.getHonorStats(Number(groupId), puuid, options);
 
     const summoner = await models.summoner.findOne({ where: { puuid } });
     stats.name = summoner ? summoner.name : '알 수 없음';
