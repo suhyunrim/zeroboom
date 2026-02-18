@@ -6,6 +6,16 @@ const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 
+const VOTE_CATEGORIES = [
+  { emoji: '⚔️', label: '캐리 머신', question: '이번 경기 가장 잘한 사람은?' },
+  { emoji: '💰', label: '가성비 왕', question: '레이팅 대비 가장 활약한 사람은?' },
+  { emoji: '🧠', label: '멘탈 지킴이', question: '팀 분위기를 살린 사람은?' },
+  { emoji: '📢', label: '샷콜러', question: '콜을 가장 잘한 사람은?' },
+  { emoji: '🛡️', label: '희생 정신', question: '묵묵히 팀을 서포트한 사람은?' },
+  { emoji: '🎯', label: '한타 MVP', question: '한타에서 가장 빛난 사람은?' },
+  { emoji: '🔥', label: '라인전 킹', question: '라인전을 가장 잘한 사람은?' },
+];
+
 function formatHonorResults(results, session) {
   if (!results || results.length === 0) {
     return '**🏆 명예 투표 종료** - 투표 결과가 없습니다.';
@@ -24,9 +34,10 @@ function formatHonorResults(results, session) {
   }
   const sorted = Object.values(merged).sort((a, b) => b.votes - a.votes);
 
+  const cat = session.category;
   let text = allVoted
-    ? '**🎉✨ 전원 투표 완료! 명예 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n'
-    : `**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
+    ? `**🎉✨ 전원 투표 완료! ${cat.emoji} ${cat.label} 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n`
+    : `**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
   for (const entry of sorted) {
     const name = (allPlayers.find(p => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
     text += `**${name}** - ${entry.votes}표\n`;
@@ -503,12 +514,14 @@ module.exports = async (app) => {
         // 명예 투표 버튼 전송
         const team1Data = matchData.team1;
         const team2Data = matchData.team2;
+        const category = VOTE_CATEGORIES[Math.floor(Math.random() * VOTE_CATEGORIES.length)];
         const voteSession = {
           gameId: matchData.gameId,
           groupId: group.id,
           team1: team1Data.map(p => ({ puuid: p[0], name: p[1] })),
           team2: team2Data.map(p => ({ puuid: p[0], name: p[1] })),
           voters: new Set(),
+          category,
         };
         honorVoteSessions.set(matchData.gameId, voteSession);
 
@@ -516,12 +529,12 @@ module.exports = async (app) => {
           .addComponents(
             new ButtonBuilder()
               .setCustomId(`honorVoteStart|${matchData.gameId}`)
-              .setLabel('🏆 명예 투표하기')
+              .setLabel(`${category.emoji} ${category.label} 투표하기`)
               .setStyle(ButtonStyle.Primary),
           );
 
         const honorMessage = await interaction.channel.send({
-          content: '**🏆 명예 투표** - 같은 팀의 MVP에게 투표하세요!\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/10)',
+          content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/10)`,
           components: [honorButton],
         });
         voteSession.honorMessage = honorMessage;
@@ -592,7 +605,7 @@ module.exports = async (app) => {
         const selectMenu = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId(`honorVote|${gameId}|${myTeamNumber}`)
-            .setPlaceholder('MVP를 선택하세요!')
+            .setPlaceholder(session.category.question)
             .addOptions(
               teammates.map(p =>
                 new StringSelectMenuOptionBuilder()
