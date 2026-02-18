@@ -120,12 +120,11 @@ module.exports.getHonorRanking = async (groupId, options = {}) => {
     given[vote.voterPuuid] = (given[vote.voterPuuid] || 0) + 1;
   });
 
-  // received와 given에 등장하는 모든 puuid 수집
-  const allPuuids = new Set([...Object.keys(received), ...Object.keys(given)]);
-  const ranking = Array.from(allPuuids)
+  // 받은 투표가 1표 이상인 유저만 랭킹에 포함
+  const ranking = Object.keys(received)
     .map((puuid) => ({
       puuid,
-      totalVotes: received[puuid] || 0,
+      totalVotes: received[puuid],
       givenVotes: given[puuid] || 0,
     }))
     .sort((a, b) => b.totalVotes - a.totalVotes);
