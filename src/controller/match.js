@@ -487,6 +487,7 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
 
   // 각 유저 업데이트
   const now = new Date();
+  const matchDate = matchData.createdAt;
   for (const [puuid] of team1Data) {
     const user = userMap[puuid];
     if (user) {
@@ -497,6 +498,7 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
         additionalRating: user.additionalRating + team1Delta,
       };
       if (!user.firstMatchDate) updateData.firstMatchDate = now;
+      if (!user.latestMatchDate || matchDate > user.latestMatchDate) updateData.latestMatchDate = matchDate;
       await user.update(updateData);
     }
   }
@@ -511,6 +513,7 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
         additionalRating: user.additionalRating + team2Delta,
       };
       if (!user.firstMatchDate) updateData.firstMatchDate = now;
+      if (!user.latestMatchDate || matchDate > user.latestMatchDate) updateData.latestMatchDate = matchDate;
       await user.update(updateData);
     }
   }
