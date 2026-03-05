@@ -112,10 +112,21 @@ module.exports.getSummonerByName = async (name) => {
       await found.update(summonerData);
     } catch (e) {
       logger.error(e.stack);
-      if (e.response.status === 404)
-        return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 }
-
-      return { result: found || e.message, status: 501 };
+      // 404면 닉변 가능성 → puuid로 현재 닉네임 조회 후 재시도
+      if (e.response?.status === 404) {
+        try {
+          const accountData = await getAccountByPuuid(found.puuid);
+          const currentName = `${accountData.gameName}#${accountData.tagLine}`;
+          logger.info(`[${name}] 닉변 감지: ${currentName} 으로 재시도`);
+          const summonerData = await generateSummonerData(currentName);
+          await found.update(summonerData);
+        } catch (e2) {
+          logger.error(`[${name}] puuid 기반 갱신도 실패: ${e2.message}`);
+          return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 };
+        }
+      } else {
+        return { result: found, status: 200 };
+      }
     }
   }
 
