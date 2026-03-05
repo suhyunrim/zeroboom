@@ -163,6 +163,8 @@ module.exports.getPositions = async (name, options = {}) => {
     // 포지션 업데이트 시 닉네임 및 rankTier 갱신 (puuid로 Riot API 조회)
     let updatedName = null;
     let updatedRankTier = null;
+    let updatedRankWin = null;
+    let updatedRankLose = null;
     try {
       const accountData = await getAccountByPuuid(found.puuid);
       if (accountData.riotId && accountData.riotId !== found.name) {
@@ -176,6 +178,10 @@ module.exports.getPositions = async (name, options = {}) => {
       const leagueData = await getRankDataByPuuid(found.puuid);
       const soloRankData = leagueData.find((elem) => elem.queueType === 'RANKED_SOLO_5x5');
       updatedRankTier = soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED';
+      if (soloRankData) {
+        updatedRankWin = soloRankData.wins;
+        updatedRankLose = soloRankData.losses;
+      }
     } catch (e) {
       logger.warn(`[${name}] rankTier 갱신 실패: ${e.message}`);
     }
@@ -276,9 +282,13 @@ module.exports.getPositions = async (name, options = {}) => {
       updateData.name = updatedName;
       updateData.simplifiedName = updatedName.toLowerCase().replace(/ /g, '');
     }
-    // rankTier 갱신
+    // rankTier, 솔랭 승패 갱신
     if (updatedRankTier) {
       updateData.rankTier = updatedRankTier;
+    }
+    if (updatedRankWin !== null) {
+      updateData.rankWin = updatedRankWin;
+      updateData.rankLose = updatedRankLose;
     }
 
     found.set(updateData);
