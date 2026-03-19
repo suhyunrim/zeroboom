@@ -104,8 +104,10 @@ module.exports.getVoteResults = async (gameId) => {
 
 module.exports.getHonorRanking = async (groupId, options = {}) => {
   const where = { groupId };
-  if (options.since) {
-    where.createdAt = { [Op.gte]: options.since };
+  if (options.since || options.until) {
+    where.createdAt = {};
+    if (options.since) where.createdAt[Op.gte] = options.since;
+    if (options.until) where.createdAt[Op.lte] = options.until;
   }
 
   const votes = await models.honor_vote.findAll({
@@ -139,8 +141,10 @@ module.exports.getHonorRanking = async (groupId, options = {}) => {
 
 module.exports.getHonorStats = async (groupId, puuid, options = {}) => {
   const where = { groupId };
-  if (options.since) {
-    where.createdAt = { [Op.gte]: options.since };
+  if (options.since || options.until) {
+    where.createdAt = {};
+    if (options.since) where.createdAt[Op.gte] = options.since;
+    if (options.until) where.createdAt[Op.lte] = options.until;
   }
 
   const received = await models.honor_vote.count({

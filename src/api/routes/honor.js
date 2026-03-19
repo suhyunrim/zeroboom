@@ -13,7 +13,7 @@ module.exports = (app) => {
    */
   route.get('/ranking/:groupId', async (req, res) => {
     const { groupId } = req.params;
-    const { since, limit } = req.query;
+    const { since, until, limit } = req.query;
 
     if (!groupId || Number.isNaN(Number(groupId))) {
       return res.status(400).json({ result: 'invalid groupId', status: 400 });
@@ -21,6 +21,7 @@ module.exports = (app) => {
 
     const options = {};
     if (since) options.since = new Date(since);
+    if (until) options.until = new Date(until);
     if (limit) options.limit = Number(limit);
 
     const ranking = await honorController.getHonorRanking(Number(groupId), options);
@@ -46,7 +47,7 @@ module.exports = (app) => {
    */
   route.get('/stats/:groupId/:puuid', async (req, res) => {
     const { groupId, puuid } = req.params;
-    const { since } = req.query;
+    const { since, until } = req.query;
 
     if (!groupId || Number.isNaN(Number(groupId))) {
       return res.status(400).json({ result: 'invalid groupId', status: 400 });
@@ -54,6 +55,7 @@ module.exports = (app) => {
 
     const options = {};
     if (since) options.since = new Date(since);
+    if (until) options.until = new Date(until);
 
     const stats = await honorController.getHonorStats(Number(groupId), puuid, options);
 
