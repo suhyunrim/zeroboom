@@ -33,6 +33,26 @@ module.exports = (app) => {
     return res.status(result.status).json({ result: result.result });
   });
 
+  route.get('/ranking/period', async (req, res) => {
+    const { groupId, startDate, endDate } = req.query;
+
+    if (!groupId || !startDate || !endDate) {
+      return res.status(400).json({ result: 'groupId, startDate, endDate가 필요합니다.' });
+    }
+
+    try {
+      const result = await groupController.getRankingByPeriod(
+        Number(groupId),
+        new Date(startDate),
+        new Date(endDate),
+      );
+      return res.status(result.status).json({ result: result.result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
   route.get('/ranking', async (req, res) => {
     const { groupName } = req.query;
 
