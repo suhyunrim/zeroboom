@@ -22,6 +22,12 @@ module.exports = {
     dialect: 'mysql',
     operatorsAliases: 0,
   },
+  discord: {
+    clientId: process.env.DISCORD_APPLICATION_ID,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET,
+    redirectUri: process.env.DISCORD_REDIRECT_URI,
+  },
+  frontendUrl: process.env.FRONTEND_URL,
   api: {
     prefix: '/api',
   },

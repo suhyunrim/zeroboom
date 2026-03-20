@@ -7,6 +7,7 @@ const match = require('./routes/match');
 const dashboard = require('./routes/dashboard');
 const externalRecord = require('./routes/external-record');
 const honor = require('./routes/honor');
+const auth = require('./routes/auth');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -22,6 +23,7 @@ module.exports = () => {
   dashboard(app);
   externalRecord(app);
   honor(app);
+  auth(app);
 
   // v2
   groupsV2(app);
