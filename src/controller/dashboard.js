@@ -179,6 +179,30 @@ module.exports.getDashboardStats = async (groupId, month) => {
       }
     }
 
+    // outsider 제외
+    const outsiders = await models.user.findAll({
+      where: { groupId, role: 'outsider' },
+      attributes: ['puuid'],
+      raw: true,
+    });
+    const outsiderSet = new Set(outsiders.map((u) => u.puuid));
+    outsiderSet.forEach((puuid) => {
+      delete userStats[puuid];
+    });
+    // 듀오/라이벌 통계에서도 outsider 제외
+    Object.keys(duoStats).forEach((key) => {
+      const duo = duoStats[key];
+      if (outsiderSet.has(duo.puuid1) || outsiderSet.has(duo.puuid2)) {
+        delete duoStats[key];
+      }
+    });
+    Object.keys(rivalryStats).forEach((key) => {
+      const rivalry = rivalryStats[key];
+      if (outsiderSet.has(rivalry.puuid1) || outsiderSet.has(rivalry.puuid2)) {
+        delete rivalryStats[key];
+      }
+    });
+
     // 만료되지 않은 외부 기록 합산 (해당 월 범위 내, 해당 월 말 기준으로 만료 여부 판단)
     const externalRecords = await models.externalRecord.findAll({
       where: {
@@ -191,6 +215,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
 
     for (const record of externalRecords) {
       const puuid = record.puuid;
+      if (outsiderSet.has(puuid)) continue;
       if (!userStats[puuid]) {
         userStats[puuid] = { games: 0, wins: 0, losses: 0, matchHistory: [] };
       }
@@ -263,6 +288,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
     const newcomers = await models.user.findAll({
       where: {
         groupId,
+        role: { [Op.ne]: 'outsider' },
         firstMatchDate: { [Op.gte]: threeWeeksAgo },
       },
       attributes: ['puuid', 'firstMatchDate'],
@@ -335,6 +361,11 @@ module.exports.getDashboardStats = async (groupId, month) => {
       }
       honorCounts[vote.targetPuuid]++;
     }
+
+    // honorCounts에서도 outsider 제외
+    outsiderSet.forEach((puuid) => {
+      delete honorCounts[puuid];
+    });
 
     const honorKingEntry = Object.entries(honorCounts)
       .sort((a, b) => b[1] - a[1])[0] || null;
