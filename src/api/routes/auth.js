@@ -64,7 +64,15 @@ module.exports = (app) => {
       const guildsRes = await axios.get(`${DISCORD_API}/users/@me/guilds`, {
         headers: { Authorization: `Bearer ${access_token}` },
       });
-      const guildIds = guildsRes.data.map((g) => g.id);
+      const userGuilds = guildsRes.data;
+      const guildIds = userGuilds.map((g) => g.id);
+
+      // guildId → permissions 매핑 (ADMINISTRATOR = 0x8)
+      const ADMINISTRATOR = 0x8;
+      const guildPermMap = {};
+      userGuilds.forEach((g) => {
+        guildPermMap[g.id] = (Number(g.permissions) & ADMINISTRATOR) === ADMINISTRATOR;
+      });
 
       // 4. discordId로 유저 정보 조회 → puuid 확인
       const users = await models.user.findAll({
@@ -85,7 +93,21 @@ module.exports = (app) => {
         groups = matchedGroups.map((g) => ({ groupId: g.id, groupName: g.groupName }));
       }
 
-      // 6. JWT 발급
+      // 6. 각 그룹에 isAdmin 플래그 추가
+      const allGroups = await models.group.findAll({
+        where: { id: groups.map((g) => g.groupId) },
+        attributes: ['id', 'discordGuildId'],
+      });
+      const groupGuildMap = allGroups.reduce((acc, g) => {
+        acc[g.id] = g.discordGuildId;
+        return acc;
+      }, {});
+      groups = groups.map((g) => ({
+        ...g,
+        isAdmin: !!guildPermMap[groupGuildMap[g.groupId]],
+      }));
+
+      // 7. JWT 발급
       const payload = {
         discordId: discordUser.id,
         puuid,

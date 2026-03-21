@@ -101,6 +101,9 @@ const registerUser = async (groupName, summonerName, tier, discordId = null) => 
 };
 
 exports.registerUser = registerUser;
+exports.getRating = getRating;
+exports.convertAbbreviationTier = convertAbbreviationTier;
+exports.isValidTier = isValidTier;
 
 const getRatingTier = (rating) => {
   let entries = Object.entries(tierNames);

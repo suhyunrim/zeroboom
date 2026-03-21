@@ -49,10 +49,19 @@ module.exports = (app) => {
     const { groupId } = req.params;
 
     try {
+      // outsider 제외
+      const outsiders = await models.user.findAll({
+        where: { groupId, role: 'outsider' },
+        attributes: ['puuid'],
+        raw: true,
+      });
+      const outsiderPuuids = outsiders.map((u) => u.puuid);
+
       const records = await models.externalRecord.findAll({
         where: {
           groupId,
           expiresAt: { [Op.gt]: new Date() },
+          ...(outsiderPuuids.length > 0 && { puuid: { [Op.notIn]: outsiderPuuids } }),
         },
         order: [['createdAt', 'DESC']],
       });

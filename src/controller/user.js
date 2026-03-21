@@ -262,6 +262,18 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   // 시간순 정렬
   matchHistory.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
+  // outsider 제외
+  const outsiders = await models.user.findAll({
+    where: { groupId, role: 'outsider' },
+    attributes: ['puuid'],
+    raw: true,
+  });
+  const outsiderSet = new Set(outsiders.map((u) => u.puuid));
+  outsiderSet.forEach((puuid) => {
+    delete teammateStats[puuid];
+    delete opponentStats[puuid];
+  });
+
   // 1. 같은 팀 많이 된 사람 Top 5
   const topTeammates = await Promise.all(
     Object.entries(teammateStats)
