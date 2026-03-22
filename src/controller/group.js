@@ -92,6 +92,7 @@ module.exports.getRanking = async (groupName) => {
   let users = await models.user.findAll({
     where: {
       groupId: group.id,
+      role: { [Op.ne]: 'outsider' },
       latestMatchDate: {
         [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
       }
@@ -234,6 +235,16 @@ module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
       }
     }
   }
+
+  // outsider 제외
+  const outsiders = await models.user.findAll({
+    where: { groupId: group.id, role: 'outsider' },
+    attributes: ['puuid'],
+  });
+  const outsiderSet = new Set(outsiders.map((u) => u.puuid));
+  outsiderSet.forEach((puuid) => {
+    delete userStats[puuid];
+  });
 
   // 소환사 이름 조회
   const puuids = Object.keys(userStats);
