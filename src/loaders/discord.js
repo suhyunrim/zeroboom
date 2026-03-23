@@ -356,6 +356,26 @@ module.exports = async (app) => {
 
         await interaction.deferUpdate();
         await interaction.followUp({ embeds: [embed], components: [buttons] });
+
+        // 팀 음성 채널 생성 및 멤버 이동
+        try {
+          const voiceChannel = interaction.member.voice?.channel;
+          if (voiceChannel) {
+            const team1DiscordIds = po.teamA.assignments.map((a) => playerDataMap[a.playerName]?.discordId);
+            const team2DiscordIds = po.teamB.assignments.map((a) => playerDataMap[a.playerName]?.discordId);
+            await tempVoiceController.createMatchTeamChannels({
+              guild: interaction.guild,
+              categoryId: voiceChannel.parentId,
+              ownerDiscordId: interaction.user.id,
+              team1DiscordIds,
+              team2DiscordIds,
+              channelName: interaction.channel?.name,
+            });
+          }
+        } catch (e) {
+          logger.error('팀 채널 생성/이동 오류:', e);
+        }
+
         return;
       }
 
@@ -687,6 +707,23 @@ module.exports = async (app) => {
             const output = await matchMakeCommand.reactButton(interaction, match);
             if (output) {
               await interaction.reply(output);
+
+              // 팀 음성 채널 생성 및 멤버 이동
+              try {
+                const voiceChannel = interaction.member.voice?.channel;
+                if (voiceChannel && output.teamDiscordIds) {
+                  await tempVoiceController.createMatchTeamChannels({
+                    guild: interaction.guild,
+                    categoryId: voiceChannel.parentId,
+                    ownerDiscordId: interaction.user.id,
+                    team1DiscordIds: output.teamDiscordIds[0],
+                    team2DiscordIds: output.teamDiscordIds[1],
+                    channelName: interaction.channel?.name,
+                  });
+                }
+              } catch (e) {
+                logger.error('팀 채널 생성/이동 오류:', e);
+              }
             }
             return;
           }

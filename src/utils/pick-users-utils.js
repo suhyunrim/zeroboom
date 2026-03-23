@@ -607,6 +607,7 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
       puuid: summonerData.puuid,
       name: actualName,
       rating,
+      discordId: memberData?.discordId || null,
       mainPos: normalizePosition(summonerData.mainPosition),
       subPos: normalizePosition(summonerData.subPosition),
       mainPositionRate: summonerData.mainPositionRate || 0,
@@ -631,9 +632,9 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
     return { content: matchResult || '매칭 생성에 실패했습니다.', ephemeral: true };
   }
 
-  // 3. 포지션 최적화 (상위 30개 중 포지션 점수 비슷한 2개 선택)
-  const optimizedMatches = optimizePositionsForMatches(matchResult.match, playerDataMap, {
-    topN: 30,
+  // 3. 포지션 최적화: 레이팅 차이 오름차순으로 정렬된 전체 풀에서 오프 수 최소 매칭 선택
+  const matchPool = matchResult.allMatches || matchResult.match;
+  const optimizedMatches = optimizePositionsForMatches(matchPool, playerDataMap, {
     resultCount: 2,
   });
 
