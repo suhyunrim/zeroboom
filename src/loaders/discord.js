@@ -1,9 +1,10 @@
-const { Client, GatewayIntentBits, REST, Routes, ComponentType, InteractionResponse } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, ComponentType, InteractionResponse, ChannelType, PermissionFlagsBits } = require('discord.js');
 const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
 const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
+const tempVoiceController = require('../controller/temp-voice');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 
 const VOTE_CATEGORIES = [
@@ -836,6 +837,81 @@ module.exports = async (app) => {
       }
     } catch (e) {
       logger.error(e);
+    }
+  });
+
+  // 임시 음성 채널: 생성기 채널 접속 시 임시 채널 생성, 퇴장 시 삭제
+  client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+      // 생성기 채널에 접속한 경우 → 임시 채널 생성
+      if (newState.channelId) {
+        const generator = await tempVoiceController.findGenerator(newState.channelId);
+        if (generator) {
+          const guild = newState.guild;
+          const member = newState.member;
+          const activeCount = await tempVoiceController.countActiveChannels(generator.id);
+          const channelName = generator.defaultName
+            .replace('{username}', member.displayName)
+            .replace('{count}', activeCount + 1);
+
+          // 생성기 채널의 권한을 복사하고 소유자 권한 추가
+          const generatorChannel = guild.channels.cache.get(generator.channelId);
+          const permissionOverwrites = generatorChannel
+            ? [...generatorChannel.permissionOverwrites.cache.values()].map((perm) => ({
+              id: perm.id,
+              allow: perm.allow,
+              deny: perm.deny,
+            }))
+            : [];
+          permissionOverwrites.push({
+            id: member.id,
+            allow: [PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MoveMembers],
+          });
+
+          const tempChannel = await guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildVoice,
+            parent: generator.categoryId || null,
+            userLimit: generator.defaultUserLimit || 0,
+            permissionOverwrites,
+          });
+
+          await tempVoiceController.createTempChannel({
+            channelId: tempChannel.id,
+            guildId: guild.id,
+            ownerDiscordId: member.id,
+            generatorId: generator.id,
+          });
+
+          await newState.setChannel(tempChannel);
+          logger.info(`임시 음성 채널 생성: ${channelName} (${tempChannel.id}) by ${member.displayName}`);
+        }
+      }
+
+      // 임시 채널에서 모든 유저가 나간 경우 → 채널 삭제
+      if (oldState.channelId && oldState.channelId !== newState.channelId) {
+        const tempChannelRecord = await tempVoiceController.findTempChannel(oldState.channelId);
+        if (tempChannelRecord) {
+          const channel = oldState.guild.channels.cache.get(oldState.channelId);
+          if (channel && channel.members.size === 0) {
+            await channel.delete();
+            await tempVoiceController.deleteTempChannel(oldState.channelId);
+            logger.info(`임시 음성 채널 삭제: ${channel.name} (${oldState.channelId})`);
+          }
+        }
+      }
+    } catch (e) {
+      logger.error('임시 음성 채널 처리 오류:', e);
+    }
+  });
+
+  // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
+  client.once('ready', async () => {
+    try {
+      await tempVoiceController.cleanupOrphanedChannels(client);
+      logger.info('임시 음성 채널 정합성 확인 완료');
+    } catch (e) {
+      logger.error('임시 음성 채널 정합성 확인 오류:', e);
     }
   });
 

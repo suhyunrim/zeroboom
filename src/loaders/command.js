@@ -42,6 +42,16 @@ class CommandList {
 						option.setName(argument[1])
 								.setDescription(argument[2])
 								.setRequired(isRequired));
+				} else if (argument[0] == 'channel') {
+					slashCommand.addChannelOption(option =>
+						option.setName(argument[1])
+								.setDescription(argument[2])
+								.setRequired(isRequired));
+				} else if (argument[0] == 'integer') {
+					slashCommand.addIntegerOption(option =>
+						option.setName(argument[1])
+								.setDescription(argument[2])
+								.setRequired(isRequired));
 				}
 			}
 			ret.push(slashCommand);
