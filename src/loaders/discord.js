@@ -359,17 +359,19 @@ module.exports = async (app) => {
 
         // 팀 음성 채널 생성 및 멤버 이동
         try {
-          const voiceChannel = interaction.member.voice?.channel;
+          const freshMember = await interaction.guild.members.fetch(interaction.user.id);
+          const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
+          logger.info(`팀 채널 생성 시도: voiceChannel=${voiceChannel ? voiceChannel.id : 'null'}`);
           if (voiceChannel) {
-            const team1DiscordIds = po.teamA.assignments.map((a) => playerDataMap[a.playerName]?.discordId);
-            const team2DiscordIds = po.teamB.assignments.map((a) => playerDataMap[a.playerName]?.discordId);
+            const team1DiscordIds = po.teamA.assignments.map((a) => playerDataMap[a.playerName] ? playerDataMap[a.playerName].discordId : null);
+            const team2DiscordIds = po.teamB.assignments.map((a) => playerDataMap[a.playerName] ? playerDataMap[a.playerName].discordId : null);
             await tempVoiceController.createMatchTeamChannels({
               guild: interaction.guild,
               categoryId: voiceChannel.parentId,
               ownerDiscordId: interaction.user.id,
               team1DiscordIds,
               team2DiscordIds,
-              channelName: interaction.channel?.name,
+              channelName: interaction.channel ? interaction.channel.name : null,
             });
           }
         } catch (e) {
@@ -710,7 +712,9 @@ module.exports = async (app) => {
 
               // 팀 음성 채널 생성 및 멤버 이동
               try {
-                const voiceChannel = interaction.member.voice?.channel;
+                const freshMember = await interaction.guild.members.fetch(interaction.user.id);
+                const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
+                logger.info(`팀 채널 생성 시도: voiceChannel=${voiceChannel ? voiceChannel.id : 'null'}`);
                 if (voiceChannel && output.teamDiscordIds) {
                   await tempVoiceController.createMatchTeamChannels({
                     guild: interaction.guild,
@@ -718,7 +722,7 @@ module.exports = async (app) => {
                     ownerDiscordId: interaction.user.id,
                     team1DiscordIds: output.teamDiscordIds[0],
                     team2DiscordIds: output.teamDiscordIds[1],
-                    channelName: interaction.channel?.name,
+                    channelName: interaction.channel ? interaction.channel.name : null,
                   });
                 }
               } catch (e) {
