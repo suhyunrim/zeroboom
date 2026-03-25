@@ -97,12 +97,11 @@ module.exports.createMatchTeamChannels = async ({
   });
 
   // 멤버 이동
-  const moveMember = (discordId, targetChannel) => {
-    const member = guild.members.cache.get(discordId);
+  const moveMember = async (discordId, targetChannel) => {
+    const member = await guild.members.fetch(discordId).catch(() => null);
     if (member && member.voice && member.voice.channelId) {
       return member.voice.setChannel(targetChannel).catch(() => {});
     }
-    return Promise.resolve();
   };
 
   await Promise.all([
