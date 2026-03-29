@@ -71,35 +71,44 @@ module.exports.createMatchTeamChannels = async ({
   channelName,
 }) => {
   const prefix = channelName ? `${channelName} :: ` : '';
-  const team1Channel = await guild.channels.create({
-    name: `${prefix}🐶팀`,
+  const team1Name = `${prefix}🐶팀`;
+  const team2Name = `${prefix}🐱팀`;
+
+  // 같은 카테고리에 이미 존재하는 팀 채널 재사용
+  const findExisting = (name) => {
+    return guild.channels.cache.find(
+      (ch) => ch.parentId === categoryId && ch.type === ChannelType.GuildVoice && ch.name === name,
+    );
+  };
+
+  const team1Channel = findExisting(team1Name) || await guild.channels.create({
+    name: team1Name,
     type: ChannelType.GuildVoice,
     parent: categoryId,
   });
-  const team2Channel = await guild.channels.create({
-    name: `${prefix}🐱팀`,
+  const team2Channel = findExisting(team2Name) || await guild.channels.create({
+    name: team2Name,
     type: ChannelType.GuildVoice,
     parent: categoryId,
   });
 
-  // temp_voice_channels에 등록 (퇴장 시 자동 삭제)
-  await models.temp_voice_channel.create({
-    channelId: team1Channel.id,
-    guildId: guild.id,
-    ownerDiscordId,
-    generatorId: 0,
-  });
-  await models.temp_voice_channel.create({
-    channelId: team2Channel.id,
-    guildId: guild.id,
-    ownerDiscordId,
-    generatorId: 0,
-  });
+  // temp_voice_channels에 등록 (이미 등록된 경우 건너뜀)
+  const ensureTempRecord = async (channelId) => {
+    const existing = await models.temp_voice_channel.findOne({ where: { channelId } });
+    if (!existing) {
+      await models.temp_voice_channel.create({ channelId, guildId: guild.id, ownerDiscordId, generatorId: 0 });
+    }
+  };
+  await ensureTempRecord(team1Channel.id);
+  await ensureTempRecord(team2Channel.id);
 
   // 멤버 이동
   const moveMember = async (discordId, targetChannel) => {
     const member = await guild.members.fetch(discordId).catch(() => null);
     if (member && member.voice && member.voice.channelId) {
+      // 같은 카테고리에 있는 멤버만 이동 (다른 카테고리에 있는 사람은 납치하지 않음)
+      const currentChannel = guild.channels.cache.get(member.voice.channelId);
+      if (currentChannel && currentChannel.parentId !== categoryId) return;
       return member.voice.setChannel(targetChannel).catch(() => {});
     }
   };
