@@ -569,15 +569,7 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
           defaults: {
             queueId: matchData.info.queueId,
             gameCreation: new Date(matchData.info.gameCreation),
-            participants: matchData.info.participants.map((p) => ({
-              puuid: p.puuid,
-              championName: p.championName,
-              teamId: p.teamId,
-              win: p.win,
-              kills: p.kills,
-              deaths: p.deaths,
-              assists: p.assists,
-            })),
+            participants: matchData.info.participants,
           },
         });
 
