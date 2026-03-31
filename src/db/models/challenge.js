@@ -30,10 +30,8 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: false,
       },
-      status: {
-        type: DataTypes.ENUM('draft', 'scheduled', 'active', 'ended', 'canceled'),
-        defaultValue: 'draft',
-        allowNull: false,
+      canceledAt: {
+        type: DataTypes.DATE,
       },
       scoringType: {
         type: DataTypes.ENUM('games', 'wins', 'winRate', 'points'),

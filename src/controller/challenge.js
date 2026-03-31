@@ -18,6 +18,26 @@ const calculatePoints = (wins, losses) => {
   return wins + losses;
 };
 
+/**
+ * 챌린지의 현재 상태를 기간 데이터에서 자동 계산
+ */
+function getChallengeStatus(challenge) {
+  if (challenge.canceledAt) return 'canceled';
+  const now = new Date();
+  if (now < new Date(challenge.startAt)) return 'scheduled';
+  if (now <= new Date(challenge.endAt)) return 'active';
+  return 'ended';
+}
+
+/**
+ * 챌린지 객체에 계산된 status를 붙여서 반환
+ */
+function withStatus(challenge) {
+  const json = challenge.toJSON ? challenge.toJSON() : { ...challenge };
+  json.status = getChallengeStatus(json);
+  return json;
+}
+
 // --- 관리자 기능 ---
 
 module.exports.createChallenge = async (groupId, data, createdBy) => {
@@ -32,14 +52,13 @@ module.exports.createChallenge = async (groupId, data, createdBy) => {
       gameType: data.gameType,
       startAt: new Date(data.startAt),
       endAt: new Date(data.endAt),
-      status: data.status || 'draft',
       scoringType: data.scoringType || 'points',
       isVisible: data.isVisible || false,
       createdBy,
       displayOrder: data.displayOrder || 0,
     });
 
-    return { result: challenge, status: 200 };
+    return { result: withStatus(challenge), status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
@@ -62,26 +81,25 @@ module.exports.updateChallenge = async (challengeId, data) => {
     await models.challenge.update(updateFields, { where: { id: challengeId } });
     const updated = await models.challenge.findByPk(challengeId);
 
-    return { result: updated, status: 200 };
+    return { result: withStatus(updated), status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
   }
 };
 
-module.exports.updateChallengeStatus = async (challengeId, status) => {
+module.exports.cancelChallenge = async (challengeId) => {
   try {
-    const validStatuses = ['draft', 'scheduled', 'active', 'ended', 'canceled'];
-    if (!validStatuses.includes(status)) {
-      return { result: '유효하지 않은 상태입니다.', status: 400 };
-    }
-
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    await models.challenge.update({ status }, { where: { id: challengeId } });
+    if (challenge.canceledAt) {
+      return { result: '이미 취소된 챌린지입니다.', status: 400 };
+    }
 
-    return { result: { id: challengeId, status }, status: 200 };
+    await models.challenge.update({ canceledAt: new Date() }, { where: { id: challengeId } });
+
+    return { result: { id: challengeId, status: 'canceled' }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
@@ -108,7 +126,7 @@ module.exports.listChallenges = async (groupId) => {
     });
 
     const result = challenges.map((c) => ({
-      ...c.toJSON(),
+      ...withStatus(c),
       participantCount: countMap[c.id] || 0,
     }));
 
@@ -130,7 +148,7 @@ module.exports.getChallengeDetail = async (challengeId) => {
 
     return {
       result: {
-        ...challenge.toJSON(),
+        ...withStatus(challenge),
         participantCount,
       },
       status: 200,
@@ -149,7 +167,7 @@ module.exports.listVisibleChallenges = async (groupId) => {
       where: {
         groupId,
         isVisible: true,
-        status: { [Op.in]: ['scheduled', 'active', 'ended'] },
+        canceledAt: null,
       },
       order: [['displayOrder', 'ASC'], ['createdAt', 'DESC']],
     });
@@ -166,7 +184,7 @@ module.exports.listVisibleChallenges = async (groupId) => {
     });
 
     const result = challenges.map((c) => ({
-      ...c.toJSON(),
+      ...withStatus(c),
       participantCount: countMap[c.id] || 0,
     }));
 
@@ -182,7 +200,8 @@ module.exports.joinChallenge = async (challengeId, puuid) => {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    if (!['scheduled', 'active'].includes(challenge.status)) {
+    const status = getChallengeStatus(challenge);
+    if (!['scheduled', 'active'].includes(status)) {
       return { result: '참가할 수 없는 상태의 챌린지입니다.', status: 400 };
     }
 
@@ -208,7 +227,8 @@ module.exports.cancelJoin = async (challengeId, puuid) => {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    if (!['scheduled', 'active'].includes(challenge.status)) {
+    const status = getChallengeStatus(challenge);
+    if (!['scheduled', 'active'].includes(status)) {
       return { result: '참가 취소할 수 없는 상태의 챌린지입니다.', status: 400 };
     }
 
@@ -438,18 +458,21 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
 /**
  * 활성 챌린지 참가자 전체 전적 일괄 동기화
  * 스케줄러에서 매일 새벽 호출
+ * 진행 중이거나 최근 3일 이내 종료된 챌린지 대상
  */
 module.exports.syncAllActiveChallenges = async () => {
   try {
-    // active 또는 최근 3일 이내 ended 챌린지
+    const now = new Date();
+    const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+
+    // 취소되지 않았고, (진행 중이거나 최근 종료된) 챌린지
     const challenges = await models.challenge.findAll({
       where: {
+        canceledAt: null,
+        startAt: { [Op.lte]: now },
         [Op.or]: [
-          { status: 'active' },
-          {
-            status: 'ended',
-            endAt: { [Op.gte]: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-          },
+          { endAt: { [Op.gte]: now } },                  // 진행 중
+          { endAt: { [Op.gte]: threeDaysAgo } },         // 최근 3일 이내 종료
         ],
       },
     });
@@ -513,7 +536,9 @@ module.exports.syncAllActiveChallenges = async () => {
   }
 };
 
-// --- 유틸 ---
+// --- 유틸 (export for testing) ---
+
+module.exports.getChallengeStatus = getChallengeStatus;
 
 /**
  * 연승/연패 streak 계산

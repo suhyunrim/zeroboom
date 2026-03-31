@@ -56,6 +56,46 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+// --- 상태 자동 계산 ---
+
+describe('getChallengeStatus', () => {
+  test('canceledAt이 있으면 canceled', () => {
+    const result = challengeController.getChallengeStatus({
+      canceledAt: new Date(),
+      startAt: new Date('2020-01-01'),
+      endAt: new Date('2099-12-31'),
+    });
+    expect(result).toBe('canceled');
+  });
+
+  test('현재 시각이 startAt 이전이면 scheduled', () => {
+    const result = challengeController.getChallengeStatus({
+      canceledAt: null,
+      startAt: new Date('2099-01-01'),
+      endAt: new Date('2099-12-31'),
+    });
+    expect(result).toBe('scheduled');
+  });
+
+  test('현재 시각이 startAt~endAt 사이면 active', () => {
+    const result = challengeController.getChallengeStatus({
+      canceledAt: null,
+      startAt: new Date('2020-01-01'),
+      endAt: new Date('2099-12-31'),
+    });
+    expect(result).toBe('active');
+  });
+
+  test('현재 시각이 endAt 이후면 ended', () => {
+    const result = challengeController.getChallengeStatus({
+      canceledAt: null,
+      startAt: new Date('2020-01-01'),
+      endAt: new Date('2020-12-31'),
+    });
+    expect(result).toBe('ended');
+  });
+});
+
 // --- 챌린지 생성 ---
 
 describe('createChallenge', () => {
@@ -71,19 +111,24 @@ describe('createChallenge', () => {
 
   test('정상 생성 시 200 반환', async () => {
     mockModels.group.findByPk.mockResolvedValue({ id: 1 });
-    const mockChallenge = { id: 1, title: '테스트 챌린지' };
+    const mockChallenge = {
+      id: 1, title: '테스트 챌린지', canceledAt: null,
+      startAt: new Date('2099-01-01'), endAt: new Date('2099-12-31'),
+      toJSON() { return { ...this }; },
+    };
+    delete mockChallenge.toJSON.toJSON; // prevent recursion in spread
     mockModels.challenge.create.mockResolvedValue(mockChallenge);
 
     const result = await challengeController.createChallenge(1, {
       title: '테스트 챌린지',
       gameType: 'soloRank',
-      startAt: '2026-04-01',
-      endAt: '2026-04-30',
+      startAt: '2099-01-01',
+      endAt: '2099-12-31',
       scoringType: 'points',
     }, 'puuid-creator');
 
     expect(result.status).toBe(200);
-    expect(result.result).toEqual(mockChallenge);
+    expect(result.result.status).toBe('scheduled');
     expect(mockModels.challenge.create).toHaveBeenCalledWith(
       expect.objectContaining({
         groupId: 1,
@@ -95,27 +140,28 @@ describe('createChallenge', () => {
   });
 });
 
-// --- 상태 변경 ---
+// --- 챌린지 취소 ---
 
-describe('updateChallengeStatus', () => {
-  test('유효하지 않은 상태면 400 반환', async () => {
-    const result = await challengeController.updateChallengeStatus(1, 'invalid');
-    expect(result.status).toBe(400);
-  });
-
+describe('cancelChallenge', () => {
   test('챌린지가 없으면 404 반환', async () => {
     mockModels.challenge.findByPk.mockResolvedValue(null);
-    const result = await challengeController.updateChallengeStatus(999, 'active');
+    const result = await challengeController.cancelChallenge(999);
     expect(result.status).toBe(404);
   });
 
-  test('정상 상태 변경 시 200 반환', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1 });
+  test('이미 취소된 경우 400', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, canceledAt: new Date() });
+    const result = await challengeController.cancelChallenge(1);
+    expect(result.status).toBe(400);
+  });
+
+  test('정상 취소 시 200', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, canceledAt: null });
     mockModels.challenge.update.mockResolvedValue([1]);
 
-    const result = await challengeController.updateChallengeStatus(1, 'active');
+    const result = await challengeController.cancelChallenge(1);
     expect(result.status).toBe(200);
-    expect(result.result.status).toBe('active');
+    expect(result.result.status).toBe('canceled');
   });
 });
 
@@ -128,14 +174,29 @@ describe('joinChallenge', () => {
     expect(result.status).toBe(404);
   });
 
-  test('draft 상태 챌린지에는 참가 불가', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'draft' });
+  test('ended 챌린지에는 참가 불가', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2020-12-31'),
+    });
+    const result = await challengeController.joinChallenge(1, 'puuid-1');
+    expect(result.status).toBe(400);
+  });
+
+  test('canceled 챌린지에는 참가 불가', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: new Date(),
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+    });
     const result = await challengeController.joinChallenge(1, 'puuid-1');
     expect(result.status).toBe(400);
   });
 
   test('이미 참가한 경우 400', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'active' });
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+    });
     mockModels.challenge_participant.findOne.mockResolvedValue({ id: 1 });
 
     const result = await challengeController.joinChallenge(1, 'puuid-1');
@@ -144,7 +205,10 @@ describe('joinChallenge', () => {
   });
 
   test('정상 참가 시 200', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'active' });
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+    });
     mockModels.challenge_participant.findOne.mockResolvedValue(null);
     const mockParticipant = { id: 1, challengeId: 1, puuid: 'puuid-1' };
     mockModels.challenge_participant.create.mockResolvedValue(mockParticipant);
@@ -159,13 +223,19 @@ describe('joinChallenge', () => {
 
 describe('cancelJoin', () => {
   test('ended 상태 챌린지에서는 취소 불가', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'ended' });
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2020-12-31'),
+    });
     const result = await challengeController.cancelJoin(1, 'puuid-1');
     expect(result.status).toBe(400);
   });
 
   test('참가하지 않은 경우 400', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'active' });
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+    });
     mockModels.challenge_participant.findOne.mockResolvedValue(null);
 
     const result = await challengeController.cancelJoin(1, 'puuid-1');
@@ -174,7 +244,10 @@ describe('cancelJoin', () => {
   });
 
   test('정상 취소 시 200', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, status: 'active' });
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+    });
     mockModels.challenge_participant.findOne.mockResolvedValue({
       id: 1, destroy: jest.fn(),
     });
@@ -218,13 +291,10 @@ describe('getLeaderboard', () => {
 
     // a: 5승 5패 (10판, points=10), b: 7승 3패 (10판, points=10), c: 3승 0패 (3판, points=3)
     mockModels.challenge_match.findAll.mockResolvedValue([
-      // a의 매치
       ...Array(5).fill(null).map((_, i) => ({ puuid: 'a', win: true, gameCreation: new Date(`2026-04-${i + 1}`) })),
       ...Array(5).fill(null).map((_, i) => ({ puuid: 'a', win: false, gameCreation: new Date(`2026-04-${i + 6}`) })),
-      // b의 매치
       ...Array(7).fill(null).map((_, i) => ({ puuid: 'b', win: true, gameCreation: new Date(`2026-04-${i + 1}`) })),
       ...Array(3).fill(null).map((_, i) => ({ puuid: 'b', win: false, gameCreation: new Date(`2026-04-${i + 8}`) })),
-      // c의 매치
       ...Array(3).fill(null).map((_, i) => ({ puuid: 'c', win: true, gameCreation: new Date(`2026-04-${i + 1}`) })),
     ]);
 
@@ -238,7 +308,6 @@ describe('getLeaderboard', () => {
     expect(result.status).toBe(200);
 
     const board = result.result;
-    // a와 b 모두 10 points지만 b가 wins 더 많음 → b가 1등
     expect(board[0].puuid).toBe('b');
     expect(board[0].rank).toBe(1);
     expect(board[1].puuid).toBe('a');
@@ -293,7 +362,7 @@ describe('syncUserMatches', () => {
   test('쿨다운 중이면 429', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({ id: 1, gameType: 'soloRank' });
     mockModels.challenge_participant.findOne.mockResolvedValue({
-      lastSyncAt: new Date(), // 방금 동기화
+      lastSyncAt: new Date(),
       update: jest.fn(),
     });
 

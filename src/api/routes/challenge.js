@@ -16,7 +16,7 @@ module.exports = (app) => {
    */
   route.post('/:groupId', verifyToken, requireGroupAdmin, async (req, res) => {
     const { groupId } = req.params;
-    const { title, description, gameType, startAt, endAt, status, scoringType, isVisible, displayOrder } = req.body;
+    const { title, description, gameType, startAt, endAt, scoringType, isVisible, displayOrder } = req.body;
 
     if (!title || !gameType || !startAt || !endAt) {
       return res.status(400).json({ result: 'title, gameType, startAt, endAt는 필수입니다.' });
@@ -33,7 +33,7 @@ module.exports = (app) => {
 
     const result = await challengeController.createChallenge(
       Number(groupId),
-      { title, description, gameType, startAt, endAt, status, scoringType, isVisible, displayOrder },
+      { title, description, gameType, startAt, endAt, scoringType, isVisible, displayOrder },
       req.user.puuid,
     );
     return res.status(result.status).json({ result: result.result });
@@ -51,18 +51,13 @@ module.exports = (app) => {
   });
 
   /**
-   * PATCH /api/challenge/:groupId/:challengeId/status
-   * 챌린지 상태 변경 (관리자 전용)
+   * POST /api/challenge/:groupId/:challengeId/cancel
+   * 챌린지 취소 (관리자 전용)
    */
-  route.patch('/:groupId/:challengeId/status', verifyToken, requireGroupAdmin, async (req, res) => {
+  route.post('/:groupId/:challengeId/cancel', verifyToken, requireGroupAdmin, async (req, res) => {
     const { challengeId } = req.params;
-    const { status } = req.body;
 
-    if (!status) {
-      return res.status(400).json({ result: 'status가 필요합니다.' });
-    }
-
-    const result = await challengeController.updateChallengeStatus(Number(challengeId), status);
+    const result = await challengeController.cancelChallenge(Number(challengeId));
     return res.status(result.status).json({ result: result.result });
   });
 
