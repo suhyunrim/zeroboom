@@ -348,25 +348,34 @@ describe('getLeaderboard', () => {
   });
 });
 
-// --- 수동 갱신 쿨다운 ---
+// --- 챌린지 전적 갱신 ---
 
-describe('syncUserMatches', () => {
-  test('참가하지 않은 챌린지면 400', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1 });
-    mockModels.challenge_participant.findOne.mockResolvedValue(null);
-
-    const result = await challengeController.syncUserMatches(1, 'puuid-1');
-    expect(result.status).toBe(400);
+describe('syncChallengeMatches', () => {
+  test('챌린지가 없으면 404', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue(null);
+    const result = await challengeController.syncChallengeMatches(999);
+    expect(result.status).toBe(404);
   });
 
   test('쿨다운 중이면 429', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({ id: 1, gameType: 'soloRank' });
-    mockModels.challenge_participant.findOne.mockResolvedValue({
-      lastSyncAt: new Date(),
-      update: jest.fn(),
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, gameType: 'soloRank',
+      lastSyncAt: new Date(), // 방금 동기화
     });
 
-    const result = await challengeController.syncUserMatches(1, 'puuid-1');
+    const result = await challengeController.syncChallengeMatches(1);
     expect(result.status).toBe(429);
+  });
+
+  test('참가자가 없으면 synced 0 반환', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, gameType: 'soloRank', lastSyncAt: null,
+      startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+    });
+    mockModels.challenge_participant.findAll.mockResolvedValue([]);
+
+    const result = await challengeController.syncChallengeMatches(1);
+    expect(result.status).toBe(200);
+    expect(result.result.synced).toBe(0);
   });
 });

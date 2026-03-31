@@ -15,9 +15,6 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: false,
       },
-      lastSyncAt: {
-        type: DataTypes.DATE,
-      },
     },
     {
       indexes: [

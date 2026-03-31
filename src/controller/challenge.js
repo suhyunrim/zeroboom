@@ -352,37 +352,49 @@ module.exports.getMyStats = async (challengeId, puuid) => {
 
 // --- 전적 동기화 ---
 
-const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2분
+const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30분
 
 /**
- * 유저 1명의 챌린지 관련 전적 동기화
- * Riot API에서 챌린지 기간 내 매치를 가져와 challenge_match에 저장
+ * 챌린지 전체 참가자 전적 동기화
+ * 쿨다운은 챌린지 단위로 적용
  */
-module.exports.syncUserMatches = async (challengeId, puuid) => {
+module.exports.syncChallengeMatches = async (challengeId) => {
   try {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    const participant = await models.challenge_participant.findOne({
-      where: { challengeId, puuid },
-    });
-    if (!participant) return { result: '참가하지 않은 챌린지입니다.', status: 400 };
-
-    // 수동 갱신 쿨다운 체크
-    if (participant.lastSyncAt) {
-      const elapsed = Date.now() - new Date(participant.lastSyncAt).getTime();
+    // 챌린지 단위 쿨다운 체크
+    if (challenge.lastSyncAt) {
+      const elapsed = Date.now() - new Date(challenge.lastSyncAt).getTime();
       if (elapsed < SYNC_COOLDOWN_MS) {
-        const remainSec = Math.ceil((SYNC_COOLDOWN_MS - elapsed) / 1000);
-        return { result: `${remainSec}초 후에 다시 시도해주세요.`, status: 429 };
+        const remainMin = Math.ceil((SYNC_COOLDOWN_MS - elapsed) / 60000);
+        return { result: `${remainMin}분 후에 다시 시도해주세요.`, status: 429 };
       }
     }
 
+    const participants = await models.challenge_participant.findAll({
+      where: { challengeId },
+      attributes: ['puuid'],
+    });
+    if (participants.length === 0) return { result: { synced: 0 }, status: 200 };
+
     const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
-    const syncCount = await fetchAndStoreMatches(puuid, queueId, challenge.startAt, challenge.endAt);
+    let totalSynced = 0;
 
-    await participant.update({ lastSyncAt: new Date() });
+    for (const p of participants) {
+      try {
+        const synced = await fetchAndStoreMatches(p.puuid, queueId, challenge.startAt, challenge.endAt);
+        totalSynced += synced;
+      } catch (e) {
+        logger.error(`[챌린지] 동기화 실패 (puuid=${p.puuid}): ${e.message}`);
+      }
 
-    return { result: { synced: syncCount }, status: 200 };
+      await sleep(2000);
+    }
+
+    await models.challenge.update({ lastSyncAt: new Date() }, { where: { id: challengeId } });
+
+    return { result: { synced: totalSynced, participants: participants.length }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };

@@ -155,13 +155,12 @@ module.exports = (app) => {
 
   /**
    * POST /api/challenge/:groupId/:challengeId/sync
-   * 내 전적 수동 갱신
+   * 챌린지 전체 참가자 전적 갱신 (인증된 유저만)
    */
   route.post('/:groupId/:challengeId/sync', verifyToken, async (req, res) => {
     const { challengeId } = req.params;
-    const { puuid } = req.user;
 
-    const result = await challengeController.syncUserMatches(Number(challengeId), puuid);
+    const result = await challengeController.syncChallengeMatches(Number(challengeId));
     return res.status(result.status).json({ result: result.result });
   });
 };
