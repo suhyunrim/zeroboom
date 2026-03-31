@@ -18,7 +18,7 @@ const getMatchIdsFromSummonerName = async (summonerName, beginIndex, count = 20)
 }
 exports.getMatchIdsFromSummonerName = getMatchIdsFromSummonerName;
 
-const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20, queue = null) => {
+const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20, queue = null, startTime = null, endTime = null) => {
   const params = {
     api_key: RIOT_API_KEY,
     start: beginIndex,
@@ -28,6 +28,14 @@ const getMatchIdsFromPuuid = async (puuid, beginIndex, count = 20, queue = null)
   // queue가 지정되면 해당 큐만 필터링 (420: 솔로랭크)
   if (queue) {
     params.queue = queue;
+  }
+
+  // epoch seconds 단위 시간 범위 필터
+  if (startTime) {
+    params.startTime = startTime;
+  }
+  if (endTime) {
+    params.endTime = endTime;
   }
 
   const result = await axios({

@@ -9,6 +9,7 @@ const externalRecord = require('./routes/external-record');
 const honor = require('./routes/honor');
 const auth = require('./routes/auth');
 const blacklist = require('./routes/blacklist');
+const challenge = require('./routes/challenge');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -26,6 +27,7 @@ module.exports = () => {
   externalRecord(app);
   honor(app);
   auth(app);
+  challenge(app);
 
   // v2
   groupsV2(app);

@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { logger } = require('./logger');
 const { updateActiveUsersPositions } = require('../controller/summoner');
+const { syncAllActiveChallenges } = require('../controller/challenge');
 
 module.exports = () => {
   // 매일 새벽 5시에 포지션 업데이트
@@ -23,4 +24,20 @@ module.exports = () => {
   });
 
   logger.info('📅 스케줄러 등록: 매일 05:00 포지션 업데이트');
+
+  // 매일 새벽 4시에 챌린지 전적 동기화
+  cron.schedule('0 4 * * *', async () => {
+    logger.info('[스케줄러] 챌린지 전적 배치 동기화 시작');
+
+    try {
+      await syncAllActiveChallenges();
+      logger.info('[스케줄러] 챌린지 전적 배치 동기화 완료');
+    } catch (e) {
+      logger.error(`[스케줄러] 챌린지 전적 배치 에러: ${e.message}`);
+    }
+  }, {
+    timezone: 'Asia/Seoul',
+  });
+
+  logger.info('📅 스케줄러 등록: 매일 04:00 챌린지 전적 동기화');
 };
