@@ -35,6 +35,9 @@ const mockModels = {
   summoner: {
     findAll: jest.fn(),
   },
+  user: {
+    findAll: jest.fn(),
+  },
   sequelize: {
     fn: jest.fn(() => 'COUNT_FN'),
     col: jest.fn(() => 'COL'),
@@ -345,6 +348,105 @@ describe('getLeaderboard', () => {
     expect(entry.currentWinStreak).toBe(1);
     expect(entry.currentLoseStreak).toBe(0);
     expect(entry.winRate).toBe(66.7);
+  });
+});
+
+// --- 유저 전적 상세 ---
+
+describe('getUserMatchHistory', () => {
+  test('챌린지가 없으면 404', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue(null);
+    const result = await challengeController.getUserMatchHistory(999, 'puuid-1', 1);
+    expect(result.status).toBe(404);
+  });
+
+  test('솔랭 챌린지에서 그룹 멤버 식별', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, gameType: 'soloRank',
+      startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+    });
+
+    const participants = [
+      { puuid: 'me', championName: 'Jinx', teamId: 100, win: true },
+      { puuid: 'friend1', championName: 'Thresh', teamId: 100, win: true },
+      { puuid: 'enemy1', championName: 'Zed', teamId: 200, win: false },
+      { puuid: 'stranger', championName: 'Ahri', teamId: 200, win: false },
+    ];
+
+    mockModels.challenge_match.findAll.mockResolvedValue([{
+      matchId: 'KR_123',
+      puuid: 'me',
+      win: true,
+      championName: 'Jinx',
+      kills: 10,
+      deaths: 2,
+      assists: 8,
+      teamId: 100,
+      gameCreation: new Date('2026-04-05'),
+      participants,
+    }]);
+
+    // 그룹에 me, friend1이 소속
+    mockModels.user.findAll.mockResolvedValue([
+      { puuid: 'me' },
+      { puuid: 'friend1' },
+    ]);
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'me', name: 'MyName' },
+      { puuid: 'friend1', name: 'FriendOne' },
+    ]);
+
+    const result = await challengeController.getUserMatchHistory(1, 'me', 1);
+    expect(result.status).toBe(200);
+    expect(result.result).toHaveLength(1);
+
+    const match = result.result[0];
+    expect(match.championName).toBe('Jinx');
+    expect(match.kills).toBe(10);
+
+    // 그룹 멤버 중 본인 제외, friend1만 표시
+    expect(match.groupMembers).toHaveLength(1);
+    expect(match.groupMembers[0].name).toBe('FriendOne');
+    expect(match.groupMembers[0].sameTeam).toBe(true);
+  });
+
+  test('칼바람 챌린지에서도 그룹 멤버 식별', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 2, gameType: 'aram',
+      startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+    });
+
+    mockModels.challenge_match.findAll.mockResolvedValue([{
+      matchId: 'KR_456',
+      puuid: 'me',
+      win: false,
+      championName: 'Lux',
+      kills: 5,
+      deaths: 7,
+      assists: 12,
+      teamId: 100,
+      gameCreation: new Date('2026-04-10'),
+      participants: [
+        { puuid: 'me', championName: 'Lux', teamId: 100, win: false },
+        { puuid: 'friend1', championName: 'Sona', teamId: 100, win: false },
+      ],
+    }]);
+
+    mockModels.user.findAll.mockResolvedValue([
+      { puuid: 'me' },
+      { puuid: 'friend1' },
+    ]);
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'me', name: 'MyName' },
+      { puuid: 'friend1', name: 'FriendOne' },
+    ]);
+
+    const result = await challengeController.getUserMatchHistory(2, 'me', 1);
+    expect(result.status).toBe(200);
+
+    const match = result.result[0];
+    expect(match.groupMembers).toHaveLength(1);
+    expect(match.groupMembers[0].name).toBe('FriendOne');
   });
 });
 

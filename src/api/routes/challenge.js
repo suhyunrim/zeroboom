@@ -154,6 +154,16 @@ module.exports = (app) => {
   });
 
   /**
+   * GET /api/challenge/:groupId/:challengeId/user/:puuid/matches
+   * 챌린지 기간 내 특정 유저 전적 상세 (솔랭/자랭: 그룹 멤버 표시)
+   */
+  route.get('/:groupId/:challengeId/user/:puuid/matches', async (req, res) => {
+    const { groupId, challengeId, puuid } = req.params;
+    const result = await challengeController.getUserMatchHistory(Number(challengeId), puuid, Number(groupId));
+    return res.status(result.status).json({ result: result.result });
+  });
+
+  /**
    * POST /api/challenge/:groupId/:challengeId/sync
    * 챌린지 전체 참가자 전적 갱신 (인증된 유저만)
    */

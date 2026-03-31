@@ -350,6 +350,82 @@ module.exports.getMyStats = async (challengeId, puuid) => {
   }
 };
 
+/**
+ * 챌린지 기간 내 특정 유저의 전적 상세 조회
+ * 같은 그룹 멤버가 같은 매치에 있었는지 식별
+ */
+module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
+  try {
+    const challenge = await models.challenge.findByPk(challengeId);
+    if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
+
+    const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
+
+    const matches = await models.challenge_match.findAll({
+      where: {
+        puuid,
+        queueId,
+        gameCreation: {
+          [Op.gte]: challenge.startAt,
+          [Op.lte]: challenge.endAt,
+        },
+      },
+      order: [['gameCreation', 'DESC']],
+    });
+
+    // 그룹 멤버 맵 구성
+    let groupMemberMap = {};
+
+    if (groupId) {
+      const groupUsers = await models.user.findAll({
+        where: { groupId },
+        attributes: ['puuid'],
+      });
+      const groupPuuids = groupUsers.map((u) => u.puuid);
+
+      const summoners = await models.summoner.findAll({
+        where: { puuid: groupPuuids },
+        attributes: ['puuid', 'name'],
+      });
+      summoners.forEach((s) => { groupMemberMap[s.puuid] = s.name; });
+    }
+
+    const result = matches.map((m) => {
+      const entry = {
+        matchId: m.matchId,
+        win: m.win,
+        championName: m.championName,
+        kills: m.kills,
+        deaths: m.deaths,
+        assists: m.assists,
+        teamId: m.teamId,
+        gameCreation: m.gameCreation,
+      };
+
+      // 같은 매치에 있는 그룹 멤버 추출
+      if (m.participants) {
+        entry.groupMembers = m.participants
+          .filter((p) => p.puuid !== puuid && groupMemberMap[p.puuid])
+          .map((p) => ({
+            puuid: p.puuid,
+            name: groupMemberMap[p.puuid],
+            championName: p.championName,
+            teamId: p.teamId,
+            win: p.win,
+            sameTeam: p.teamId === m.teamId,
+          }));
+      }
+
+      return entry;
+    });
+
+    return { result, status: 200 };
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
+  }
+};
+
 // --- 전적 동기화 ---
 
 const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30분
@@ -439,11 +515,25 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
         const participant = matchData.info.participants.find((p) => p.puuid === puuid);
         if (!participant) continue;
 
+        // 참가자 요약 정보 (그룹 멤버 식별용)
+        const participants = matchData.info.participants.map((p) => ({
+          puuid: p.puuid,
+          championName: p.championName,
+          teamId: p.teamId,
+          win: p.win,
+        }));
+
         await models.challenge_match.findOrCreate({
           where: { matchId, puuid },
           defaults: {
             queueId: matchData.info.queueId,
             win: participant.win,
+            championName: participant.championName,
+            kills: participant.kills,
+            deaths: participant.deaths,
+            assists: participant.assists,
+            teamId: participant.teamId,
+            participants,
             gameCreation: new Date(matchData.info.gameCreation),
           },
         });
