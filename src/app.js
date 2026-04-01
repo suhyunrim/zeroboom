@@ -8,8 +8,6 @@ const path = require('path');
 
 const indexRouter = require('./routes/index');
 const userRouter = require('./routes/user');
-const friendlyGameRouter = require('./routes/friendly-game');
-const matchHistoryRouter = require('./routes/match-history');
 
 const riotMatchController = require('./controller/riot-match');
 
@@ -24,8 +22,6 @@ const startServer = async () => {
 
   app.use('/', indexRouter);
   app.use('/user', userRouter);
-  app.use('/friendly-game', friendlyGameRouter);
-  app.use('/match-history', matchHistoryRouter);
 
   const server = await loader(app);
 

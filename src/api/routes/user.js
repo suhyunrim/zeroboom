@@ -1,23 +1,13 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
-const { registerUser } = require('../../services/user');
 const route = Router();
 const userController = require('../../controller/user');
-const groupController = require('../../controller/group');
 const summonerController = require('../../controller/summoner');
 
 module.exports = (app) => {
   app.use('/user', route);
 
-  route.post('/register', async (req, res) => {
-    const { groupName, summonerName } = req.body;
-    let { tier } = req.body;
-
-    var ret = await registerUser(groupName, summonerName, tier);
-    return res.status(ret.status).json({ result: ret.result });
-  });
-
-  route.post('/login', async (req, res, next) => {
+  route.post('/login', async (req, res) => {
     const { riotId } = req.body;
     try {
       if (!riotId || !riotId.includes('#')) {
@@ -43,7 +33,7 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/getGroupList', async (req, res, next) => {
+  route.get('/getGroupList', async (req, res) => {
     try {
       const puuid = req.headers.puuid;
       if (!puuid) {
@@ -57,7 +47,7 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/getInfo', async (req, res, next) => {
+  route.get('/getInfo', async (req, res) => {
     const { groupId, puuid: queryPuuid } = req.query;
     try {
       const puuid = queryPuuid || req.headers.puuid;
@@ -69,30 +59,6 @@ module.exports = (app) => {
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
-    }
-  });
-
-  route.get('/getRating', async (req, res, next) => {
-    const { groupName, userName } = req.query;
-    try {
-      const group = await groupController.getByName(groupName);
-      const summoner = await summonerController.getSummonerByName(userName);
-      const userInfo = await userController.getRating(group.id, summoner.result.puuid);
-      return res.status(userInfo.status).json({ result: userInfo.result });
-    } catch (e) {
-      logger.error(e);
-      return res.status(500);
-    }
-  });
-
-  route.get('/getPosition', async (req, res, next) => {
-    const { userName } = req.query;
-    try {
-      const positions = await summonerController.getPositions(userName);
-      return res.status(positions.status).json({ result: positions.result });
-    } catch (e) {
-      logger.error(e);
-      return res.status(500);
     }
   });
 };
