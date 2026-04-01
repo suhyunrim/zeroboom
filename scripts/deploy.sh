@@ -1,59 +1,50 @@
 #!/bin/bash
 set -e
 
-# 프로젝트 루트 디렉토리로 이동
-cd "$(dirname "$0")/.."
-
-COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.test.yml"
 TARGET=${1:-all}
+
+LIVE_DIR=${PROJECT_DIR_LIVE:-/home/ubuntu/zeroboom-live}
+TEST_DIR=${PROJECT_DIR_TEST:-/home/ubuntu/zeroboom-test}
 
 echo "========================================="
 echo " ZeroBoom Bot 배포 시작 (${TARGET})"
 echo "========================================="
 
-# 1. 최신 코드 pull
-echo ""
-echo "[1/4] git pull..."
-if [ "$TARGET" = "test" ]; then
+deploy_test() {
+  echo ""
+  echo "[테섭] 배포 시작..."
+  cd "$TEST_DIR"
   git pull origin master
-elif [ "$TARGET" = "live" ]; then
+  docker compose -f docker-compose.yml -f docker-compose.test.yml build --no-cache app-test
+  docker compose -f docker-compose.yml -f docker-compose.test.yml up -d app-test
+  echo "[테섭] 배포 완료"
+}
+
+deploy_live() {
+  echo ""
+  echo "[라이브] 배포 시작..."
+  cd "$LIVE_DIR"
   git pull origin prod
-else
-  git pull
-fi
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache app
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
+  echo "[라이브] 배포 완료"
+}
 
-# 2. 대상 컨테이너 빌드
-echo ""
-echo "[2/4] docker build..."
 if [ "$TARGET" = "test" ]; then
-  docker compose $COMPOSE_FILES build --no-cache app-test
+  deploy_test
 elif [ "$TARGET" = "live" ]; then
-  docker compose $COMPOSE_FILES build --no-cache app
+  deploy_live
 else
-  docker compose $COMPOSE_FILES build --no-cache app app-test
+  deploy_test
+  deploy_live
 fi
 
-# 3. 대상 컨테이너 재시작
+# 안 쓰는 이미지 정리
 echo ""
-echo "[3/4] 컨테이너 재시작..."
-if [ "$TARGET" = "test" ]; then
-  docker compose $COMPOSE_FILES up -d app-test
-elif [ "$TARGET" = "live" ]; then
-  docker compose $COMPOSE_FILES up -d app
-else
-  docker compose $COMPOSE_FILES up -d app app-test
-fi
-
-# 4. 안 쓰는 이미지 정리
-echo ""
-echo "[4/4] 사용하지 않는 이미지 정리..."
+echo "이미지 정리..."
 docker image prune -f
 
 echo ""
 echo "========================================="
 echo " 배포 완료! (${TARGET})"
 echo "========================================="
-echo ""
-
-# 컨테이너 상태 확인
-docker compose $COMPOSE_FILES ps
