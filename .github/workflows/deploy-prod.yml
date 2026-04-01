@@ -17,6 +17,6 @@ jobs:
           script: |
             cd ${{ secrets.PROJECT_DIR_LIVE }}
             git pull origin prod
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache app
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
-            docker image prune -f
+            sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache app
+            sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
+            sudo docker image prune -f
