@@ -1,0 +1,34 @@
+# 테스트 환경: app-test 서비스 추가
+# 실행: docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.test.yml up -d
+
+services:
+  db:
+    environment:
+      MYSQL_DATABASE: ${DATABASE_NAME:-mydb}
+    volumes:
+      - ./docker/init:/docker-entrypoint-initdb.d
+
+  app-test:
+    container_name: zeroboom-bot-test
+    build: .
+    restart: unless-stopped
+    expose:
+      - "3001"
+    environment:
+      SERVICE_PORT: 3001
+      DATABASE_HOST: db
+      DATABASE_PORT: 3306
+      DATABASE_NAME: ${DATABASE_NAME_TEST:-mydb_test}
+      DATABASE_USER: ${DATABASE_USER:-zeroboom}
+      DATABASE_PASS: ${DATABASE_PASS:-zeroboompass}
+      RIOT_API_KEY: ${RIOT_API_KEY}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN_TEST:-${DISCORD_BOT_TOKEN}}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID_TEST:-${DISCORD_APPLICATION_ID}}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      COMMAND_PREFIX: ${COMMAND_PREFIX:-}
+      FRONTEND_URL: ${FRONTEND_URL_TEST:-}
+    depends_on:
+      db:
+        condition: service_healthy

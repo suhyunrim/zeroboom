@@ -1,0 +1,22 @@
+name: 라이브 환경 배포
+
+on:
+  push:
+    branches: [prod]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 라이브 서버 배포
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd ${{ secrets.PROJECT_DIR }}
+            git pull origin prod
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.test.yml build --no-cache app
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.test.yml up -d app
+            docker image prune -f
