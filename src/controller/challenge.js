@@ -424,10 +424,18 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 
     const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
 
-    // 해당 유저의 matchId 목록
+    // 부캐 puuid도 포함하여 조회
+    const subAccount = await models.user.findOne({
+      where: { primaryPuuid: puuid },
+      attributes: ['puuid'],
+    });
+    const puuidsToQuery = [puuid];
+    if (subAccount) puuidsToQuery.push(subAccount.puuid);
+
+    // 해당 유저(본캐+부캐)의 matchId 목록
     const userMatches = await models.challenge_match.findAll({
-      where: { puuid },
-      attributes: ['matchId', 'win'],
+      where: { puuid: puuidsToQuery },
+      attributes: ['matchId', 'win', 'puuid'],
     });
     if (userMatches.length === 0) return { result: [], status: 200 };
 
@@ -467,7 +475,7 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 
     const result = details.map((d) => {
       const participants = d.participants || [];
-      const me = participants.find((p) => p.puuid === puuid);
+      const me = participants.find((p) => puuidsToQuery.includes(p.puuid));
 
       const entry = {
         matchId: d.matchId,
@@ -479,7 +487,7 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 
       // 같은 매치에 있는 그룹 멤버 추출
       entry.groupMembers = participants
-        .filter((p) => p.puuid !== puuid && groupMemberMap[p.puuid])
+        .filter((p) => !puuidsToQuery.includes(p.puuid) && groupMemberMap[p.puuid])
         .map((p) => ({
           puuid: p.puuid,
           name: groupMemberMap[p.puuid],
