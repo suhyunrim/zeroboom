@@ -165,73 +165,6 @@ describe('cancelChallenge', () => {
   });
 });
 
-// --- 참가 ---
-
-describe('joinChallenge', () => {
-  test('챌린지가 없으면 404', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue(null);
-    const result = await challengeController.joinChallenge(999, 'puuid-1');
-    expect(result.status).toBe(404);
-  });
-
-  test('ended 챌린지에는 참가 불가', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2020-12-31'),
-    });
-    const result = await challengeController.joinChallenge(1, 'puuid-1');
-    expect(result.status).toBe(400);
-  });
-
-  test('이미 참가한 경우 400', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
-    });
-    mockModels.challenge_participant.findOne.mockResolvedValue({ id: 1 });
-    const result = await challengeController.joinChallenge(1, 'puuid-1');
-    expect(result.status).toBe(400);
-    expect(result.result).toContain('이미');
-  });
-
-  test('정상 참가 시 200', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
-    });
-    mockModels.challenge_participant.findOne.mockResolvedValue(null);
-    const mockParticipant = { id: 1, challengeId: 1, puuid: 'puuid-1' };
-    mockModels.challenge_participant.create.mockResolvedValue(mockParticipant);
-    const result = await challengeController.joinChallenge(1, 'puuid-1');
-    expect(result.status).toBe(200);
-  });
-});
-
-// --- 참가 취소 ---
-
-describe('cancelJoin', () => {
-  test('ended 상태에서 취소 불가', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2020-12-31'),
-    });
-    const result = await challengeController.cancelJoin(1, 'puuid-1');
-    expect(result.status).toBe(400);
-  });
-
-  test('정상 취소 시 200', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
-    });
-    mockModels.challenge_participant.findOne.mockResolvedValue({
-      id: 1, destroy: jest.fn(),
-    });
-    const result = await challengeController.cancelJoin(1, 'puuid-1');
-    expect(result.status).toBe(200);
-  });
-});
-
 // --- 리더보드 ---
 
 describe('getLeaderboard', () => {
@@ -241,11 +174,12 @@ describe('getLeaderboard', () => {
     expect(result.status).toBe(404);
   });
 
-  test('참가자가 없으면 빈 배열', async () => {
+  test('그룹 유저가 없으면 빈 배열', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, gameType: 'soloRank', startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+      id: 1, groupId: 1, gameType: 'soloRank', startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    mockModels.challenge_participant.findAll.mockResolvedValue([]);
+    // 첫 번째 user.findAll: 그룹 유저 조회 → 빈 배열
+    mockModels.user.findAll.mockResolvedValueOnce([]);
     const result = await challengeController.getLeaderboard(1);
     expect(result.status).toBe(200);
     expect(result.result).toEqual([]);
@@ -253,15 +187,16 @@ describe('getLeaderboard', () => {
 
   test('리더보드 정렬: points > wins > winRate > totalGames', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, gameType: 'soloRank',
+      id: 1, groupId: 1, gameType: 'soloRank',
       startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    mockModels.challenge_participant.findAll.mockResolvedValue([
+    // 첫 번째 user.findAll: 그룹 유저 조회
+    mockModels.user.findAll.mockResolvedValueOnce([
       { puuid: 'a' }, { puuid: 'b' }, { puuid: 'c' },
     ]);
 
-    // 부캐 없음
-    mockModels.user.findAll.mockResolvedValue([]);
+    // 두 번째 user.findAll: 부캐 조회 → 없음
+    mockModels.user.findAll.mockResolvedValueOnce([]);
 
     // detail에서 matchId 목록 반환
     const detailRows = [
@@ -329,7 +264,10 @@ describe('getUserMatchHistory', () => {
       participants,
     }]);
 
-    mockModels.user.findAll.mockResolvedValue([{ puuid: 'me' }, { puuid: 'friend1' }]);
+    // 첫 번째 user.findAll: 부캐 조회 → 없음
+    mockModels.user.findAll.mockResolvedValueOnce([]);
+    // 두 번째 user.findAll: 그룹 멤버 조회
+    mockModels.user.findAll.mockResolvedValueOnce([{ puuid: 'me' }, { puuid: 'friend1' }]);
     mockModels.summoner.findAll.mockResolvedValue([
       { puuid: 'me', name: 'MyName' },
       { puuid: 'friend1', name: 'FriendOne' },
@@ -367,27 +305,28 @@ describe('syncChallengeMatches', () => {
     expect(result.status).toBe(429);
   });
 
-  test('참가자가 없으면 synced 0', async () => {
+  test('그룹 유저가 없으면 synced 0', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, gameType: 'soloRank', lastSyncAt: null,
+      id: 1, groupId: 1, gameType: 'soloRank', lastSyncAt: null,
       startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    mockModels.challenge_participant.findAll.mockResolvedValue([]);
+    // 그룹 유저 없음
+    mockModels.user.findAll.mockResolvedValueOnce([]);
     const result = await challengeController.syncChallengeMatches(1);
     expect(result.status).toBe(200);
     expect(result.result.synced).toBe(0);
   });
 
-  test('참가자가 있으면 202 즉시 반환', async () => {
+  test('그룹 유저가 있으면 202 즉시 반환', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
-      id: 99, gameType: 'soloRank', lastSyncAt: null,
+      id: 99, groupId: 1, gameType: 'soloRank', lastSyncAt: null,
       startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    mockModels.challenge_participant.findAll.mockResolvedValue([
-      { puuid: 'puuid-1' }, { puuid: 'puuid-2' },
-    ]);
-    // 부캐 없음
-    mockModels.user.findAll.mockResolvedValue([]);
+    // 그룹 유저 + 부캐 조회 (syncChallengeMatches + runSyncInBackground 양쪽)
+    mockModels.user.findAll
+      .mockResolvedValueOnce([{ puuid: 'puuid-1' }, { puuid: 'puuid-2' }]) // 그룹 유저
+      .mockResolvedValueOnce([]) // 부캐 조회 (syncChallengeMatches)
+      .mockResolvedValue([]); // 부캐 조회 (runSyncInBackground)
 
     const result = await challengeController.syncChallengeMatches(99);
     expect(result.status).toBe(202);
@@ -396,16 +335,14 @@ describe('syncChallengeMatches', () => {
 
   test('부캐 있으면 total에 포함', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
-      id: 100, gameType: 'soloRank', lastSyncAt: null,
+      id: 100, groupId: 1, gameType: 'soloRank', lastSyncAt: null,
       startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    mockModels.challenge_participant.findAll.mockResolvedValue([
-      { puuid: 'main-1' }, { puuid: 'main-2' },
-    ]);
-    // main-1에 부캐 1개
-    mockModels.user.findAll.mockResolvedValue([
-      { puuid: 'sub-1', primaryPuuid: 'main-1' },
-    ]);
+    // 그룹 유저 + 부캐 조회 (syncChallengeMatches + runSyncInBackground 양쪽)
+    mockModels.user.findAll
+      .mockResolvedValueOnce([{ puuid: 'main-1' }, { puuid: 'main-2' }]) // 그룹 유저
+      .mockResolvedValueOnce([{ puuid: 'sub-1', primaryPuuid: 'main-1' }]) // 부캐 (syncChallengeMatches)
+      .mockResolvedValue([{ puuid: 'sub-1', primaryPuuid: 'main-1' }]); // 부캐 (runSyncInBackground)
 
     const result = await challengeController.syncChallengeMatches(100);
     expect(result.status).toBe(202);

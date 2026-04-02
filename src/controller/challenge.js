@@ -148,21 +148,8 @@ module.exports.listChallenges = async (groupId) => {
       order: [['displayOrder', 'ASC'], ['createdAt', 'DESC']],
     });
 
-    // 참가자 수 조회
-    const challengeIds = challenges.map((c) => c.id);
-    const participants = await models.challenge_participant.findAll({
-      where: { challengeId: challengeIds },
-      attributes: ['challengeId', [models.sequelize.fn('COUNT', models.sequelize.col('id')), 'count']],
-      group: ['challengeId'],
-    });
-    const countMap = {};
-    participants.forEach((p) => {
-      countMap[p.challengeId] = Number(p.getDataValue('count'));
-    });
-
     const result = challenges.map((c) => ({
       ...withStatus(c),
-      participantCount: countMap[c.id] || 0,
     }));
 
     return { result, status: 200 };
@@ -177,16 +164,11 @@ module.exports.getChallengeDetail = async (challengeId) => {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    const participantCount = await models.challenge_participant.count({
-      where: { challengeId },
-    });
-
     const sync = syncState.get(challengeId);
 
     return {
       result: {
         ...withStatus(challenge),
-        participantCount,
         syncStatus: sync ? 'syncing' : 'idle',
         syncProgress: sync || null,
       },
@@ -211,74 +193,11 @@ module.exports.listVisibleChallenges = async (groupId) => {
       order: [['displayOrder', 'ASC'], ['createdAt', 'DESC']],
     });
 
-    const challengeIds = challenges.map((c) => c.id);
-    const participants = await models.challenge_participant.findAll({
-      where: { challengeId: challengeIds },
-      attributes: ['challengeId', [models.sequelize.fn('COUNT', models.sequelize.col('id')), 'count']],
-      group: ['challengeId'],
-    });
-    const countMap = {};
-    participants.forEach((p) => {
-      countMap[p.challengeId] = Number(p.getDataValue('count'));
-    });
-
     const result = challenges.map((c) => ({
       ...withStatus(c),
-      participantCount: countMap[c.id] || 0,
     }));
 
     return { result, status: 200 };
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
-  }
-};
-
-module.exports.joinChallenge = async (challengeId, puuid) => {
-  try {
-    const challenge = await models.challenge.findByPk(challengeId);
-    if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
-
-    const status = getChallengeStatus(challenge);
-    if (!['scheduled', 'active'].includes(status)) {
-      return { result: '참가할 수 없는 상태의 챌린지입니다.', status: 400 };
-    }
-
-    const existing = await models.challenge_participant.findOne({
-      where: { challengeId, puuid },
-    });
-    if (existing) return { result: '이미 참가한 챌린지입니다.', status: 400 };
-
-    const participant = await models.challenge_participant.create({
-      challengeId,
-      puuid,
-    });
-
-    return { result: participant, status: 200 };
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
-  }
-};
-
-module.exports.cancelJoin = async (challengeId, puuid) => {
-  try {
-    const challenge = await models.challenge.findByPk(challengeId);
-    if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
-
-    const status = getChallengeStatus(challenge);
-    if (!['scheduled', 'active'].includes(status)) {
-      return { result: '참가 취소할 수 없는 상태의 챌린지입니다.', status: 400 };
-    }
-
-    const participant = await models.challenge_participant.findOne({
-      where: { challengeId, puuid },
-    });
-    if (!participant) return { result: '참가하지 않은 챌린지입니다.', status: 400 };
-
-    await participant.destroy();
-
-    return { result: '참가가 취소되었습니다.', status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
@@ -294,12 +213,14 @@ module.exports.getLeaderboard = async (challengeId) => {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    const participants = await models.challenge_participant.findAll({
-      where: { challengeId },
+    // 그룹 전체 유저 (본캐만)
+    const groupUsers = await models.user.findAll({
+      where: { groupId: challenge.groupId, primaryPuuid: null },
+      attributes: ['puuid'],
     });
-    if (participants.length === 0) return { result: [], status: 200 };
+    if (groupUsers.length === 0) return { result: [], status: 200 };
 
-    const puuids = participants.map((p) => p.puuid);
+    const puuids = groupUsers.map((u) => u.puuid);
     const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
 
     // 부캐 puuid 포함
@@ -378,8 +299,11 @@ module.exports.getLeaderboard = async (challengeId) => {
       };
     });
 
+    // 전적 없는 유저 제외
+    const filtered = leaderboard.filter((e) => e.totalGames > 0);
+
     // 정렬: points desc → wins desc → winRate desc → totalGames desc
-    leaderboard.sort((a, b) => {
+    filtered.sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       if (b.wins !== a.wins) return b.wins - a.wins;
       if (b.winRate !== a.winRate) return b.winRate - a.winRate;
@@ -387,11 +311,11 @@ module.exports.getLeaderboard = async (challengeId) => {
     });
 
     // 순위 부여
-    leaderboard.forEach((entry, idx) => {
+    filtered.forEach((entry, idx) => {
       entry.rank = idx + 1;
     });
 
-    return { result: leaderboard, status: 200 };
+    return { result: filtered, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
@@ -404,7 +328,7 @@ module.exports.getMyStats = async (challengeId, puuid) => {
     if (leaderboardResult.status !== 200) return leaderboardResult;
 
     const myEntry = leaderboardResult.result.find((e) => e.puuid === puuid);
-    if (!myEntry) return { result: '참가하지 않은 챌린지입니다.', status: 404 };
+    if (!myEntry) return { result: '전적이 없습니다.', status: 404 };
 
     return { result: myEntry, status: 200 };
   } catch (e) {
@@ -544,20 +468,20 @@ module.exports.syncChallengeMatches = async (challengeId) => {
       }
     }
 
-    const participants = await models.challenge_participant.findAll({
-      where: { challengeId },
+    // 그룹 전체 유저로 동기화
+    const groupUsers = await models.user.findAll({
+      where: { groupId: challenge.groupId, primaryPuuid: null },
       attributes: ['puuid'],
     });
-    if (participants.length === 0) return { result: { synced: 0 }, status: 200 };
+    if (groupUsers.length === 0) return { result: { synced: 0 }, status: 200 };
 
-    // 부캐 포함 전체 수 계산
-    const participantPuuids = participants.map((p) => p.puuid);
-    const { allPuuids } = await getParticipantPuuidsWithSubs(participantPuuids);
+    const groupPuuids = groupUsers.map((u) => u.puuid);
+    const { allPuuids } = await getParticipantPuuidsWithSubs(groupPuuids);
 
     // 진행 상태 초기화 후 백그라운드 실행
     syncState.set(challengeId, { done: 0, total: allPuuids.length });
 
-    runSyncInBackground(challengeId, challenge, participants);
+    runSyncInBackground(challengeId, challenge, groupPuuids);
 
     return { result: { message: '전적 갱신을 시작했습니다.', total: allPuuids.length }, status: 202 };
   } catch (e) {
@@ -568,15 +492,13 @@ module.exports.syncChallengeMatches = async (challengeId) => {
 
 /**
  * 백그라운드에서 동기화 실행
- * 참가자의 부캐 puuid도 함께 전적 수집
+ * 그룹 전체 유저 + 부캐 puuid도 함께 전적 수집
  */
-async function runSyncInBackground(challengeId, challenge, participants) {
+async function runSyncInBackground(challengeId, challenge, puuids) {
   const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
   let totalSynced = 0;
 
-  // 부캐 포함 전체 puuid 수집
-  const participantPuuids = participants.map((p) => p.puuid);
-  const { allPuuids, puuidToMain } = await getParticipantPuuidsWithSubs(participantPuuids);
+  const { allPuuids } = await getParticipantPuuidsWithSubs(puuids);
 
   try {
     for (let i = 0; i < allPuuids.length; i++) {
@@ -726,20 +648,23 @@ module.exports.syncAllActiveChallenges = async () => {
     const seen = new Set();
 
     for (const challenge of challenges) {
-      const participants = await models.challenge_participant.findAll({
-        where: { challengeId: challenge.id },
+      // 그룹 전체 유저 (본캐만)
+      const groupUsers = await models.user.findAll({
+        where: { groupId: challenge.groupId, primaryPuuid: null },
         attributes: ['puuid'],
       });
+      const groupPuuids = groupUsers.map((u) => u.puuid);
+      const { allPuuids } = await getParticipantPuuidsWithSubs(groupPuuids);
 
       const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
 
-      for (const p of participants) {
-        const key = `${p.puuid}:${queueId}:${challenge.startAt}:${challenge.endAt}`;
+      for (const puuid of allPuuids) {
+        const key = `${puuid}:${queueId}:${challenge.startAt}:${challenge.endAt}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         syncTasks.push({
-          puuid: p.puuid,
+          puuid,
           queueId,
           startAt: challenge.startAt,
           endAt: challenge.endAt,

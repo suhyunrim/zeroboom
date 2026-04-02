@@ -104,34 +104,6 @@ module.exports = (app) => {
   });
 
   /**
-   * POST /api/challenge/:groupId/:challengeId/join
-   * 챌린지 참가
-   */
-  route.post('/:groupId/:challengeId/join', verifyToken, async (req, res) => {
-    const { challengeId } = req.params;
-    const { puuid } = req.user;
-
-    if (!puuid) {
-      return res.status(400).json({ result: 'puuid가 필요합니다.' });
-    }
-
-    const result = await challengeController.joinChallenge(Number(challengeId), puuid);
-    return res.status(result.status).json({ result: result.result });
-  });
-
-  /**
-   * DELETE /api/challenge/:groupId/:challengeId/join
-   * 챌린지 참가 취소
-   */
-  route.delete('/:groupId/:challengeId/join', verifyToken, async (req, res) => {
-    const { challengeId } = req.params;
-    const { puuid } = req.user;
-
-    const result = await challengeController.cancelJoin(Number(challengeId), puuid);
-    return res.status(result.status).json({ result: result.result });
-  });
-
-  /**
    * GET /api/challenge/:groupId/:challengeId/leaderboard
    * 챌린지 리더보드
    */
@@ -175,7 +147,7 @@ module.exports = (app) => {
 
   /**
    * POST /api/challenge/:groupId/:challengeId/sync
-   * 챌린지 전체 참가자 전적 갱신 (인증된 유저만)
+   * 챌린지 그룹 전체 유저 전적 갱신 (인증된 유저만)
    */
   route.post('/:groupId/:challengeId/sync', verifyToken, async (req, res) => {
     const { challengeId } = req.params;
