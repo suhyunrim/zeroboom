@@ -260,6 +260,9 @@ describe('getLeaderboard', () => {
       { puuid: 'a' }, { puuid: 'b' }, { puuid: 'c' },
     ]);
 
+    // 부캐 없음
+    mockModels.user.findAll.mockResolvedValue([]);
+
     // detail에서 matchId 목록 반환
     const detailRows = [
       ...Array(10).fill(null).map((_, i) => ({ matchId: `m_a${i}`, gameCreation: new Date(`2026-04-${i + 1}`) })),
@@ -383,10 +386,30 @@ describe('syncChallengeMatches', () => {
     mockModels.challenge_participant.findAll.mockResolvedValue([
       { puuid: 'puuid-1' }, { puuid: 'puuid-2' },
     ]);
+    // 부캐 없음
+    mockModels.user.findAll.mockResolvedValue([]);
 
     const result = await challengeController.syncChallengeMatches(99);
     expect(result.status).toBe(202);
     expect(result.result.total).toBe(2);
+  });
+
+  test('부캐 있으면 total에 포함', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 100, gameType: 'soloRank', lastSyncAt: null,
+      startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+    });
+    mockModels.challenge_participant.findAll.mockResolvedValue([
+      { puuid: 'main-1' }, { puuid: 'main-2' },
+    ]);
+    // main-1에 부캐 1개
+    mockModels.user.findAll.mockResolvedValue([
+      { puuid: 'sub-1', primaryPuuid: 'main-1' },
+    ]);
+
+    const result = await challengeController.syncChallengeMatches(100);
+    expect(result.status).toBe(202);
+    expect(result.result.total).toBe(3); // main-1 + main-2 + sub-1
   });
 });
 

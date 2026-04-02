@@ -45,6 +45,10 @@ module.exports = (sequelize, DataTypes) => {
       revisionDate: {
         type: DataTypes.DATE,
       },
+      primaryPuuid: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {},
   );

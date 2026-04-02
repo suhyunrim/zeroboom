@@ -483,7 +483,24 @@ module.exports.getInfo = async (groupId, puuid) => {
     const honorController = require('./honor');
     const honorStats = await honorController.getHonorStats(groupId, puuid);
 
-    return { result: { userInfo, summonerInfo, detailedStats, honorStats }, status: 200 };
+    // 부캐 정보
+    let subAccount = null;
+    const subUser = await models.user.findOne({
+      where: { primaryPuuid: puuid, groupId },
+      attributes: ['puuid'],
+    });
+    if (subUser) {
+      const subSummoner = await models.summoner.findOne({
+        where: { puuid: subUser.puuid },
+        attributes: ['puuid', 'name'],
+      });
+      subAccount = {
+        puuid: subUser.puuid,
+        name: subSummoner ? subSummoner.name : '알 수 없음',
+      };
+    }
+
+    return { result: { userInfo, summonerInfo, detailedStats, honorStats, subAccount }, status: 200 };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };
