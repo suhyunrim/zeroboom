@@ -481,6 +481,7 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
         matchId: d.matchId,
         win: winMap[d.matchId],
         gameCreation: d.gameCreation,
+        targetPuuid: me ? me.puuid : null,
         // participants 전체를 내려줌 (프론트에서 챔피언/KDA/CS 등 렌더링)
         participants,
       };
