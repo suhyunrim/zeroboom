@@ -956,6 +956,8 @@ module.exports = async (app) => {
     }
   });
 
+  app.discordClient = client;
+
   client.login(process.env.DISCORD_BOT_TOKEN);
 
   const commandList = await commandListLoader();
