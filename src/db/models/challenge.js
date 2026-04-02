@@ -53,6 +53,9 @@ module.exports = (sequelize, DataTypes) => {
       lastSyncAt: {
         type: DataTypes.DATE,
       },
+      leaderboardSnapshot: {
+        type: DataTypes.JSON,
+      },
     },
     {},
   );

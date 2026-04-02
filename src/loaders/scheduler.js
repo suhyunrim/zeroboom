@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const { logger } = require('./logger');
 const { updateActiveUsersPositions } = require('../controller/summoner');
-const { syncAllActiveChallenges } = require('../controller/challenge');
+const { syncAllActiveChallenges, initSnapshotSchedulers } = require('../controller/challenge');
 
 module.exports = () => {
   // 매일 새벽 5시에 포지션 업데이트
@@ -40,4 +40,7 @@ module.exports = () => {
   });
 
   logger.info('📅 스케줄러 등록: 매일 04:00 챌린지 전적 동기화');
+
+  // 서버 시작 시 챌린지 스냅샷 스케줄러 등록
+  initSnapshotSchedulers();
 };

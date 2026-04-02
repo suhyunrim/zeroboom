@@ -174,6 +174,18 @@ describe('getLeaderboard', () => {
     expect(result.status).toBe(404);
   });
 
+  test('ended + 스냅샷 있으면 스냅샷 반환', async () => {
+    const snapshot = [{ puuid: 'a', rank: 1, wins: 5 }];
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, groupId: 1, gameType: 'soloRank', canceledAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2020-12-31'),
+      leaderboardSnapshot: snapshot,
+    });
+    const result = await challengeController.getLeaderboard(1);
+    expect(result.status).toBe(200);
+    expect(result.result).toBe(snapshot);
+  });
+
   test('그룹 유저가 없으면 빈 배열', async () => {
     mockModels.challenge.findByPk.mockResolvedValue({
       id: 1, groupId: 1, gameType: 'soloRank', startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),

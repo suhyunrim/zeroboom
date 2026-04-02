@@ -53,6 +53,82 @@ const calculatePoints = (wins, losses) => {
 // 동기화 진행 상태 (인메모리)
 const syncState = new Map();
 
+// 스냅샷 스케줄러 (challengeId → timeoutId)
+const snapshotTimers = new Map();
+
+/**
+ * 리더보드 스냅샷 저장
+ */
+async function saveLeaderboardSnapshot(challengeId) {
+  try {
+    const challenge = await models.challenge.findByPk(challengeId);
+    if (!challenge || challenge.leaderboardSnapshot) return;
+
+    const leaderboardResult = await module.exports.getLeaderboard(challengeId);
+    if (leaderboardResult.status !== 200) return;
+
+    await models.challenge.update(
+      { leaderboardSnapshot: leaderboardResult.result },
+      { where: { id: challengeId } },
+    );
+    logger.info(`[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId})`);
+  } catch (e) {
+    logger.error(`[챌린지] 리더보드 스냅샷 저장 실패 (challengeId=${challengeId}): ${e.message}`);
+  } finally {
+    snapshotTimers.delete(challengeId);
+  }
+}
+
+/**
+ * 챌린지 종료 시 스냅샷을 찍도록 스케줄 등록
+ */
+function scheduleSnapshot(challenge) {
+  if (challenge.canceledAt || challenge.leaderboardSnapshot) return;
+
+  // 기존 타이머 제거
+  if (snapshotTimers.has(challenge.id)) {
+    clearTimeout(snapshotTimers.get(challenge.id));
+    snapshotTimers.delete(challenge.id);
+  }
+
+  const delay = new Date(challenge.endAt).getTime() - Date.now();
+  if (delay <= 0) {
+    // 이미 종료됨 → 즉시 실행
+    saveLeaderboardSnapshot(challenge.id);
+    return;
+  }
+
+  const timerId = setTimeout(() => saveLeaderboardSnapshot(challenge.id), delay);
+  snapshotTimers.set(challenge.id, timerId);
+  logger.info(`[챌린지] 스냅샷 스케줄 등록 (challengeId=${challenge.id}, ${Math.round(delay / 60000)}분 후)`);
+}
+
+/**
+ * 서버 시작 시 호출: 활성 챌린지들의 스냅샷 스케줄러 등록
+ */
+module.exports.initSnapshotSchedulers = async () => {
+  try {
+    const now = new Date();
+    const challenges = await models.challenge.findAll({
+      where: {
+        canceledAt: null,
+        leaderboardSnapshot: null,
+        startAt: { [Op.lte]: now },
+      },
+    });
+
+    for (const challenge of challenges) {
+      scheduleSnapshot(challenge);
+    }
+
+    if (challenges.length > 0) {
+      logger.info(`[챌린지] ${challenges.length}개 챌린지 스냅샷 스케줄러 등록 완료`);
+    }
+  } catch (e) {
+    logger.error(`[챌린지] 스냅샷 스케줄러 초기화 실패: ${e.message}`);
+  }
+};
+
 /**
  * 챌린지의 현재 상태를 기간 데이터에서 자동 계산
  */
@@ -93,6 +169,8 @@ module.exports.createChallenge = async (groupId, data, createdBy) => {
       displayOrder: data.displayOrder || 0,
     });
 
+    scheduleSnapshot(challenge);
+
     return { result: withStatus(challenge), status: 200 };
   } catch (e) {
     logger.error(e.stack);
@@ -115,6 +193,11 @@ module.exports.updateChallenge = async (challengeId, data) => {
 
     await models.challenge.update(updateFields, { where: { id: challengeId } });
     const updated = await models.challenge.findByPk(challengeId);
+
+    // endAt 변경 시 스냅샷 스케줄러 재등록
+    if (data.endAt !== undefined) {
+      scheduleSnapshot(updated);
+    }
 
     return { result: withStatus(updated), status: 200 };
   } catch (e) {
@@ -212,6 +295,11 @@ module.exports.getLeaderboard = async (challengeId) => {
   try {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
+
+    // ended + 스냅샷 있으면 스냅샷 반환
+    if (getChallengeStatus(challenge) === 'ended' && challenge.leaderboardSnapshot) {
+      return { result: challenge.leaderboardSnapshot, status: 200 };
+    }
 
     // 그룹 전체 유저 (본캐만)
     const groupUsers = await models.user.findAll({
