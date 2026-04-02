@@ -11,6 +11,7 @@ jest.mock('sequelize', () => ({
     gte: Symbol('gte'),
     lte: Symbol('lte'),
     or: Symbol('or'),
+    ne: Symbol('ne'),
   },
 }));
 

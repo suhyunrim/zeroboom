@@ -306,7 +306,7 @@ module.exports.getLeaderboard = async (challengeId) => {
 
     // 그룹 전체 유저 (본캐만)
     const groupUsers = await models.user.findAll({
-      where: { groupId: challenge.groupId, primaryPuuid: null },
+      where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
       attributes: ['puuid'],
     });
     if (groupUsers.length === 0) return { result: [], status: 200 };
@@ -561,7 +561,7 @@ module.exports.syncChallengeMatches = async (challengeId) => {
 
     // 그룹 전체 유저로 동기화
     const groupUsers = await models.user.findAll({
-      where: { groupId: challenge.groupId, primaryPuuid: null },
+      where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
       attributes: ['puuid'],
     });
     if (groupUsers.length === 0) return { result: { synced: 0 }, status: 200 };
@@ -748,7 +748,7 @@ module.exports.syncAllActiveChallenges = async () => {
     for (const challenge of challenges) {
       // 그룹 전체 유저 (본캐만)
       const groupUsers = await models.user.findAll({
-        where: { groupId: challenge.groupId, primaryPuuid: null },
+        where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
         attributes: ['puuid'],
       });
       const groupPuuids = groupUsers.map((u) => u.puuid);
