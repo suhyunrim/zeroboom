@@ -132,7 +132,7 @@ module.exports = (app) => {
    * GET /api/auth/me
    * JWT로 현재 로그인 유저 정보 조회
    */
-  route.get('/me', (req, res) => {
+  route.get('/me', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ result: '인증이 필요합니다.' });
@@ -141,7 +141,18 @@ module.exports = (app) => {
     try {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, config.jwtSecret);
-      return res.status(200).json({ result: decoded });
+
+      // 부캐 puuid 조회
+      let subPuuid = null;
+      if (decoded.puuid) {
+        const subUser = await models.user.findOne({
+          where: { primaryPuuid: decoded.puuid },
+          attributes: ['puuid'],
+        });
+        if (subUser) subPuuid = subUser.puuid;
+      }
+
+      return res.status(200).json({ result: { ...decoded, subPuuid } });
     } catch (e) {
       return res.status(401).json({ result: '유효하지 않은 토큰입니다.' });
     }
