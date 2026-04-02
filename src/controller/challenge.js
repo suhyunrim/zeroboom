@@ -149,14 +149,10 @@ module.exports.getChallengeDetail = async (challengeId) => {
       where: { challengeId },
     });
 
-    const sync = syncState.get(challengeId);
-
     return {
       result: {
         ...withStatus(challenge),
         participantCount,
-        syncStatus: sync ? 'syncing' : 'idle',
-        syncProgress: sync || null,
       },
       status: 200,
     };
@@ -466,6 +462,20 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 // --- 전적 동기화 ---
 
 const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30분
+
+/**
+ * 동기화 진행 상태 조회 (DB 조회 없음, 인메모리)
+ */
+module.exports.getSyncStatus = (challengeId) => {
+  const sync = syncState.get(challengeId);
+  return {
+    result: {
+      syncStatus: sync ? 'syncing' : 'idle',
+      syncProgress: sync || null,
+    },
+    status: 200,
+  };
+};
 
 /**
  * 챌린지 전체 참가자 전적 동기화 (비동기)

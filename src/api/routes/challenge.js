@@ -164,6 +164,16 @@ module.exports = (app) => {
   });
 
   /**
+   * GET /api/challenge/:groupId/:challengeId/sync-status
+   * 동기화 진행 상태 조회 (DB 조회 없음, 폴링용)
+   */
+  route.get('/:groupId/:challengeId/sync-status', (req, res) => {
+    const { challengeId } = req.params;
+    const result = challengeController.getSyncStatus(Number(challengeId));
+    return res.status(result.status).json({ result: result.result });
+  });
+
+  /**
    * POST /api/challenge/:groupId/:challengeId/sync
    * 챌린지 전체 참가자 전적 갱신 (인증된 유저만)
    */

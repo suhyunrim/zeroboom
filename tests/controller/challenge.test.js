@@ -390,18 +390,12 @@ describe('syncChallengeMatches', () => {
   });
 });
 
-// --- 챌린지 상세 syncStatus ---
+// --- 동기화 상태 조회 ---
 
-describe('getChallengeDetail syncStatus', () => {
-  test('동기화 중이 아니면 idle', async () => {
-    mockModels.challenge.findByPk.mockResolvedValue({
-      id: 1, canceledAt: null, lastSyncAt: null,
-      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
-      toJSON() { return { ...this }; },
-    });
-    mockModels.challenge_participant.count.mockResolvedValue(5);
-
-    const result = await challengeController.getChallengeDetail(1);
+describe('getSyncStatus', () => {
+  test('동기화 중이 아니면 idle', () => {
+    const result = challengeController.getSyncStatus(999);
+    expect(result.status).toBe(200);
     expect(result.result.syncStatus).toBe('idle');
     expect(result.result.syncProgress).toBeNull();
   });
