@@ -102,10 +102,16 @@ module.exports = (app) => {
         acc[g.id] = g.discordGuildId;
         return acc;
       }, {});
-      groups = groups.map((g) => ({
-        ...g,
-        isAdmin: !!guildPermMap[groupGuildMap[g.groupId]],
-      }));
+      const client = req.app.discordClient;
+      groups = groups.map((g) => {
+        const guildId = groupGuildMap[g.groupId];
+        const guild = client && guildId && client.guilds.cache.get(guildId);
+        return {
+          ...g,
+          isAdmin: !!guildPermMap[guildId],
+          iconUrl: guild ? guild.iconURL({ size: 128 }) : null,
+        };
+      });
 
       // 7. JWT 발급
       const payload = {

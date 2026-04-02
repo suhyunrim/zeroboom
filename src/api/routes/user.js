@@ -23,6 +23,11 @@ module.exports = (app) => {
 
       const puuid = summoner.result.puuid;
       const groupList = await userController.getGroupList(puuid);
+      const client = req.app.discordClient;
+      for (const group of groupList.result) {
+        const guild = client && group.discordGuildId && client.guilds.cache.get(group.discordGuildId);
+        group.iconUrl = guild ? guild.iconURL({ size: 128 }) : null;
+      }
 
       return res.status(200).json({
         puuid,
@@ -42,6 +47,11 @@ module.exports = (app) => {
         return res.status(400).json({ result: 'puuid가 필요합니다.' });
       }
       const groupList = await userController.getGroupList(puuid);
+      const client = req.app.discordClient;
+      for (const group of groupList.result) {
+        const guild = client && group.discordGuildId && client.guilds.cache.get(group.discordGuildId);
+        group.iconUrl = guild ? guild.iconURL({ size: 128 }) : null;
+      }
       return res.status(groupList.status).json({ result: groupList.result });
     } catch (e) {
       logger.error(e);

@@ -79,6 +79,7 @@ module.exports.getGroupList = async (puuid) => {
       result.push({
         groupId: group.id,
         groupName: group.groupName,
+        discordGuildId: group.discordGuildId,
         defaultRating: userInfo.defaultRating,
         additionalRating: userInfo.additionalRating,
         win: userInfo.win,

@@ -14,9 +14,7 @@ module.exports.get = handler(
     params: { id },
   }) => {
     const result = await get(id);
-    const data = result.dataValues || result;
-    data.iconUrl = getGuildIconUrl(discordClient, data.discordGuildId);
-    return data;
+    return { ...(result.dataValues || result), iconUrl: getGuildIconUrl(discordClient, result.discordGuildId) };
   },
 );
 
@@ -26,8 +24,6 @@ module.exports.getByDiscordGuildId = handler(
     params: { id },
   }) => {
     const result = await getByDiscordGuildId(id);
-    const data = result.dataValues || result;
-    data.iconUrl = getGuildIconUrl(discordClient, data.discordGuildId);
-    return data;
+    return { ...(result.dataValues || result), iconUrl: getGuildIconUrl(discordClient, result.discordGuildId) };
   },
 );
