@@ -68,10 +68,13 @@ async function saveLeaderboardSnapshot(challengeId) {
     if (leaderboardResult.status !== 200) return;
 
     await models.challenge.update(
-      { leaderboardSnapshot: leaderboardResult.result },
+      {
+        leaderboardSnapshot: leaderboardResult.result,
+        activePlayerCount: leaderboardResult.result.length,
+      },
       { where: { id: challengeId } },
     );
-    logger.info(`[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId})`);
+    logger.info(`[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId}, ${leaderboardResult.result.length}명)`);
   } catch (e) {
     logger.error(`[챌린지] 리더보드 스냅샷 저장 실패 (challengeId=${challengeId}): ${e.message}`);
   } finally {
@@ -602,8 +605,15 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
       await sleep(2000);
     }
 
-    await models.challenge.update({ lastSyncAt: new Date() }, { where: { id: challengeId } });
-    logger.info(`[챌린지] 동기화 완료 (challengeId=${challengeId}) - ${totalSynced}건`);
+    // 리더보드 계산하여 activePlayerCount 업데이트
+    const leaderboardResult = await module.exports.getLeaderboard(challengeId);
+    const playerCount = leaderboardResult.status === 200 ? leaderboardResult.result.length : 0;
+
+    await models.challenge.update(
+      { lastSyncAt: new Date(), activePlayerCount: playerCount },
+      { where: { id: challengeId } },
+    );
+    logger.info(`[챌린지] 동기화 완료 (challengeId=${challengeId}) - ${totalSynced}건, ${playerCount}명`);
   } catch (e) {
     logger.error(`[챌린지] 동기화 에러 (challengeId=${challengeId}): ${e.stack}`);
   } finally {

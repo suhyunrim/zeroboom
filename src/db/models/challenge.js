@@ -56,6 +56,10 @@ module.exports = (sequelize, DataTypes) => {
       leaderboardSnapshot: {
         type: DataTypes.JSON,
       },
+      activePlayerCount: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+      },
     },
     {},
   );
