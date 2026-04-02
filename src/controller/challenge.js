@@ -149,10 +149,14 @@ module.exports.getChallengeDetail = async (challengeId) => {
       where: { challengeId },
     });
 
+    const sync = syncState.get(challengeId);
+
     return {
       result: {
         ...withStatus(challenge),
         participantCount,
+        syncStatus: sync ? 'syncing' : 'idle',
+        syncProgress: sync || null,
       },
       status: 200,
     };
