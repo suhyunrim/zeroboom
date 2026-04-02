@@ -424,13 +424,7 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 
     const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
 
-    // 부캐 puuid도 포함하여 조회
-    const subAccount = await models.user.findOne({
-      where: { primaryPuuid: puuid },
-      attributes: ['puuid'],
-    });
-    const puuidsToQuery = [puuid];
-    if (subAccount) puuidsToQuery.push(subAccount.puuid);
+    const { allPuuids: puuidsToQuery } = await getParticipantPuuidsWithSubs([puuid]);
 
     // 해당 유저(본캐+부캐)의 matchId 목록
     const userMatches = await models.challenge_match.findAll({

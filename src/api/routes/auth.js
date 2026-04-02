@@ -142,7 +142,6 @@ module.exports = (app) => {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, config.jwtSecret);
 
-      // 부캐 puuid 조회
       let subPuuid = null;
       if (decoded.puuid) {
         const subUser = await models.user.findOne({
