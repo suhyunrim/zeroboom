@@ -276,19 +276,20 @@ module.exports.getLeaderboard = async (challengeId) => {
       order: [['gameCreation', 'ASC']],
     });
     const matchIds = details.map((d) => d.matchId);
-    if (matchIds.length === 0) return { result: [], status: 200 };
 
     // matchId → gameCreation 매핑 (streak 정렬용)
     const gameCreationMap = {};
     details.forEach((d) => { gameCreationMap[d.matchId] = d.gameCreation; });
 
     // 해당 매치들에서 참가자별 승패 조회
-    const matches = await models.challenge_match.findAll({
-      where: {
-        matchId: matchIds,
-        puuid: puuids,
-      },
-    });
+    const matches = matchIds.length > 0
+      ? await models.challenge_match.findAll({
+        where: {
+          matchId: matchIds,
+          puuid: puuids,
+        },
+      })
+      : [];
 
     // puuid별로 그룹핑 + gameCreation 기준 정렬
     const matchesByPuuid = {};
