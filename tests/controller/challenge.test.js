@@ -374,4 +374,35 @@ describe('syncChallengeMatches', () => {
     expect(result.status).toBe(200);
     expect(result.result.synced).toBe(0);
   });
+
+  test('참가자가 있으면 202 즉시 반환', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 99, gameType: 'soloRank', lastSyncAt: null,
+      startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
+    });
+    mockModels.challenge_participant.findAll.mockResolvedValue([
+      { puuid: 'puuid-1' }, { puuid: 'puuid-2' },
+    ]);
+
+    const result = await challengeController.syncChallengeMatches(99);
+    expect(result.status).toBe(202);
+    expect(result.result.total).toBe(2);
+  });
+});
+
+// --- 챌린지 상세 syncStatus ---
+
+describe('getChallengeDetail syncStatus', () => {
+  test('동기화 중이 아니면 idle', async () => {
+    mockModels.challenge.findByPk.mockResolvedValue({
+      id: 1, canceledAt: null, lastSyncAt: null,
+      startAt: new Date('2020-01-01'), endAt: new Date('2099-12-31'),
+      toJSON() { return { ...this }; },
+    });
+    mockModels.challenge_participant.count.mockResolvedValue(5);
+
+    const result = await challengeController.getChallengeDetail(1);
+    expect(result.result.syncStatus).toBe('idle');
+    expect(result.result.syncProgress).toBeNull();
+  });
 });

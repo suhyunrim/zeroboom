@@ -18,6 +18,9 @@ const calculatePoints = (wins, losses) => {
   return wins + losses;
 };
 
+// 동기화 진행 상태 (인메모리)
+const syncState = new Map();
+
 /**
  * 챌린지의 현재 상태를 기간 데이터에서 자동 계산
  */
@@ -146,10 +149,14 @@ module.exports.getChallengeDetail = async (challengeId) => {
       where: { challengeId },
     });
 
+    const sync = syncState.get(challengeId);
+
     return {
       result: {
         ...withStatus(challenge),
         participantCount,
+        syncStatus: sync ? 'syncing' : 'idle',
+        syncProgress: sync || null,
       },
       status: 200,
     };
@@ -461,13 +468,19 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30분
 
 /**
- * 챌린지 전체 참가자 전적 동기화
- * 쿨다운은 챌린지 단위로 적용
+ * 챌린지 전체 참가자 전적 동기화 (비동기)
+ * 즉시 202 반환 후 백그라운드에서 동기화 진행
+ * 진행률은 getChallengeDetail에서 syncStatus/syncProgress로 확인
  */
 module.exports.syncChallengeMatches = async (challengeId) => {
   try {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
+
+    // 이미 동기화 진행 중
+    if (syncState.has(challengeId)) {
+      return { result: '이미 동기화가 진행 중입니다.', status: 409 };
+    }
 
     // 챌린지 단위 쿨다운 체크
     if (challenge.lastSyncAt) {
@@ -484,10 +497,28 @@ module.exports.syncChallengeMatches = async (challengeId) => {
     });
     if (participants.length === 0) return { result: { synced: 0 }, status: 200 };
 
-    const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
-    let totalSynced = 0;
+    // 진행 상태 초기화 후 백그라운드 실행
+    syncState.set(challengeId, { done: 0, total: participants.length });
 
-    for (const p of participants) {
+    runSyncInBackground(challengeId, challenge, participants);
+
+    return { result: { message: '전적 갱신을 시작했습니다.', total: participants.length }, status: 202 };
+  } catch (e) {
+    logger.error(e.stack);
+    return { result: e.message, status: 501 };
+  }
+};
+
+/**
+ * 백그라운드에서 동기화 실행
+ */
+async function runSyncInBackground(challengeId, challenge, participants) {
+  const queueId = GAME_TYPE_QUEUE_MAP[challenge.gameType];
+  let totalSynced = 0;
+
+  try {
+    for (let i = 0; i < participants.length; i++) {
+      const p = participants[i];
       try {
         const synced = await fetchAndStoreMatches(p.puuid, queueId, challenge.startAt, challenge.endAt);
         totalSynced += synced;
@@ -495,17 +526,18 @@ module.exports.syncChallengeMatches = async (challengeId) => {
         logger.error(`[챌린지] 동기화 실패 (puuid=${p.puuid}): ${e.message}`);
       }
 
+      syncState.set(challengeId, { done: i + 1, total: participants.length });
       await sleep(2000);
     }
 
     await models.challenge.update({ lastSyncAt: new Date() }, { where: { id: challengeId } });
-
-    return { result: { synced: totalSynced, participants: participants.length }, status: 200 };
+    logger.info(`[챌린지] 동기화 완료 (challengeId=${challengeId}) - ${totalSynced}건`);
   } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
+    logger.error(`[챌린지] 동기화 에러 (challengeId=${challengeId}): ${e.stack}`);
+  } finally {
+    syncState.delete(challengeId);
   }
-};
+}
 
 /**
  * Riot API에서 매치를 가져와 challenge_match + challenge_match_detail에 저장
