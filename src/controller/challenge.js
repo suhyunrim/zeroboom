@@ -324,6 +324,12 @@ module.exports.getLeaderboard = async (challengeId) => {
     // 부캐 puuid 포함
     const { allPuuids, puuidToMain } = await getParticipantPuuidsWithSubs(puuids);
 
+    // 본캐 → 부캐 puuid 매핑
+    const mainToSub = {};
+    for (const [subPuuid, mainPuuid] of Object.entries(puuidToMain)) {
+      if (subPuuid !== mainPuuid) mainToSub[mainPuuid] = subPuuid;
+    }
+
     // 챌린지 기간 내 매치 ID 조회
     const details = await models.challenge_match_detail.findAll({
       where: {
@@ -385,6 +391,17 @@ module.exports.getLeaderboard = async (challengeId) => {
       if (tierField) tierMap[s.puuid] = s[tierField] || 'UNRANKED';
     });
 
+    // 부캐 소환사 이름 조회
+    const subPuuids = Object.values(mainToSub);
+    const subNameMap = {};
+    if (subPuuids.length > 0) {
+      const subSummoners = await models.summoner.findAll({
+        where: { puuid: subPuuids },
+        attributes: ['puuid', 'name'],
+      });
+      subSummoners.forEach((s) => { subNameMap[s.puuid] = s.name; });
+    }
+
     // 참가자별 통계 계산 (본캐 puuid 기준)
     const leaderboard = puuids.map((puuid) => {
       const playerMatches = matchesByMain[puuid] || [];
@@ -395,10 +412,12 @@ module.exports.getLeaderboard = async (challengeId) => {
       const points = calculatePoints(wins, losses);
       const streaks = calculateStreaks(playerMatches);
 
+      const subPuuid = mainToSub[puuid];
       return {
         puuid,
         name: nameMap[puuid] || '알 수 없음',
         tier: tierMap[puuid] || null,
+        subAccountName: subPuuid ? (subNameMap[subPuuid] || null) : null,
         totalGames,
         wins,
         losses,
