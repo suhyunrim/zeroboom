@@ -7,6 +7,7 @@ const honor = require('./routes/honor');
 const auth = require('./routes/auth');
 const blacklist = require('./routes/blacklist');
 const challenge = require('./routes/challenge');
+const match = require('./routes/match');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -22,6 +23,7 @@ module.exports = () => {
   honor(app);
   auth(app);
   challenge(app);
+  match(app);
 
   // v2
   groupsV2(app);
