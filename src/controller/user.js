@@ -2,7 +2,6 @@ const models = require('../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const { getCustomGames } = require('../services/riot-api');
-const { getRatingTier } = require('../services/user');
 const { getKSTYearStart } = require('../utils/timeUtils');
 
 module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
@@ -135,14 +134,12 @@ module.exports.getRating = async (groupId, puuid) => {
     }
 
     const totalRating = userInfo.defaultRating + userInfo.additionalRating;
-    const ratingTier = getRatingTier(totalRating);
 
     return {
       result: {
         defaultRating: userInfo.defaultRating,
         additionalRating: userInfo.additionalRating,
         totalRating: totalRating,
-        ratingTier: ratingTier,
       },
       status: 200,
     };
@@ -449,9 +446,6 @@ module.exports.getInfo = async (groupId, puuid) => {
       return { result: 'user is not exist', status: 501 };
     }
 
-    userInfo.ratingTier = getRatingTier(
-      userInfo.defaultRating + userInfo.additionalRating,
-    );
 
     // externalRecord 승패 합산 (만료 여부 상관없이 전체)
     const externalRecords = await models.externalRecord.findAll({
