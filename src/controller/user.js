@@ -446,7 +446,6 @@ module.exports.getInfo = async (groupId, puuid) => {
       return { result: 'user is not exist', status: 501 };
     }
 
-
     // externalRecord 승패 합산 (만료 여부 상관없이 전체)
     const externalRecords = await models.externalRecord.findAll({
       where: {

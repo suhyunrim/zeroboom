@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
+const { getGuildIconUrl } = require('../../utils/discordUtils');
 const route = Router();
 const userController = require('../../controller/user');
 const summonerController = require('../../controller/summoner');
@@ -25,8 +26,7 @@ module.exports = (app) => {
       const groupList = await userController.getGroupList(puuid);
       const client = req.app.discordClient;
       for (const group of groupList.result) {
-        const guild = client && group.discordGuildId && client.guilds.cache.get(group.discordGuildId);
-        group.iconUrl = guild ? guild.iconURL({ size: 128 }) : null;
+        group.iconUrl = getGuildIconUrl(client, group.discordGuildId);
       }
 
       return res.status(200).json({
@@ -49,8 +49,7 @@ module.exports = (app) => {
       const groupList = await userController.getGroupList(puuid);
       const client = req.app.discordClient;
       for (const group of groupList.result) {
-        const guild = client && group.discordGuildId && client.guilds.cache.get(group.discordGuildId);
-        group.iconUrl = guild ? guild.iconURL({ size: 128 }) : null;
+        group.iconUrl = getGuildIconUrl(client, group.discordGuildId);
       }
       return res.status(groupList.status).json({ result: groupList.result });
     } catch (e) {

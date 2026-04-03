@@ -3,6 +3,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const models = require('../../db/models');
+const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const userController = require('../../controller/user');
@@ -105,11 +106,10 @@ module.exports = (app) => {
       const client = req.app.discordClient;
       groups = groups.map((g) => {
         const guildId = groupGuildMap[g.groupId];
-        const guild = client && guildId && client.guilds.cache.get(guildId);
         return {
           ...g,
           isAdmin: !!guildPermMap[guildId],
-          iconUrl: guild ? guild.iconURL({ size: 128 }) : null,
+          iconUrl: getGuildIconUrl(client, guildId),
         };
       });
 

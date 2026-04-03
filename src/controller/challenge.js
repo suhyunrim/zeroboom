@@ -53,6 +53,16 @@ const calculatePoints = (wins, losses) => {
 // 동기화 진행 상태 (인메모리)
 const syncState = new Map();
 
+/**
+ * 그룹 본캐 멤버 조회 (outsider 제외)
+ */
+async function getGroupMainMembers(groupId) {
+  return models.user.findAll({
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    attributes: ['puuid'],
+  });
+}
+
 // 스냅샷 스케줄러 (challengeId → timeoutId)
 const snapshotTimers = new Map();
 
@@ -305,10 +315,7 @@ module.exports.getLeaderboard = async (challengeId) => {
     }
 
     // 그룹 전체 유저 (본캐만)
-    const groupUsers = await models.user.findAll({
-      where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
-      attributes: ['puuid'],
-    });
+    const groupUsers = await getGroupMainMembers(challenge.groupId);
     if (groupUsers.length === 0) return { result: [], status: 200 };
 
     const puuids = groupUsers.map((u) => u.puuid);
@@ -560,10 +567,7 @@ module.exports.syncChallengeMatches = async (challengeId) => {
     }
 
     // 그룹 전체 유저로 동기화
-    const groupUsers = await models.user.findAll({
-      where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
-      attributes: ['puuid'],
-    });
+    const groupUsers = await getGroupMainMembers(challenge.groupId);
     if (groupUsers.length === 0) return { result: { synced: 0 }, status: 200 };
 
     const groupPuuids = groupUsers.map((u) => u.puuid);
