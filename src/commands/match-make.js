@@ -4,7 +4,6 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 const { selectAllConcepts } = require('../match-maker/concept-scorers');
-const { optimizePositionsForMatches } = require('../match-maker/position-optimizer');
 
 const POSITION_ABBR = {
   TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', UTILITY: 'SUP',
@@ -137,30 +136,9 @@ exports.run = async (groupName, interaction) => {
   // 컨셉 매칭용 전체 매치 보존 (그룹 필터링만 적용된 상태)
   const allMatches = [...result.result];
 
-  // 포지션 하드 필터: 레이팅 균형 상위 N개 안에서만 포지션 필터 적용
-  // (전체 풀 대상으로 하면 레이팅 불균형한 조합이 포지션 좋다는 이유로 선택됨)
-  const BALANCE_POOL_SIZE = 30;
-  const playerDataMapForFilter = {};
-  for (const [name, info] of Object.entries(ratingCache)) {
-    playerDataMapForFilter[name] = {
-      puuid: info.puuid,
-      name,
-      rating: info.rating,
-      mainPos: toOptimizerPos(info.position),
-      subPos: toOptimizerPos(info.subPosition),
-      mainPositionRate: info.mainPositionRate,
-      subPositionRate: info.subPositionRate,
-    };
-  }
-  const balanceTopN = result.result.slice(0, Math.min(result.result.length, BALANCE_POOL_SIZE));
-  const positionSortedPool = optimizePositionsForMatches(balanceTopN, playerDataMapForFilter, {
-    resultCount: balanceTopN.length,
-  });
-  const dedupeSource = positionSortedPool.length > 0 ? positionSortedPool : balanceTopN;
-
   // 한 명만 다른 케이스 제외 (최소 2명 이상 차이나는 매칭만 선택)
   const filteredResults = [];
-  for (const match of dedupeSource) {
+  for (const match of result.result) {
     const team1Set = new Set(match.team1Names);
     let isDuplicate = false;
 
