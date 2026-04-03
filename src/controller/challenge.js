@@ -1,7 +1,7 @@
 const models = require('../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
-const { getMatchIdsFromPuuid, getMatchData } = require('../services/riot-api');
+const { getMatchIdsFromPuuid, getMatchData, getRankDataByPuuid } = require('../services/riot-api');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -367,13 +367,23 @@ module.exports.getLeaderboard = async (challengeId) => {
       matchesByMain[puuid].sort((a, b) => new Date(a.gameCreation) - new Date(b.gameCreation));
     }
 
-    // 소환사 이름 조회 (본캐 기준)
+    // 소환사 정보 조회 (본캐 기준)
+    const tierField = ['soloRank', 'flexRank'].includes(challenge.gameType)
+      ? (challenge.gameType === 'soloRank' ? 'rankTier' : 'flexRankTier')
+      : null;
+    const summonerAttrs = ['puuid', 'name'];
+    if (tierField) summonerAttrs.push(tierField);
+
     const summoners = await models.summoner.findAll({
       where: { puuid: puuids },
-      attributes: ['puuid', 'name'],
+      attributes: summonerAttrs,
     });
     const nameMap = {};
-    summoners.forEach((s) => { nameMap[s.puuid] = s.name; });
+    const tierMap = {};
+    summoners.forEach((s) => {
+      nameMap[s.puuid] = s.name;
+      if (tierField) tierMap[s.puuid] = s[tierField] || 'UNRANKED';
+    });
 
     // 참가자별 통계 계산 (본캐 puuid 기준)
     const leaderboard = puuids.map((puuid) => {
@@ -388,6 +398,7 @@ module.exports.getLeaderboard = async (challengeId) => {
       return {
         puuid,
         name: nameMap[puuid] || '알 수 없음',
+        tier: tierMap[puuid] || null,
         totalGames,
         wins,
         losses,
@@ -607,6 +618,26 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
 
       syncState.set(challengeId, { done: i + 1, total: allPuuids.length });
       await sleep(2000);
+    }
+
+    // 본캐 유저들의 summoner 티어 갱신
+    for (const puuid of puuids) {
+      try {
+        const leagueData = await getRankDataByPuuid(puuid);
+        const soloRank = leagueData.find((e) => e.queueType === 'RANKED_SOLO_5x5');
+        const flexRank = leagueData.find((e) => e.queueType === 'RANKED_FLEX_SR');
+        await models.summoner.update({
+          rankTier: soloRank ? `${soloRank.tier} ${soloRank.rank}` : 'UNRANKED',
+          rankWin: soloRank ? soloRank.wins : 0,
+          rankLose: soloRank ? soloRank.losses : 0,
+          flexRankTier: flexRank ? `${flexRank.tier} ${flexRank.rank}` : 'UNRANKED',
+          flexRankWin: flexRank ? flexRank.wins : 0,
+          flexRankLose: flexRank ? flexRank.losses : 0,
+        }, { where: { puuid } });
+      } catch (e) {
+        logger.error(`[챌린지] 티어 갱신 실패 (puuid=${puuid}): ${e.message}`);
+      }
+      await sleep(1200);
     }
 
     // 리더보드 계산하여 activePlayerCount 업데이트

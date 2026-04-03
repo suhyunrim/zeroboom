@@ -57,6 +57,7 @@ const generateSummonerData = async (name) => {
   const summonerResult = await getSummonerByName(name);
   const leagueResult = await getRankDataByPuuid(summonerResult.puuid);
   const soloRankData = leagueResult.find((elem) => elem.queueType == 'RANKED_SOLO_5x5');
+  const flexRankData = leagueResult.find((elem) => elem.queueType == 'RANKED_FLEX_SR');
 
   // Riot API에서 가져온 실제 닉네임 사용
   const actualName = summonerResult.riotId || name;
@@ -68,6 +69,9 @@ const generateSummonerData = async (name) => {
     rankTier: soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED',
     rankWin: soloRankData ? soloRankData.wins : 0,
     rankLose: soloRankData ? soloRankData.losses : 0,
+    flexRankTier: flexRankData ? `${flexRankData.tier} ${flexRankData.rank}` : 'UNRANKED',
+    flexRankWin: flexRankData ? flexRankData.wins : 0,
+    flexRankLose: flexRankData ? flexRankData.losses : 0,
     profileIconId: summonerResult.profileIconId,
     revisionDate: summonerResult.revisionDate,
     summonerLevel: summonerResult.summonerLevel,
@@ -176,6 +180,9 @@ module.exports.getPositions = async (name, options = {}) => {
     let updatedRankTier = null;
     let updatedRankWin = null;
     let updatedRankLose = null;
+    let updatedFlexRankTier = null;
+    let updatedFlexRankWin = null;
+    let updatedFlexRankLose = null;
     try {
       const accountData = await getAccountByPuuid(found.puuid);
       if (accountData.riotId && accountData.riotId !== found.name) {
@@ -192,6 +199,12 @@ module.exports.getPositions = async (name, options = {}) => {
       if (soloRankData) {
         updatedRankWin = soloRankData.wins;
         updatedRankLose = soloRankData.losses;
+      }
+      const flexRankData = leagueData.find((elem) => elem.queueType === 'RANKED_FLEX_SR');
+      updatedFlexRankTier = flexRankData ? `${flexRankData.tier} ${flexRankData.rank}` : 'UNRANKED';
+      if (flexRankData) {
+        updatedFlexRankWin = flexRankData.wins;
+        updatedFlexRankLose = flexRankData.losses;
       }
     } catch (e) {
       logger.warn(`[${name}] rankTier 갱신 실패: ${e.message}`);
@@ -293,13 +306,20 @@ module.exports.getPositions = async (name, options = {}) => {
       updateData.name = updatedName;
       updateData.simplifiedName = updatedName.toLowerCase().replace(/ /g, '');
     }
-    // rankTier, 솔랭 승패 갱신
+    // rankTier, 솔랭/자랭 승패 갱신
     if (updatedRankTier) {
       updateData.rankTier = updatedRankTier;
     }
     if (updatedRankWin !== null) {
       updateData.rankWin = updatedRankWin;
       updateData.rankLose = updatedRankLose;
+    }
+    if (updatedFlexRankTier) {
+      updateData.flexRankTier = updatedFlexRankTier;
+    }
+    if (updatedFlexRankWin !== null) {
+      updateData.flexRankWin = updatedFlexRankWin;
+      updateData.flexRankLose = updatedFlexRankLose;
     }
 
     found.set(updateData);

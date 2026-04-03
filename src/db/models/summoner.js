@@ -27,6 +27,15 @@ module.exports = (sequelize, DataTypes) => {
       rankLose: {
         type: DataTypes.INTEGER,
       },
+      flexRankTier: {
+        type: DataTypes.STRING,
+      },
+      flexRankWin: {
+        type: DataTypes.INTEGER,
+      },
+      flexRankLose: {
+        type: DataTypes.INTEGER,
+      },
       profileIconId: {
         type: DataTypes.INTEGER,
       },
