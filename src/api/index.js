@@ -15,6 +15,7 @@ const groupsV2 = require('./routes/v2/groups');
 // guaranteed to get dependencies
 module.exports = () => {
   const app = Router();
+  app.get('/health', (req, res) => res.json({ status: 'ok' }));
   summoner(app);
   blacklist(app);
   group(app);
