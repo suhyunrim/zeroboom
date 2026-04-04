@@ -339,14 +339,22 @@ module.exports.getLeaderboard = async (challengeId) => {
           [Op.lte]: challenge.endAt,
         },
       },
-      attributes: ['matchId', 'gameCreation'],
+      attributes: ['matchId', 'gameCreation', 'participants'],
       order: [['gameCreation', 'ASC']],
     });
-    const matchIds = details.map((d) => d.matchId);
+
+    // 그룹 멤버(본캐+부캐)와 함께한 매치만 필터
+    const allPuuidSet = new Set(allPuuids);
+    const filteredDetails = details.filter((d) => {
+      const participants = d.participants || [];
+      const groupParticipants = participants.filter((p) => allPuuidSet.has(p.puuid));
+      return groupParticipants.length >= 2;
+    });
+    const matchIds = filteredDetails.map((d) => d.matchId);
 
     // matchId → gameCreation 매핑 (streak 정렬용)
     const gameCreationMap = {};
-    details.forEach((d) => { gameCreationMap[d.matchId] = d.gameCreation; });
+    filteredDetails.forEach((d) => { gameCreationMap[d.matchId] = d.gameCreation; });
 
     // 해당 매치들에서 참가자별 승패 조회 (본캐+부캐 전체)
     const matches = matchIds.length > 0
