@@ -545,7 +545,7 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
         }));
 
       return entry;
-    });
+    }).filter((entry) => entry.groupMembers.length > 0);
 
     return { result, status: 200 };
   } catch (e) {
