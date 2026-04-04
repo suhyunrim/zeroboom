@@ -330,7 +330,7 @@ module.exports.getLeaderboard = async (challengeId) => {
       if (subPuuid !== mainPuuid) mainToSub[mainPuuid] = subPuuid;
     }
 
-    // 챌린지 기간 내 매치 ID 조회
+    // 챌린지 기간 내 매치 ID + 참가자 puuid 목록 조회 (participants 전체 로드 방지)
     const details = await models.challenge_match_detail.findAll({
       where: {
         queueId,
@@ -339,16 +339,19 @@ module.exports.getLeaderboard = async (challengeId) => {
           [Op.lte]: challenge.endAt,
         },
       },
-      attributes: ['matchId', 'gameCreation', 'participants'],
+      attributes: [
+        'matchId', 'gameCreation',
+        [models.sequelize.literal("JSON_EXTRACT(participants, '$[*].puuid')"), 'participantPuuids'],
+      ],
       order: [['gameCreation', 'ASC']],
     });
 
     // 그룹 멤버(본캐+부캐)와 함께한 매치만 필터
     const allPuuidSet = new Set(allPuuids);
     const filteredDetails = details.filter((d) => {
-      const participants = d.participants || [];
-      const groupParticipants = participants.filter((p) => allPuuidSet.has(p.puuid));
-      return groupParticipants.length >= 2;
+      const puuidList = d.getDataValue('participantPuuids') || [];
+      const groupCount = puuidList.filter((p) => allPuuidSet.has(p)).length;
+      return groupCount >= 2;
     });
     const matchIds = filteredDetails.map((d) => d.matchId);
 
