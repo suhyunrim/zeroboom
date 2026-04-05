@@ -469,6 +469,9 @@ module.exports.getLeaderboard = async (challengeId) => {
       entry.rank = idx + 1;
     });
 
+    // 풀 계산 결과를 DB에 캐시
+    models.challenge.update({ leaderboardCache: filtered }, { where: { id: challengeId } }).catch(() => {});
+
     return { result: filtered, status: 200 };
   } catch (e) {
     logger.error(e.stack);
@@ -685,14 +688,13 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
       await sleep(1200);
     }
 
-    // 리더보드 계산하여 DB에 캐시 + activePlayerCount 업데이트
-    // leaderboardCache를 null로 초기화해서 풀 계산 유도
+    // 캐시 무효화 후 리더보드 재계산 (getLeaderboard 내부에서 캐시 자동 저장)
     await models.challenge.update({ leaderboardCache: null }, { where: { id: challengeId } });
     const leaderboardResult = await module.exports.getLeaderboard(challengeId);
     const playerCount = leaderboardResult.status === 200 ? leaderboardResult.result.length : 0;
 
     await models.challenge.update(
-      { lastSyncAt: new Date(), activePlayerCount: playerCount, leaderboardCache: leaderboardResult.result },
+      { lastSyncAt: new Date(), activePlayerCount: playerCount },
       { where: { id: challengeId } },
     );
     logger.info(`[챌린지] 동기화 완료 (challengeId=${challengeId}) - ${totalSynced}건, ${playerCount}명`);
