@@ -505,9 +505,10 @@ module.exports = async (app) => {
 
         // 투표 세션 및 DB 데이터 삭제
         honorVoteSessions.delete(gameId);
-        await honorController.deleteVotesByGameId(gameId);
-
-        await matchData.update({ winTeam: null });
+        await Promise.all([
+          honorController.deleteVotesByGameId(gameId),
+          matchData.update({ winTeam: null }),
+        ]);
         await matchController.applyMatchResult(gameId, previousWinTeam);
 
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -757,12 +758,6 @@ module.exports = async (app) => {
             new ButtonBuilder()
               .setCustomId(`cancelMatch|${gameId}`)
               .setLabel('❌ 취소')
-              .setStyle(ButtonStyle.Secondary),
-          )
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId(`voiceMove|${gameId}`)
-              .setLabel('🔊 보이스 이동')
               .setStyle(ButtonStyle.Secondary),
           );
 
