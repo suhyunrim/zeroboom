@@ -258,6 +258,12 @@ exports.reactButton = async (interaction, match) => {
         .setCustomId(`winCommand|${matchQueryResult.gameId}|2`)
         .setLabel('🐱팀 승리!')
         .setStyle(ButtonStyle.Danger),
+    )
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`voiceMove|${matchQueryResult.gameId}`)
+        .setLabel('🔊 보이스 이동')
+        .setStyle(ButtonStyle.Secondary),
     );
 
   const label = match.conceptLabel

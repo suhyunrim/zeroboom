@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, REST, Routes, ComponentType, InteractionResponse, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
@@ -352,31 +353,16 @@ module.exports = async (app) => {
               .setCustomId(`winCommand|${matchQueryResult.gameId}|2`)
               .setLabel('🐱팀 승리!')
               .setStyle(ButtonStyle.Danger),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`voiceMove|${matchQueryResult.gameId}`)
+              .setLabel('🔊 보이스 이동')
+              .setStyle(ButtonStyle.Secondary),
           );
 
         await interaction.deferUpdate();
         await interaction.followUp({ embeds: [embed], components: [buttons] });
-
-        // 팀 음성 채널 생성 및 멤버 이동
-        try {
-          const freshMember = await interaction.guild.members.fetch(interaction.user.id);
-          const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
-          logger.info(`팀 채널 생성 시도: voiceChannel=${voiceChannel ? voiceChannel.id : 'null'}`);
-          if (voiceChannel) {
-            const team1DiscordIds = po.teamA.assignments.map((a) => playerDataMap[a.playerName] ? playerDataMap[a.playerName].discordId : null);
-            const team2DiscordIds = po.teamB.assignments.map((a) => playerDataMap[a.playerName] ? playerDataMap[a.playerName].discordId : null);
-            await tempVoiceController.createMatchTeamChannels({
-              guild: interaction.guild,
-              categoryId: voiceChannel.parentId,
-              ownerDiscordId: interaction.user.id,
-              team1DiscordIds,
-              team2DiscordIds,
-              channelName: interaction.channel ? interaction.channel.name : null,
-            });
-          }
-        } catch (e) {
-          logger.error('팀 채널 생성/이동 오류:', e);
-        }
 
         return;
       }
@@ -500,6 +486,55 @@ module.exports = async (app) => {
 
         await interaction.update({ components: [] });
         await interaction.followUp(result);
+        return;
+      }
+
+      // voiceMove 버튼 체크 (보이스 채널 이동)
+      if (split[0] === 'voiceMove') {
+        const gameId = Number(split[1]);
+        const matchData = await models.match.findOne({ where: { gameId } });
+        if (!matchData) {
+          await interaction.reply({ content: '매치 데이터를 찾을 수 없습니다.', ephemeral: true });
+          return;
+        }
+
+        const freshMember = await interaction.guild.members.fetch(interaction.user.id);
+        const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
+        if (!voiceChannel) {
+          await interaction.reply({ content: '음성 채널에 접속한 상태에서 눌러주세요.', ephemeral: true });
+          return;
+        }
+
+        try {
+          const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+          const getDiscordIds = async (teamJson) => {
+            const puuids = teamJson.map(([puuid]) => puuid);
+            const users = await models.user.findAll({
+              where: { groupId: group.id, puuid: { [Op.in]: puuids } },
+              raw: true,
+            });
+            const userMap = {};
+            users.forEach((u) => { userMap[u.puuid] = u.discordId || null; });
+            return puuids.map((puuid) => userMap[puuid] || null);
+          };
+          const [team1DiscordIds, team2DiscordIds] = await Promise.all([
+            getDiscordIds(matchData.team1),
+            getDiscordIds(matchData.team2),
+          ]);
+
+          await tempVoiceController.createMatchTeamChannels({
+            guild: interaction.guild,
+            categoryId: voiceChannel.parentId,
+            ownerDiscordId: interaction.user.id,
+            team1DiscordIds,
+            team2DiscordIds,
+            channelName: interaction.channel ? interaction.channel.name : null,
+          });
+          await interaction.reply({ content: '🔊 팀 보이스 채널로 이동했습니다!', ephemeral: true });
+        } catch (e) {
+          logger.error('팀 채널 생성/이동 오류:', e);
+          await interaction.reply({ content: '보이스 채널 이동 중 오류가 발생했습니다.', ephemeral: true });
+        }
         return;
       }
 
@@ -668,6 +703,12 @@ module.exports = async (app) => {
               .setCustomId(`winCommand|${gameId}|2`)
               .setLabel('🐱팀 승리!')
               .setStyle(ButtonStyle.Danger),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`voiceMove|${gameId}`)
+              .setLabel('🔊 보이스 이동')
+              .setStyle(ButtonStyle.Secondary),
           );
 
         await interaction.update({ components: [buttons] });
@@ -709,25 +750,6 @@ module.exports = async (app) => {
             const output = await matchMakeCommand.reactButton(interaction, match);
             if (output) {
               await interaction.reply(output);
-
-              // 팀 음성 채널 생성 및 멤버 이동
-              try {
-                const freshMember = await interaction.guild.members.fetch(interaction.user.id);
-                const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
-                logger.info(`팀 채널 생성 시도: voiceChannel=${voiceChannel ? voiceChannel.id : 'null'}`);
-                if (voiceChannel && output.teamDiscordIds) {
-                  await tempVoiceController.createMatchTeamChannels({
-                    guild: interaction.guild,
-                    categoryId: voiceChannel.parentId,
-                    ownerDiscordId: interaction.user.id,
-                    team1DiscordIds: output.teamDiscordIds[0],
-                    team2DiscordIds: output.teamDiscordIds[1],
-                    channelName: interaction.channel ? interaction.channel.name : null,
-                  });
-                }
-              } catch (e) {
-                logger.error('팀 채널 생성/이동 오류:', e);
-              }
             }
             return;
           }
