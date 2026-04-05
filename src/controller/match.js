@@ -368,7 +368,7 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   });
 
   if (!matchData) return { result: 'match not found', status: 404 };
-  if (!matchData.winTeam) return { result: 'winTeam not set', status: 400 };
+  if (!matchData.winTeam && !previousWinTeam) return { result: 'winTeam not set', status: 400 };
 
   const team1Data = matchData.team1; // [[puuid, name], ...] 또는 [[puuid, name, rating], ...]
   const team2Data = matchData.team2;
@@ -454,6 +454,11 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     for (const user of Object.values(userMap)) {
       await user.reload();
     }
+  }
+
+  // winTeam이 null이면 되돌리기만 수행 (취소)
+  if (!matchData.winTeam) {
+    return { result: 'success', status: 200 };
   }
 
   // === 새 결과 적용 ===

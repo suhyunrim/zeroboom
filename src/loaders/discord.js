@@ -489,6 +489,55 @@ module.exports = async (app) => {
         return;
       }
 
+      // cancelMatch 버튼 체크 (승/패 취소)
+      if (split[0] === 'cancelMatch') {
+        const gameId = Number(split[1]);
+        const matchData = await models.match.findOne({ where: { gameId } });
+        if (!matchData) {
+          await interaction.reply({ content: '매치 데이터를 찾을 수 없습니다.', ephemeral: true });
+          return;
+        }
+        const previousWinTeam = matchData.winTeam;
+        if (!previousWinTeam) {
+          await interaction.reply({ content: '이미 승/패가 설정되지 않은 상태입니다.', ephemeral: true });
+          return;
+        }
+
+        // 투표 세션 및 DB 데이터 삭제
+        honorVoteSessions.delete(gameId);
+        await honorController.deleteVotesByGameId(gameId);
+
+        await matchData.update({ winTeam: null });
+        await matchController.applyMatchResult(gameId, previousWinTeam);
+
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+        const buttons = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${gameId}|1`)
+              .setLabel('🐶팀 승리!')
+              .setStyle(ButtonStyle.Success),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`winCommand|${gameId}|2`)
+              .setLabel('🐱팀 승리!')
+              .setStyle(ButtonStyle.Danger),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`voiceMove|${gameId}`)
+              .setLabel('🔊 보이스 이동')
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+        await interaction.update({
+          content: `**❌ [${interaction.member.nickname}]님이 승/패를 취소했습니다. 레이팅이 롤백되었습니다.**`,
+          components: [buttons],
+        });
+        return;
+      }
+
       // voiceMove 버튼 체크 (보이스 채널 이동)
       if (split[0] === 'voiceMove') {
         const gameId = Number(split[1]);
@@ -690,7 +739,7 @@ module.exports = async (app) => {
         honorVoteSessions.delete(Number(gameId));
         await honorController.deleteVotesByGameId(Number(gameId));
 
-        // 다시 승/패 버튼 표시
+        // 다시 승/패 버튼 표시 (취소 버튼 포함)
         const buttons = new ActionRowBuilder()
           .addComponents(
             new ButtonBuilder()
@@ -703,6 +752,12 @@ module.exports = async (app) => {
               .setCustomId(`winCommand|${gameId}|2`)
               .setLabel('🐱팀 승리!')
               .setStyle(ButtonStyle.Danger),
+          )
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`cancelMatch|${gameId}`)
+              .setLabel('❌ 취소')
+              .setStyle(ButtonStyle.Secondary),
           )
           .addComponents(
             new ButtonBuilder()
