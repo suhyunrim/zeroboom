@@ -3,6 +3,7 @@ const models = require('../../db/models');
 const { logger } = require('../../loaders/logger');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 const { getRating, convertAbbreviationTier, isValidTier } = require('../../services/user');
+const challengeController = require('../../controller/challenge');
 
 const route = Router();
 
@@ -118,6 +119,7 @@ module.exports = (app) => {
       }
 
       await models.user.update({ role: 'outsider' }, { where: { puuid, groupId: Number(groupId) } });
+      await challengeController.invalidateLeaderboardCache(Number(groupId));
 
       return res.status(200).json({ result: '블랙리스트에 등록되었습니다.' });
     } catch (e) {
@@ -193,6 +195,7 @@ module.exports = (app) => {
       }
 
       await models.user.update({ role: 'member' }, { where: { puuid, groupId: Number(groupId) } });
+      await challengeController.invalidateLeaderboardCache(Number(groupId));
 
       return res.status(200).json({ result: '블랙리스트에서 해제되었습니다.' });
     } catch (e) {

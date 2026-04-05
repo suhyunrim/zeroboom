@@ -54,6 +54,16 @@ const calculatePoints = (wins, losses) => {
 const syncState = new Map();
 
 /**
+ * 그룹의 활성 챌린지 리더보드 캐시 무효화
+ */
+module.exports.invalidateLeaderboardCache = async (groupId) => {
+  await models.challenge.update(
+    { leaderboardCache: null },
+    { where: { groupId, canceledAt: null, leaderboardSnapshot: null } },
+  );
+};
+
+/**
  * 그룹 본캐 멤버 조회 (outsider 제외)
  */
 async function getGroupMainMembers(groupId) {
@@ -228,7 +238,7 @@ module.exports.cancelChallenge = async (challengeId) => {
       return { result: '이미 취소된 챌린지입니다.', status: 400 };
     }
 
-    await models.challenge.update({ canceledAt: new Date() }, { where: { id: challengeId } });
+    await models.challenge.update({ canceledAt: new Date(), leaderboardCache: null }, { where: { id: challengeId } });
 
     return { result: { id: challengeId, status: 'canceled' }, status: 200 };
   } catch (e) {
@@ -309,9 +319,14 @@ module.exports.getLeaderboard = async (challengeId) => {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
-    // ended + 스냅샷 있으면 스냅샷 반환
+    // ended + 확정 스냅샷 반환
     if (getChallengeStatus(challenge) === 'ended' && challenge.leaderboardSnapshot) {
       return { result: challenge.leaderboardSnapshot, status: 200 };
+    }
+
+    // sync 시 저장된 캐시 반환
+    if (challenge.leaderboardCache) {
+      return { result: challenge.leaderboardCache, status: 200 };
     }
 
     // 그룹 전체 유저 (본캐만)
@@ -670,12 +685,14 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
       await sleep(1200);
     }
 
-    // 리더보드 계산하여 activePlayerCount 업데이트
+    // 리더보드 계산하여 DB에 캐시 + activePlayerCount 업데이트
+    // leaderboardCache를 null로 초기화해서 풀 계산 유도
+    await models.challenge.update({ leaderboardCache: null }, { where: { id: challengeId } });
     const leaderboardResult = await module.exports.getLeaderboard(challengeId);
     const playerCount = leaderboardResult.status === 200 ? leaderboardResult.result.length : 0;
 
     await models.challenge.update(
-      { lastSyncAt: new Date(), activePlayerCount: playerCount },
+      { lastSyncAt: new Date(), activePlayerCount: playerCount, leaderboardCache: leaderboardResult.result },
       { where: { id: challengeId } },
     );
     logger.info(`[챌린지] 동기화 완료 (challengeId=${challengeId}) - ${totalSynced}건, ${playerCount}명`);
