@@ -875,6 +875,14 @@ module.exports.syncAllActiveChallenges = async () => {
     }
 
     logger.info(`[챌린지 배치] 완료 - 성공: ${successCount}, 실패: ${failCount}`);
+
+    // 각 챌린지 캐시 무효화 + lastSyncAt 업데이트
+    for (const challenge of challenges) {
+      await models.challenge.update(
+        { leaderboardCache: null, lastSyncAt: new Date() },
+        { where: { id: challenge.id } },
+      );
+    }
   } catch (e) {
     logger.error(`[챌린지 배치] 에러: ${e.stack}`);
   }
