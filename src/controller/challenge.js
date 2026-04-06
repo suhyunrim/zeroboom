@@ -783,13 +783,13 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
         logger.error(`[챌린지] 매치 데이터 저장 실패 (matchId=${matchId}): ${e.message}`);
       }
 
-      await sleep(1200);
+      await sleep(2000);
     }
 
     if (matchIds.length < batchSize) break;
 
     beginIndex += batchSize;
-    await sleep(1200);
+    await sleep(2000);
   }
 
   return totalSynced;
