@@ -963,13 +963,38 @@ module.exports = async (app) => {
       if (memberId && guildId) {
         (async () => {
           if (oldState.channelId) {
-            await models.voice_activity.update(
-              {
-                totalDuration: models.sequelize.literal('totalDuration + GREATEST(TIMESTAMPDIFF(SECOND, lastJoinedAt, NOW()), 0)'),
-                lastLeftAt: new Date(),
-              },
-              { where: { discordId: memberId, guildId, [Op.or]: [{ lastLeftAt: null }, { lastLeftAt: { [Op.lt]: models.sequelize.col('lastJoinedAt') } }] } },
-            );
+            const activity = await models.voice_activity.findOne({
+              where: { discordId: memberId, guildId, [Op.or]: [{ lastLeftAt: null }, { lastLeftAt: { [Op.lt]: models.sequelize.col('lastJoinedAt') } }] },
+            });
+            if (activity && activity.lastJoinedAt) {
+              const now = new Date();
+              // 비정상적으로 오래된 세션은 최대 7일까지만 처리
+              const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+              const joinedAt = new Date(Math.max(new Date(activity.lastJoinedAt).getTime(), now.getTime() - MAX_DURATION_MS));
+              const dailyDurations = [];
+              let cursor = new Date(joinedAt);
+              while (cursor < now) {
+                const dateStr = cursor.toISOString().slice(0, 10);
+                const nextDay = new Date(cursor);
+                nextDay.setUTCFullYear(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate() + 1);
+                nextDay.setUTCHours(0, 0, 0, 0);
+                const end = nextDay < now ? nextDay : now;
+                const seconds = Math.floor((end - cursor) / 1000);
+                if (seconds > 0) {
+                  dailyDurations.push({ date: dateStr, duration: seconds });
+                }
+                cursor = nextDay;
+              }
+              await Promise.all(dailyDurations.map(({ date, duration }) =>
+                models.sequelize.query(
+                  `INSERT INTO voice_activity_dailies (discordId, guildId, date, duration, createdAt, updatedAt)
+                   VALUES (:discordId, :guildId, :date, :duration, NOW(), NOW())
+                   ON DUPLICATE KEY UPDATE duration = duration + :duration, updatedAt = NOW()`,
+                  { replacements: { discordId: memberId, guildId, date, duration } },
+                ),
+              ));
+              await activity.update({ lastLeftAt: now });
+            }
           }
           if (newState.channelId) {
             await models.voice_activity.upsert({

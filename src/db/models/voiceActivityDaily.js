@@ -1,6 +1,6 @@
 module.exports = (sequelize, DataTypes) => {
-  const voiceActivity = sequelize.define(
-    'voice_activity',
+  const voiceActivityDaily = sequelize.define(
+    'voice_activity_daily',
     {
       id: {
         type: DataTypes.INTEGER,
@@ -15,24 +15,25 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: false,
       },
-      lastJoinedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
+      date: {
+        type: DataTypes.DATEONLY,
+        allowNull: false,
       },
-      lastLeftAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
+      duration: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
       },
     },
     {
       indexes: [
         {
           unique: true,
-          fields: ['discordId', 'guildId'],
+          fields: ['discordId', 'guildId', 'date'],
         },
       ],
     },
   );
-  voiceActivity.associate = (/* models */) => {};
-  return voiceActivity;
+  voiceActivityDaily.associate = (/* models */) => {};
+  return voiceActivityDaily;
 };
