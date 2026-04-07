@@ -94,7 +94,32 @@ async function saveLeaderboardSnapshot(challengeId) {
       },
       { where: { id: challengeId } },
     );
-    logger.info(`[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId}, ${leaderboardResult.result.length}명)`);
+    logger.info(
+      `[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId}, ${leaderboardResult.result.length}명)`,
+    );
+
+    // 챌린지 업적 체크 (상위 3명)
+    const top3 = leaderboardResult.result.filter((e) => e.rank <= 3);
+    if (top3.length > 0) {
+      const top3Puuids = top3.map((e) => e.puuid);
+      const top3Users = await models.user.findAll({
+        where: { groupId: challenge.groupId, puuid: top3Puuids },
+      });
+      if (top3Users.length > 0) {
+        const userMap = {};
+        top3Users.forEach((u) => {
+          userMap[u.puuid] = u;
+        });
+        const { processAchievements } = require('../services/achievement/engine');
+        const newAchievements = await processAchievements('challenge_end', {
+          groupId: challenge.groupId,
+          userMap,
+        });
+        if (newAchievements.length > 0) {
+          logger.info(`[챌린지] 업적 해금 ${newAchievements.length}건 (challengeId=${challengeId})`);
+        }
+      }
+    }
   } catch (e) {
     logger.error(`[챌린지] 리더보드 스냅샷 저장 실패 (challengeId=${challengeId}): ${e.message}`);
   } finally {
@@ -207,7 +232,16 @@ module.exports.updateChallenge = async (challengeId, data) => {
     if (!challenge) return { result: '챌린지를 찾을 수 없습니다.', status: 404 };
 
     const updateFields = {};
-    const allowedFields = ['title', 'description', 'gameType', 'startAt', 'endAt', 'scoringType', 'isVisible', 'displayOrder'];
+    const allowedFields = [
+      'title',
+      'description',
+      'gameType',
+      'startAt',
+      'endAt',
+      'scoringType',
+      'isVisible',
+      'displayOrder',
+    ];
     for (const field of allowedFields) {
       if (data[field] !== undefined) {
         updateFields[field] = data[field];
@@ -251,7 +285,10 @@ module.exports.listChallenges = async (groupId) => {
   try {
     const challenges = await models.challenge.findAll({
       where: { groupId },
-      order: [['displayOrder', 'ASC'], ['createdAt', 'DESC']],
+      order: [
+        ['displayOrder', 'ASC'],
+        ['createdAt', 'DESC'],
+      ],
     });
 
     const result = challenges.map((c) => ({
@@ -296,7 +333,10 @@ module.exports.listVisibleChallenges = async (groupId) => {
         isVisible: true,
         canceledAt: null,
       },
-      order: [['displayOrder', 'ASC'], ['createdAt', 'DESC']],
+      order: [
+        ['displayOrder', 'ASC'],
+        ['createdAt', 'DESC'],
+      ],
     });
 
     const result = challenges.map((c) => ({
@@ -355,7 +395,8 @@ module.exports.getLeaderboard = async (challengeId) => {
         },
       },
       attributes: [
-        'matchId', 'gameCreation',
+        'matchId',
+        'gameCreation',
         [models.sequelize.literal("JSON_EXTRACT(participants, '$[*].puuid')"), 'participantPuuids'],
       ],
       order: [['gameCreation', 'ASC']],
@@ -372,17 +413,20 @@ module.exports.getLeaderboard = async (challengeId) => {
 
     // matchId → gameCreation 매핑 (streak 정렬용)
     const gameCreationMap = {};
-    filteredDetails.forEach((d) => { gameCreationMap[d.matchId] = d.gameCreation; });
+    filteredDetails.forEach((d) => {
+      gameCreationMap[d.matchId] = d.gameCreation;
+    });
 
     // 해당 매치들에서 참가자별 승패 조회 (본캐+부캐 전체)
-    const matches = matchIds.length > 0
-      ? await models.challenge_match.findAll({
-        where: {
-          matchId: matchIds,
-          puuid: allPuuids,
-        },
-      })
-      : [];
+    const matches =
+      matchIds.length > 0
+        ? await models.challenge_match.findAll({
+            where: {
+              matchId: matchIds,
+              puuid: allPuuids,
+            },
+          })
+        : [];
 
     // 본캐 puuid 기준으로 그룹핑 (부캐 전적은 본캐에 합산)
     const matchesByMain = {};
@@ -401,7 +445,9 @@ module.exports.getLeaderboard = async (challengeId) => {
 
     // 소환사 정보 조회 (본캐 기준)
     const tierField = ['soloRank', 'flexRank'].includes(challenge.gameType)
-      ? (challenge.gameType === 'soloRank' ? 'rankTier' : 'flexRankTier')
+      ? challenge.gameType === 'soloRank'
+        ? 'rankTier'
+        : 'flexRankTier'
       : null;
     const summonerAttrs = ['puuid', 'name'];
     if (tierField) summonerAttrs.push(tierField);
@@ -425,7 +471,9 @@ module.exports.getLeaderboard = async (challengeId) => {
         where: { puuid: subPuuids },
         attributes: ['puuid', 'name'],
       });
-      subSummoners.forEach((s) => { subNameMap[s.puuid] = s.name; });
+      subSummoners.forEach((s) => {
+        subNameMap[s.puuid] = s.name;
+      });
     }
 
     // 참가자별 통계 계산 (본캐 puuid 기준)
@@ -443,7 +491,7 @@ module.exports.getLeaderboard = async (challengeId) => {
         puuid,
         name: nameMap[puuid] || '알 수 없음',
         tier: tierMap[puuid] || null,
-        subAccountName: subPuuid ? (subNameMap[subPuuid] || null) : null,
+        subAccountName: subPuuid ? subNameMap[subPuuid] || null : null,
         totalGames,
         wins,
         losses,
@@ -516,7 +564,9 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
 
     const userMatchIds = userMatches.map((m) => m.matchId);
     const winMap = {};
-    userMatches.forEach((m) => { winMap[m.matchId] = m.win; });
+    userMatches.forEach((m) => {
+      winMap[m.matchId] = m.win;
+    });
 
     // 기간+큐 필터하여 상세 데이터 조회
     const details = await models.challenge_match_detail.findAll({
@@ -545,36 +595,40 @@ module.exports.getUserMatchHistory = async (challengeId, puuid, groupId) => {
         where: { puuid: groupPuuids },
         attributes: ['puuid', 'name'],
       });
-      summoners.forEach((s) => { groupMemberMap[s.puuid] = s.name; });
+      summoners.forEach((s) => {
+        groupMemberMap[s.puuid] = s.name;
+      });
     }
 
-    const result = details.map((d) => {
-      const participants = d.participants || [];
-      const me = participants.find((p) => puuidsToQuery.includes(p.puuid));
+    const result = details
+      .map((d) => {
+        const participants = d.participants || [];
+        const me = participants.find((p) => puuidsToQuery.includes(p.puuid));
 
-      const entry = {
-        matchId: d.matchId,
-        win: winMap[d.matchId],
-        gameCreation: d.gameCreation,
-        targetPuuid: me ? me.puuid : null,
-        // participants 전체를 내려줌 (프론트에서 챔피언/KDA/CS 등 렌더링)
-        participants,
-      };
+        const entry = {
+          matchId: d.matchId,
+          win: winMap[d.matchId],
+          gameCreation: d.gameCreation,
+          targetPuuid: me ? me.puuid : null,
+          // participants 전체를 내려줌 (프론트에서 챔피언/KDA/CS 등 렌더링)
+          participants,
+        };
 
-      // 같은 매치에 있는 그룹 멤버 추출
-      entry.groupMembers = participants
-        .filter((p) => !puuidsToQuery.includes(p.puuid) && groupMemberMap[p.puuid])
-        .map((p) => ({
-          puuid: p.puuid,
-          name: groupMemberMap[p.puuid],
-          championName: p.championName,
-          teamId: p.teamId,
-          win: p.win,
-          sameTeam: me ? p.teamId === me.teamId : false,
-        }));
+        // 같은 매치에 있는 그룹 멤버 추출
+        entry.groupMembers = participants
+          .filter((p) => !puuidsToQuery.includes(p.puuid) && groupMemberMap[p.puuid])
+          .map((p) => ({
+            puuid: p.puuid,
+            name: groupMemberMap[p.puuid],
+            championName: p.championName,
+            teamId: p.teamId,
+            win: p.win,
+            sameTeam: me ? p.teamId === me.teamId : false,
+          }));
 
-      return entry;
-    }).filter((entry) => entry.groupMembers.length > 0);
+        return entry;
+      })
+      .filter((entry) => entry.groupMembers.length > 0);
 
     return { result, status: 200 };
   } catch (e) {
@@ -674,14 +728,17 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
         const leagueData = await getRankDataByPuuid(puuid);
         const soloRank = leagueData.find((e) => e.queueType === 'RANKED_SOLO_5x5');
         const flexRank = leagueData.find((e) => e.queueType === 'RANKED_FLEX_SR');
-        await models.summoner.update({
-          rankTier: soloRank ? `${soloRank.tier} ${soloRank.rank}` : 'UNRANKED',
-          rankWin: soloRank ? soloRank.wins : 0,
-          rankLose: soloRank ? soloRank.losses : 0,
-          flexRankTier: flexRank ? `${flexRank.tier} ${flexRank.rank}` : 'UNRANKED',
-          flexRankWin: flexRank ? flexRank.wins : 0,
-          flexRankLose: flexRank ? flexRank.losses : 0,
-        }, { where: { puuid } });
+        await models.summoner.update(
+          {
+            rankTier: soloRank ? `${soloRank.tier} ${soloRank.rank}` : 'UNRANKED',
+            rankWin: soloRank ? soloRank.wins : 0,
+            rankLose: soloRank ? soloRank.losses : 0,
+            flexRankTier: flexRank ? `${flexRank.tier} ${flexRank.rank}` : 'UNRANKED',
+            flexRankWin: flexRank ? flexRank.wins : 0,
+            flexRankLose: flexRank ? flexRank.losses : 0,
+          },
+          { where: { puuid } },
+        );
       } catch (e) {
         logger.error(`[챌린지] 티어 갱신 실패 (puuid=${puuid}): ${e.message}`);
       }
@@ -729,9 +786,7 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
     attributes: ['gameCreation'],
   });
 
-  const startTime = latestMatch
-    ? Math.floor(new Date(latestMatch.gameCreation).getTime() / 1000)
-    : challengeStartTime;
+  const startTime = latestMatch ? Math.floor(new Date(latestMatch.gameCreation).getTime() / 1000) : challengeStartTime;
 
   let beginIndex = 0;
   let totalSynced = 0;
@@ -812,10 +867,7 @@ module.exports.syncAllActiveChallenges = async () => {
       where: {
         canceledAt: null,
         startAt: { [Op.lte]: now },
-        [Op.or]: [
-          { endAt: { [Op.gte]: now } },
-          { endAt: { [Op.gte]: threeDaysAgo } },
-        ],
+        [Op.or]: [{ endAt: { [Op.gte]: now } }, { endAt: { [Op.gte]: threeDaysAgo } }],
       },
     });
 

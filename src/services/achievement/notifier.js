@@ -40,7 +40,8 @@ async function sendAchievementNotification(channel, newAchievements, groupId) {
       const name = nameMap[unlock.puuid] || '알 수 없음';
       const tierIdx = tierOrder.indexOf(def.tier);
       if (tierIdx > highestTierIdx) highestTierIdx = tierIdx;
-      return `${def.emoji} **${name}** — ${def.name}`;
+      const prefix = def.emoji ? `${def.emoji} ` : '';
+      return `${prefix}**${name}** — ${def.name}`;
     }).filter(Boolean);
 
     if (lines.length === 0) return;

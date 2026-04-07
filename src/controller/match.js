@@ -7,18 +7,15 @@ const summonerController = require('../controller/summoner');
 const honorController = require('../controller/honor');
 
 const elo = require('arpad');
-const {
-  getSummonerByName_V1,
-  getCustomGames,
-  getMatchData,
-} = require('../services/riot-api');
+const { getSummonerByName_V1, getCustomGames, getMatchData } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
 const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 const { formatTier } = require('../utils/tierUtils');
-const { getKSTYearStart, getKSTIsoWeekday, daysAgo } = require('../utils/timeUtils');
+const { getKSTYearStart, getKSTIsoWeekday, getKSTHours, daysAgo } = require('../utils/timeUtils');
+const { STAT_TYPES } = require('../services/achievement/definitions');
 
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
@@ -33,9 +30,7 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
       where: { accountId },
       raw: true,
     });
-    const until = latestGameCreation
-      ? latestGameCreation.gameCreation
-      : getKSTYearStart();
+    const until = latestGameCreation ? latestGameCreation.gameCreation : getKSTYearStart();
     const matches = await getCustomGames(tokenId, accountId, until);
     const matchIds = matches.map((elem) => elem.gameId);
     const matchIdsInDB = (
@@ -48,16 +43,13 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
     let newLatestGameCreation = 0;
     for (const simpleMatchData of matches) {
       newLatestGameCreation =
-        simpleMatchData.gameCreation >= newLatestGameCreation
-          ? simpleMatchData.gameCreation
-          : newLatestGameCreation;
+        simpleMatchData.gameCreation >= newLatestGameCreation ? simpleMatchData.gameCreation : newLatestGameCreation;
 
       const gameId = simpleMatchData.gameId;
       if (matchIdsInDB.find((elem) => elem === gameId)) continue;
 
       const matchData = await getMatchData(tokenId, gameId);
-      if (!matchData || matchData.team1.length + matchData.team2.length !== 10)
-        continue;
+      if (!matchData || matchData.team1.length + matchData.team2.length !== 10) continue;
 
       await models.match.create(matchData);
     }
@@ -93,19 +85,13 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
   };
 
   let team1RatingMap = {};
-  for (const summonerName of team1)
-    team1RatingMap[summonerName] = await getRating(summonerName);
+  for (const summonerName of team1) team1RatingMap[summonerName] = await getRating(summonerName);
 
   let team2RatingMap = {};
-  for (const summonerName of team2)
-    team2RatingMap[summonerName] = await getRating(summonerName);
+  for (const summonerName of team2) team2RatingMap[summonerName] = await getRating(summonerName);
 
-  const team1Rating =
-    Object.values(team1RatingMap).reduce((total, current) => total + current) /
-    5;
-  const team2Rating =
-    Object.values(team2RatingMap).reduce((total, current) => total + current) /
-    5;
+  const team1Rating = Object.values(team1RatingMap).reduce((total, current) => total + current) / 5;
+  const team2Rating = Object.values(team2RatingMap).reduce((total, current) => total + current) / 5;
   const winRate = ratingCalculator.expectedScore(team1Rating, team2Rating);
   return {
     result: {
@@ -119,14 +105,7 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
   };
 };
 
-module.exports.generateMatch = async (
-  groupName,
-  team1Names,
-  team2Names,
-  userPool,
-  matchCount,
-  discordIdMap = {},
-) => {
+module.exports.generateMatch = async (groupName, team1Names, team2Names, userPool, matchCount, discordIdMap = {}) => {
   try {
     if (team1Names.length + team2Names.length + userPool.length !== 10) {
       throw '자동매칭에 필요한 유저 수는 10명입니다.';
@@ -219,12 +198,7 @@ module.exports.generateMatch = async (
     let makerUserPool = [];
     await applyTeam(makerUserPool, userPool);
 
-    const matchingGames = matchMaker.matchMake(
-      preOrganizationTeam1,
-      preOrganizationTeam2,
-      makerUserPool,
-      matchCount,
-    );
+    const matchingGames = matchMaker.matchMake(preOrganizationTeam1, preOrganizationTeam2, makerUserPool, matchCount);
     if (matchingGames == null) {
       logger.error('invalid params');
       throw 'invalid params';
@@ -257,8 +231,8 @@ module.exports.calculateRating = async (groupName) => {
 
   const matches = await models.match.findAll({
     where: {
-      groupId: {[Op.eq]: group.id},
-      winTeam: {[Op.ne]: null},
+      groupId: { [Op.eq]: group.id },
+      winTeam: { [Op.ne]: null },
       // gameCreation: {
       //   [Op.gte]: usableMatchDate
       // }
@@ -269,7 +243,7 @@ module.exports.calculateRating = async (groupName) => {
 
   const groupUsers = await models.user.findAll({
     where: {
-      groupId: group.id
+      groupId: group.id,
     },
   });
 
@@ -334,17 +308,11 @@ module.exports.calculateRating = async (groupName) => {
 
     let team1Delta, team2Delta;
     if (match.winTeam == 1) {
-      team1Delta =
-        ratingCalculator.newRatingIfWon(team1Rating, team2Rating) - team1Rating;
-      team2Delta =
-        ratingCalculator.newRatingIfLost(team2Rating, team1Rating) -
-        team2Rating;
+      team1Delta = ratingCalculator.newRatingIfWon(team1Rating, team2Rating) - team1Rating;
+      team2Delta = ratingCalculator.newRatingIfLost(team2Rating, team1Rating) - team2Rating;
     } else {
-      team1Delta =
-        ratingCalculator.newRatingIfLost(team1Rating, team2Rating) -
-        team1Rating;
-      team2Delta =
-        ratingCalculator.newRatingIfWon(team2Rating, team1Rating) - team2Rating;
+      team1Delta = ratingCalculator.newRatingIfLost(team1Rating, team2Rating) - team1Rating;
+      team2Delta = ratingCalculator.newRatingIfWon(team2Rating, team1Rating) - team2Rating;
     }
 
     apply(team1, match.winTeam == 1, team1Delta, match.createdAt);
@@ -376,7 +344,7 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   const hasSnapshot = team1Data[0] && team1Data[0].length >= 3;
 
   // 매치 참가자들의 유저 정보 조회
-  const allPuuids = [...team1Data.map(p => p[0]), ...team2Data.map(p => p[0])];
+  const allPuuids = [...team1Data.map((p) => p[0]), ...team2Data.map((p) => p[0])];
   const users = await models.user.findAll({
     where: {
       groupId: matchData.groupId,
@@ -394,7 +362,10 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     let total = 0;
     let count = 0;
     for (const [puuid, , rating] of teamData) {
-      if (userMap[puuid]) { total += rating; count++; }
+      if (userMap[puuid]) {
+        total += rating;
+        count++;
+      }
     }
     return count > 0 ? total / count : 500;
   };
@@ -491,6 +462,12 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     await matchData.update({ team1: team1WithRating, team2: team2WithRating });
   }
 
+  // 언더독/야식 판별
+  const team1WinRate = ratingCalculator.expectedScore(team1AvgRating, team2AvgRating);
+  const isTeam1Underdog = matchData.winTeam === 1 && team1WinRate <= 0.45;
+  const isTeam2Underdog = matchData.winTeam === 2 && 1 - team1WinRate <= 0.45;
+  const isLateNight = getKSTHours(matchData.gameCreation || matchData.createdAt) < 5;
+
   // 각 유저 업데이트
   const now = new Date();
   const matchDate = matchData.createdAt;
@@ -522,6 +499,27 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
       if (!user.latestMatchDate || matchDate > user.latestMatchDate) updateData.latestMatchDate = matchDate;
       await user.update(updateData);
     }
+  }
+
+  // 업적 통계 업데이트 (언더독/야식)
+  if (isTeam1Underdog || isTeam2Underdog || isLateNight) {
+    const upsertStat = (puuid, statType) =>
+      models.sequelize.query(
+        `INSERT INTO user_achievement_stats (puuid, groupId, statType, value, createdAt, updatedAt)
+         VALUES (:puuid, :groupId, :statType, 1, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE value = value + 1, updatedAt = NOW()`,
+        { replacements: { puuid, groupId: matchData.groupId, statType } },
+      );
+
+    const statsUpdates = [];
+    for (const [puuid] of [...team1Data, ...team2Data]) {
+      if (!userMap[puuid]) continue;
+      const inTeam1 = team1Data.some((p) => p[0] === puuid);
+      const isUnderdog = inTeam1 ? isTeam1Underdog : isTeam2Underdog;
+      if (isUnderdog) statsUpdates.push(upsertStat(puuid, STAT_TYPES.UNDERDOG_WINS));
+      if (isLateNight) statsUpdates.push(upsertStat(puuid, STAT_TYPES.LATE_NIGHT_GAMES));
+    }
+    await Promise.all(statsUpdates);
   }
 
   // 업적 체크 (새 결과 적용 시에만)
@@ -556,10 +554,7 @@ module.exports.cancelMatch = async (groupId, matchId) => {
     return { status: 400, result: { error: '이미 취소된 매치입니다.' } };
   }
 
-  await Promise.all([
-    honorController.deleteVotesByGameId(matchId),
-    matchData.update({ winTeam: null }),
-  ]);
+  await Promise.all([honorController.deleteVotesByGameId(matchId), matchData.update({ winTeam: null })]);
   await module.exports.applyMatchResult(matchId, previousWinTeam);
 
   return { status: 200, result: { gameId: matchId } };
@@ -606,21 +601,23 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     where: {
       groupId: group.id,
       latestMatchDate: {
-        [Op.gte]: daysAgo(60)
-      }
+        [Op.gte]: daysAgo(60),
+      },
     },
   });
 
   const puuIds = users.map((elem) => elem.puuid);
 
-  const matches = await models.match.findAll({ where: {
-    groupId: group.id,
-    winTeam: {[Op.ne]: null},
-    createdAt: {
-      [Op.gte]: from,
-      [Op.lte]: to,
-    }
-  }});
+  const matches = await models.match.findAll({
+    where: {
+      groupId: group.id,
+      winTeam: { [Op.ne]: null },
+      createdAt: {
+        [Op.gte]: from,
+        [Op.lte]: to,
+      },
+    },
+  });
 
   const nameCache = {};
 
@@ -632,8 +629,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
       const puuid = participant[0];
       if (nameCache[puuid] == null) {
         const summoner = await models.summoner.findOne({ where: { puuid } });
-        if (!summoner)
-          continue;
+        if (!summoner) continue;
 
         nameCache[puuid] = summoner.name;
       }
@@ -648,26 +644,27 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     }
   }
 
-  const riotMatches = await models.riot_match.findAll({ where: {
-    gameCreation: {
-      [Op.gte]: from,
-      [Op.lte]: to,
-    }
-  }});
+  const riotMatches = await models.riot_match.findAll({
+    where: {
+      gameCreation: {
+        [Op.gte]: from,
+        [Op.lte]: to,
+      },
+    },
+  });
 
   const riotMatchSet = {};
   const riotMatchPlayCountMap = {};
   for (let match of riotMatches) {
     const filtered = match.participants.filter((elem) => puuIds.includes(elem));
-    if (filtered.length <= 1)
-      continue;
+    if (filtered.length <= 1) continue;
 
     for (let puuId of filtered) {
       if (nameCache[puuId] == null) {
         const summoner = await models.summoner.findOne({ where: { puuId } });
         nameCache[puuId] = summoner.name;
       }
-      
+
       const name = nameCache[puuId];
       if (riotMatchSet[name] == null) {
         riotMatchSet[name] = [];
@@ -686,8 +683,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
   let result = [];
   for (let user of users) {
     const name = nameCache[user.puuid];
-    if (!name)
-      continue;
+    if (!name) continue;
 
     const riotMatchPlayCount = riotMatchPlayCountMap[name] || 0;
     const matchPlayCount = matchPlayCountMap[name] || 0;
@@ -705,7 +701,7 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
   result = result.sort((a, b) => b.point - a.point);
 
   const completedTableConfig = {
-    border: table.getBorderCharacters("ramac"),
+    border: table.getBorderCharacters('ramac'),
     columns: {
       0: { alignment: 'center', width: 5 },
       1: { alignment: 'center', width: 20 },
@@ -713,42 +709,49 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
       3: { alignment: 'center', width: 10 },
       4: { alignment: 'center', width: 10 },
       5: { alignment: 'center', width: 10 },
-    }
-  }
+    },
+  };
 
   const matchCountCondition = 4;
   const riotMatchCountCondition = 8;
 
   const completedTableData = [['No', '닉네임', '내전', '롤데인', '합산']];
   let rank = 1;
-  for (let elem of result.filter(elem => elem.matchPlayCount >= matchCountCondition || elem.riotMatchPlayCount >= riotMatchCountCondition)) {
+  for (let elem of result.filter(
+    (elem) => elem.matchPlayCount >= matchCountCondition || elem.riotMatchPlayCount >= riotMatchCountCondition,
+  )) {
     completedTableData.push([rank++, elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
   }
 
   const uncompletedTableConfig = {
-    border: table.getBorderCharacters("ramac"),
+    border: table.getBorderCharacters('ramac'),
     columns: {
       0: { alignment: 'center', width: 20 },
       1: { alignment: 'center', width: 10 },
       2: { alignment: 'center', width: 10 },
       3: { alignment: 'center', width: 10 },
       4: { alignment: 'center', width: 10 },
-    }
-  }
+    },
+  };
 
   const uncompletedTableData = [['닉네임', '내전', '롤데인', '합산']];
-  for (let elem of result.filter(elem => elem.matchPlayCount < matchCountCondition && elem.riotMatchPlayCount < riotMatchCountCondition)) {
+  for (let elem of result.filter(
+    (elem) => elem.matchPlayCount < matchCountCondition && elem.riotMatchPlayCount < riotMatchCountCondition,
+  )) {
     uncompletedTableData.push([elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
   }
 
-  let msg = `<pre><h1>달성자</h1>${table.table(completedTableData, completedTableConfig)}<br><h1>미달성자</h1>${table.table(uncompletedTableData, uncompletedTableConfig)}</pre>`
+  let msg = `<pre><h1>달성자</h1>${table.table(
+    completedTableData,
+    completedTableConfig,
+  )}<br><h1>미달성자</h1>${table.table(uncompletedTableData, uncompletedTableConfig)}</pre>`;
   msg = msg.replaceAll('\n', '<br>');
 
   return {
     result: msg,
     status: 200,
-  }
-}
+  };
+};
 
 module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, search = null) => {
   const group = await models.group.findByPk(groupId);
@@ -764,10 +767,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
 
   if (search) {
     const likeSearch = `%${search}%`;
-    whereCondition[Op.or] = [
-      { team1: { [Op.like]: likeSearch } },
-      { team2: { [Op.like]: likeSearch } },
-    ];
+    whereCondition[Op.or] = [{ team1: { [Op.like]: likeSearch } }, { team2: { [Op.like]: likeSearch } }];
   }
 
   // 전체 매치 수 조회
@@ -839,7 +839,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       const buildTeamFallback = async (teamData) => {
         const players = [];
         for (const [puuid, name] of teamData) {
-          const resolvedName = name || await getSummonerName(puuid);
+          const resolvedName = name || (await getSummonerName(puuid));
           players.push({ puuid, name: resolvedName, rating: null, tier: null });
         }
         return { players, avgRating: null };
