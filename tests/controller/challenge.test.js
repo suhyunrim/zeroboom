@@ -211,11 +211,16 @@ describe('getLeaderboard', () => {
     // 두 번째 user.findAll: 부캐 조회 → 없음
     mockModels.user.findAll.mockResolvedValueOnce([]);
 
-    // detail에서 matchId 목록 반환
+    // detail에서 matchId 목록 반환 (getDataValue로 participantPuuids 접근)
+    const makeDetail = (matchId, gameCreation, puuids) => ({
+      matchId,
+      gameCreation,
+      getDataValue: (key) => key === 'participantPuuids' ? puuids : undefined,
+    });
     const detailRows = [
-      ...Array(10).fill(null).map((_, i) => ({ matchId: `m_a${i}`, gameCreation: new Date(`2026-04-${i + 1}`) })),
-      ...Array(10).fill(null).map((_, i) => ({ matchId: `m_b${i}`, gameCreation: new Date(`2026-04-${i + 1}`) })),
-      ...Array(3).fill(null).map((_, i) => ({ matchId: `m_c${i}`, gameCreation: new Date(`2026-04-${i + 1}`) })),
+      ...Array(10).fill(null).map((_, i) => makeDetail(`m_a${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
+      ...Array(10).fill(null).map((_, i) => makeDetail(`m_b${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
+      ...Array(3).fill(null).map((_, i) => makeDetail(`m_c${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
     ];
     mockModels.challenge_match_detail.findAll.mockResolvedValue(detailRows);
 
