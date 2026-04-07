@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const controller = require('../../controller/match');
+const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
 const route = Router();
 
@@ -15,6 +16,13 @@ module.exports = (app) => {
       Number(limit) || 20,
       search || null,
     );
+    return res.status(result.status).json(result.result);
+  });
+
+  route.post('/:groupId/duplicate', verifyToken, requireGroupAdmin, async (req, res) => {
+    const { groupId } = req.params;
+    const { matchId, date, winTeam } = req.body;
+    const result = await controller.duplicateMatch(Number(groupId), Number(matchId), date, Number(winTeam));
     return res.status(result.status).json(result.result);
   });
 };

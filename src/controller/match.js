@@ -526,6 +526,37 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   return { result: 'success', status: 200 };
 };
 
+module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
+  if (!matchId || !date || ![1, 2].includes(winTeam)) {
+    return { status: 400, result: { error: 'matchId, date, winTeam(1 또는 2)은 필수입니다.' } };
+  }
+
+  const originalMatch = await models.match.findOne({
+    where: { gameId: matchId, groupId },
+  });
+
+  if (!originalMatch) {
+    return { status: 404, result: { error: '해당 매치를 찾을 수 없습니다.' } };
+  }
+
+  const team1 = originalMatch.team1.map(([puuid, name]) => [puuid, name]);
+  const team2 = originalMatch.team2.map(([puuid, name]) => [puuid, name]);
+  const matchDate = new Date(date);
+
+  const newMatch = await models.match.create({
+    groupId,
+    team1,
+    team2,
+    winTeam,
+    gameCreation: matchDate,
+    createdAt: matchDate,
+  });
+
+  await module.exports.applyMatchResult(newMatch.gameId);
+
+  return { status: 200, result: { gameId: newMatch.gameId } };
+};
+
 module.exports.getMatchHistory = async (groupName, from, to) => {
   if (!groupName) return { status: 900, result: 'invalid group name' };
 
