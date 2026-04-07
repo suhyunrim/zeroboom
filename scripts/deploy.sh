@@ -39,6 +39,9 @@ else
   deploy_live
 fi
 
+# 컨테이너 IP 변경에 대응하여 nginx DNS 캐시 갱신
+docker restart zeroboom-nginx
+
 # 안 쓰는 이미지 정리
 echo ""
 echo "이미지 정리..."
