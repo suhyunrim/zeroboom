@@ -46,6 +46,15 @@ const requireGroupAdmin = async (req, res, next) => {
       return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
     }
 
+    // 서버 소유자는 역할과 무관하게 모든 권한 보유
+    const guildRes = await axios.get(
+      `${DISCORD_API}/guilds/${group.discordGuildId}`,
+      { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
+    );
+    if (guildRes.data.owner_id === discordId) {
+      return next();
+    }
+
     const memberRes = await axios.get(
       `${DISCORD_API}/guilds/${group.discordGuildId}/members/${discordId}`,
       { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
