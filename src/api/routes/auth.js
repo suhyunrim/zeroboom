@@ -72,7 +72,7 @@ module.exports = (app) => {
       const ADMINISTRATOR = 0x8;
       const guildPermMap = {};
       userGuilds.forEach((g) => {
-        guildPermMap[g.id] = (Number(g.permissions) & ADMINISTRATOR) === ADMINISTRATOR;
+        guildPermMap[g.id] = g.owner || (Number(g.permissions) & ADMINISTRATOR) === ADMINISTRATOR;
       });
 
       // 4. discordId로 유저 정보 조회 → puuid 확인
