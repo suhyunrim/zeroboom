@@ -5,44 +5,6 @@ const { getTierName } = require('../../utils/tierUtils');
 const { logger } = require('../../loaders/logger');
 
 /**
- * 전체 유저의 연승/연패를 배치 계산 (매치 1회 로드)
- */
-async function getBatchStreaks(puuids, groupId) {
-  const matches = await models.match.findAll({
-    where: { groupId, winTeam: { [Op.ne]: null } },
-    order: [['createdAt', 'DESC']],
-  });
-
-  const result = {};
-  for (const puuid of puuids) {
-    let winStreak = 0;
-    let loseStreak = 0;
-
-    for (const match of matches) {
-      const inTeam1 = match.team1.some((p) => p[0] === puuid);
-      const inTeam2 = match.team2.some((p) => p[0] === puuid);
-      if (!inTeam1 && !inTeam2) continue;
-
-      const won = (inTeam1 && match.winTeam === 1) || (inTeam2 && match.winTeam === 2);
-
-      if (winStreak === 0 && loseStreak === 0) {
-        if (won) winStreak = 1;
-        else loseStreak = 1;
-      } else if (winStreak > 0 && won) {
-        winStreak += 1;
-      } else if (loseStreak > 0 && !won) {
-        loseStreak += 1;
-      } else {
-        break;
-      }
-    }
-
-    result[puuid] = { winStreak, loseStreak };
-  }
-  return result;
-}
-
-/**
  * 보이스 체류 시간 배치 조회 (puuid → 총 초)
  */
 async function getVoiceDurations(users, groupId) {
@@ -106,7 +68,7 @@ async function getMedalCounts(puuids, groupId) {
 /**
  * 업적 체크 로직
  */
-function checkAchievement(def, user, streaks, extra) {
+function checkAchievement(def, user, extra) {
   const { category, goal } = def;
   if (category === 'match') {
     return user.win >= goal;
@@ -115,8 +77,8 @@ function checkAchievement(def, user, streaks, extra) {
     return user.win + user.lose >= goal;
   }
   if (category === 'streak') {
-    if (def.id.startsWith('WIN_STREAK')) return streaks.winStreak >= goal;
-    if (def.id.startsWith('LOSE_STREAK')) return streaks.loseStreak >= goal;
+    if (def.id.startsWith('WIN_STREAK')) return (extra.bestWinStreak || 0) >= goal;
+    if (def.id.startsWith('LOSE_STREAK')) return (extra.bestLoseStreak || 0) >= goal;
   }
   if (category === 'tier') {
     const rating = user.defaultRating + user.additionalRating;
@@ -166,18 +128,27 @@ async function processAchievements(trigger, context) {
     const existingSet = new Set(existing.map((e) => `${e.puuid}:${e.achievementId}`));
 
     // 카테고리별 데이터 병렬 조회
-    const needsStreaks = defs.some((d) => d.category === 'streak');
     const needsVoice = defs.some((d) => d.category === 'voice');
     const needsChallenge = defs.some((d) => d.category === 'challenge');
-    const needsStats = defs.some((d) => d.category === 'underdog' || d.category === 'late_night');
+    const needsStats = defs.some(
+      (d) => d.category === 'streak' || d.category === 'underdog' || d.category === 'late_night',
+    );
 
-    const [streaksMap, voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
-      needsStreaks ? getBatchStreaks(puuids, groupId) : {},
+    const [voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
       needsVoice ? getVoiceDurations(users, groupId) : {},
       needsChallenge ? getMedalCounts(puuids, groupId) : {},
       needsStats
         ? models.user_achievement_stats.findAll({
-            where: { groupId, puuid: puuids, statType: [STAT_TYPES.UNDERDOG_WINS, STAT_TYPES.LATE_NIGHT_GAMES] },
+            where: {
+              groupId,
+              puuid: puuids,
+              statType: [
+                STAT_TYPES.UNDERDOG_WINS,
+                STAT_TYPES.LATE_NIGHT_GAMES,
+                STAT_TYPES.BEST_WIN_STREAK,
+                STAT_TYPES.BEST_LOSE_STREAK,
+              ],
+            },
             raw: true,
           })
         : [],
@@ -196,17 +167,18 @@ async function processAchievements(trigger, context) {
       const unchecked = defs.filter((d) => !existingSet.has(`${user.puuid}:${d.id}`));
       if (unchecked.length === 0) continue;
 
-      const streaks = streaksMap[user.puuid] || { winStreak: 0, loseStreak: 0 };
       const userStats = statsMap[user.puuid] || {};
       const extra = {
         voiceDuration: voiceDurationMap[user.puuid] || 0,
         medalCounts: medalCountsMap[user.puuid] || { gold: 0, silver: 0, bronze: 0 },
         underdogWins: userStats[STAT_TYPES.UNDERDOG_WINS] || 0,
         lateNightGames: userStats[STAT_TYPES.LATE_NIGHT_GAMES] || 0,
+        bestWinStreak: userStats[STAT_TYPES.BEST_WIN_STREAK] || 0,
+        bestLoseStreak: userStats[STAT_TYPES.BEST_LOSE_STREAK] || 0,
       };
 
       for (const def of unchecked) {
-        if (checkAchievement(def, user, streaks, extra)) {
+        if (checkAchievement(def, user, extra)) {
           newUnlocks.push({
             groupId,
             puuid: user.puuid,

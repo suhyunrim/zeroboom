@@ -501,23 +501,64 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     }
   }
 
-  // 업적 통계 업데이트 (언더독/야식)
-  if (isTeam1Underdog || isTeam2Underdog || isLateNight) {
-    const upsertStat = (puuid, statType) =>
+  // 업적 통계 업데이트 (언더독/야식/연승연패)
+  {
+    const incrementStat = (puuid, statType) =>
       models.sequelize.query(
         `INSERT INTO user_achievement_stats (puuid, groupId, statType, value, createdAt, updatedAt)
          VALUES (:puuid, :groupId, :statType, 1, NOW(), NOW())
          ON DUPLICATE KEY UPDATE value = value + 1, updatedAt = NOW()`,
         { replacements: { puuid, groupId: matchData.groupId, statType } },
       );
+    const updateBestStat = (puuid, statType, value) =>
+      models.sequelize.query(
+        `INSERT INTO user_achievement_stats (puuid, groupId, statType, value, createdAt, updatedAt)
+         VALUES (:puuid, :groupId, :statType, :value, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE value = GREATEST(value, :value), updatedAt = NOW()`,
+        { replacements: { puuid, groupId: matchData.groupId, statType, value } },
+      );
+
+    // 현재 연승/연패 계산 (최근 매치만 조회)
+    const recentMatches = await models.match.findAll({
+      where: {
+        groupId: matchData.groupId,
+        winTeam: { [Op.ne]: null },
+      },
+      order: [['createdAt', 'DESC']],
+      limit: 30,
+    });
 
     const statsUpdates = [];
     for (const [puuid] of [...team1Data, ...team2Data]) {
       if (!userMap[puuid]) continue;
       const inTeam1 = team1Data.some((p) => p[0] === puuid);
+
+      // 언더독/야식
       const isUnderdog = inTeam1 ? isTeam1Underdog : isTeam2Underdog;
-      if (isUnderdog) statsUpdates.push(upsertStat(puuid, STAT_TYPES.UNDERDOG_WINS));
-      if (isLateNight) statsUpdates.push(upsertStat(puuid, STAT_TYPES.LATE_NIGHT_GAMES));
+      if (isUnderdog) statsUpdates.push(incrementStat(puuid, STAT_TYPES.UNDERDOG_WINS));
+      if (isLateNight) statsUpdates.push(incrementStat(puuid, STAT_TYPES.LATE_NIGHT_GAMES));
+
+      // 현재 연승/연패 계산
+      let winStreak = 0;
+      let loseStreak = 0;
+      for (const m of recentMatches) {
+        const inT1 = m.team1.some((p) => p[0] === puuid);
+        const inT2 = m.team2.some((p) => p[0] === puuid);
+        if (!inT1 && !inT2) continue;
+        const won = (inT1 && m.winTeam === 1) || (inT2 && m.winTeam === 2);
+        if (winStreak === 0 && loseStreak === 0) {
+          if (won) winStreak = 1;
+          else loseStreak = 1;
+        } else if (winStreak > 0 && won) {
+          winStreak += 1;
+        } else if (loseStreak > 0 && !won) {
+          loseStreak += 1;
+        } else {
+          break;
+        }
+      }
+      if (winStreak > 0) statsUpdates.push(updateBestStat(puuid, STAT_TYPES.BEST_WIN_STREAK, winStreak));
+      if (loseStreak > 0) statsUpdates.push(updateBestStat(puuid, STAT_TYPES.BEST_LOSE_STREAK, loseStreak));
     }
     await Promise.all(statsUpdates);
   }

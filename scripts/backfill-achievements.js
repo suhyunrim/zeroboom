@@ -24,14 +24,14 @@ async function backfillStats(groupId, users) {
     userMap[u.puuid] = u;
   });
 
-  const stats = {}; // puuid → { underdog_wins, late_night_games }
+  const stats = {}; // puuid → { underdog_wins, late_night_games, best_win_streak, best_lose_streak }
+  const streakState = {}; // puuid → { currentWin, currentLose }
 
   for (const match of matches) {
     const team1Data = match.team1;
     const team2Data = match.team2;
     const hasSnapshot = team1Data[0] && team1Data[0].length >= 3;
 
-    // 팀 평균 레이팅 계산
     let team1Avg = 500;
     let team2Avg = 500;
     if (hasSnapshot) {
@@ -49,7 +49,9 @@ async function backfillStats(groupId, users) {
     const allPuuids = [...team1Data.map((p) => p[0]), ...team2Data.map((p) => p[0])];
     for (const puuid of allPuuids) {
       if (!userMap[puuid]) continue;
-      if (!stats[puuid]) stats[puuid] = { underdog_wins: 0, late_night_games: 0 };
+      if (!stats[puuid])
+        stats[puuid] = { underdog_wins: 0, late_night_games: 0, best_win_streak: 0, best_lose_streak: 0 };
+      if (!streakState[puuid]) streakState[puuid] = { currentWin: 0, currentLose: 0 };
 
       const inTeam1 = team1Data.some((p) => p[0] === puuid);
       if ((inTeam1 && isTeam1Underdog) || (!inTeam1 && isTeam2Underdog)) {
@@ -57,6 +59,18 @@ async function backfillStats(groupId, users) {
       }
       if (isLateNight) {
         stats[puuid].late_night_games += 1;
+      }
+
+      const won = (inTeam1 && match.winTeam === 1) || (!inTeam1 && match.winTeam === 2);
+      const ss = streakState[puuid];
+      if (won) {
+        ss.currentWin += 1;
+        ss.currentLose = 0;
+        if (ss.currentWin > stats[puuid].best_win_streak) stats[puuid].best_win_streak = ss.currentWin;
+      } else {
+        ss.currentLose += 1;
+        ss.currentWin = 0;
+        if (ss.currentLose > stats[puuid].best_lose_streak) stats[puuid].best_lose_streak = ss.currentLose;
       }
     }
   }

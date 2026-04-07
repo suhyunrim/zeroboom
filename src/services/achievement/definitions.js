@@ -310,6 +310,8 @@ const definitions = [
 const STAT_TYPES = {
   UNDERDOG_WINS: 'underdog_wins',
   LATE_NIGHT_GAMES: 'late_night_games',
+  BEST_WIN_STREAK: 'best_win_streak',
+  BEST_LOSE_STREAK: 'best_lose_streak',
 };
 
 module.exports = { definitions, TIERS, STAT_TYPES, getTierName };
