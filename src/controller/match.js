@@ -524,7 +524,18 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     }
   }
 
-  return { result: 'success', status: 200 };
+  // 업적 체크 (새 결과 적용 시에만)
+  let newAchievements = [];
+  if (matchData.winTeam) {
+    const { processAchievements } = require('../services/achievement/engine');
+    newAchievements = await processAchievements('match_result', {
+      groupId: matchData.groupId,
+      matchData,
+      userMap,
+    });
+  }
+
+  return { result: 'success', status: 200, newAchievements };
 };
 
 module.exports.cancelMatch = async (groupId, matchId) => {

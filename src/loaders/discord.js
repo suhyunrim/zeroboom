@@ -600,8 +600,15 @@ module.exports = async (app) => {
         const previousWinTeam = matchData.winTeam; // 이전 승리팀 저장 (되돌리기용)
         const winTeam = Number(split[2]);
         await matchData.update({ winTeam });
-        await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
+        const matchResult = await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
+
+        // 업적 달성 알림
+        if (matchResult.newAchievements?.length > 0) {
+          const { sendAchievementNotification } = require('../services/achievement/notifier');
+          sendAchievementNotification(interaction.channel, matchResult.newAchievements, matchData.groupId)
+            .catch((e) => logger.error('업적 알림 오류:', e));
+        }
 
         // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
         const changeButton = new ActionRowBuilder()

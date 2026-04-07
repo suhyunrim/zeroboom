@@ -8,6 +8,7 @@ const auth = require('./routes/auth');
 const blacklist = require('./routes/blacklist');
 const challenge = require('./routes/challenge');
 const match = require('./routes/match');
+const achievement = require('./routes/achievement');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -25,6 +26,7 @@ module.exports = () => {
   auth(app);
   challenge(app);
   match(app);
+  achievement(app);
 
   // v2
   groupsV2(app);
