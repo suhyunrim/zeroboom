@@ -19,6 +19,13 @@ module.exports = (app) => {
     return res.status(result.status).json(result.result);
   });
 
+  route.post('/:groupId/cancel', verifyToken, requireGroupAdmin, async (req, res) => {
+    const { groupId } = req.params;
+    const { matchId } = req.body;
+    const result = await controller.cancelMatch(Number(groupId), Number(matchId));
+    return res.status(result.status).json(result.result);
+  });
+
   route.post('/:groupId/duplicate', verifyToken, requireGroupAdmin, async (req, res) => {
     const { groupId } = req.params;
     const { matchId, date, winTeam } = req.body;

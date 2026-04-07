@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const table = require('table');
 
 const summonerController = require('../controller/summoner');
+const honorController = require('../controller/honor');
 
 const elo = require('arpad');
 const {
@@ -524,6 +525,33 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   }
 
   return { result: 'success', status: 200 };
+};
+
+module.exports.cancelMatch = async (groupId, matchId) => {
+  if (!matchId) {
+    return { status: 400, result: { error: 'matchId는 필수입니다.' } };
+  }
+
+  const matchData = await models.match.findOne({
+    where: { gameId: matchId, groupId },
+  });
+
+  if (!matchData) {
+    return { status: 404, result: { error: '해당 매치를 찾을 수 없습니다.' } };
+  }
+
+  const previousWinTeam = matchData.winTeam;
+  if (!previousWinTeam) {
+    return { status: 400, result: { error: '이미 취소된 매치입니다.' } };
+  }
+
+  await Promise.all([
+    honorController.deleteVotesByGameId(matchId),
+    matchData.update({ winTeam: null }),
+  ]);
+  await module.exports.applyMatchResult(matchId, previousWinTeam);
+
+  return { status: 200, result: { gameId: matchId } };
 };
 
 module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
