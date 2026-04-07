@@ -26,14 +26,27 @@ module.exports = (app) => {
       });
 
       const puuids = users.map((u) => u.puuid);
-      const summoners = await models.summoner.findAll({
-        where: { puuid: puuids },
-        attributes: ['puuid', 'name'],
-      });
+      const discordIds = users.map((u) => u.discordId).filter(Boolean);
+      const [summoners, group] = await Promise.all([
+        models.summoner.findAll({
+          where: { puuid: puuids },
+          attributes: ['puuid', 'name'],
+        }),
+        models.group.findByPk(Number(groupId), { attributes: ['discordGuildId'] }),
+      ]);
       const nameMap = summoners.reduce((acc, s) => {
         acc[s.puuid] = s.name;
         return acc;
       }, {});
+
+      const voiceMap = {};
+      if (group && group.discordGuildId && discordIds.length > 0) {
+        const activities = await models.voice_activity.findAll({
+          where: { guildId: group.discordGuildId, discordId: discordIds },
+          attributes: ['discordId', 'lastJoinedAt'],
+        });
+        activities.forEach((a) => { voiceMap[a.discordId] = a.lastJoinedAt; });
+      }
 
       const result = users.map((u) => ({
         puuid: u.puuid,
@@ -46,6 +59,7 @@ module.exports = (app) => {
         additionalRating: u.additionalRating,
         rating: u.defaultRating + u.additionalRating,
         latestMatchDate: u.latestMatchDate,
+        lastVoiceJoinedAt: voiceMap[u.discordId] || null,
         createdAt: u.createdAt,
       }));
 

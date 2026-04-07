@@ -955,7 +955,32 @@ module.exports = async (app) => {
 
   // 임시 음성 채널: 생성기 채널 접속 시 임시 채널 생성, 퇴장 시 삭제
   client.on('voiceStateUpdate', async (oldState, newState) => {
+    if (oldState.channelId === newState.channelId) return;
+
     try {
+      const memberId = newState.member?.id || oldState.member?.id;
+      const guildId = newState.guild?.id || oldState.guild?.id;
+      if (memberId && guildId) {
+        (async () => {
+          if (oldState.channelId) {
+            await models.voice_activity.update(
+              {
+                totalDuration: models.sequelize.literal('totalDuration + GREATEST(TIMESTAMPDIFF(SECOND, lastJoinedAt, NOW()), 0)'),
+                lastLeftAt: new Date(),
+              },
+              { where: { discordId: memberId, guildId, [Op.or]: [{ lastLeftAt: null }, { lastLeftAt: { [Op.lt]: models.sequelize.col('lastJoinedAt') } }] } },
+            );
+          }
+          if (newState.channelId) {
+            await models.voice_activity.upsert({
+              discordId: memberId,
+              guildId,
+              lastJoinedAt: new Date(),
+            });
+          }
+        })().catch((e) => logger.error('보이스 활동 기록 오류:', e));
+      }
+
       // 생성기 채널에 접속한 경우 → 임시 채널 생성
       if (newState.channelId) {
         const generator = await tempVoiceController.findGenerator(newState.channelId);
