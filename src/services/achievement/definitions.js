@@ -254,13 +254,13 @@ const challengeMedals = [
 // 언더독 승리 (예상 승률 45% 이하에서 승리)
 const underdogGoals = {
   BRONZE: 1,
-  SILVER: 3,
-  GOLD: 5,
-  PLATINUM: 10,
-  EMERALD: 20,
-  DIAMOND: 30,
-  MASTER: 50,
-  GRANDMASTER: 100,
+  SILVER: 2,
+  GOLD: 3,
+  PLATINUM: 4,
+  EMERALD: 5,
+  DIAMOND: 6,
+  MASTER: 8,
+  GRANDMASTER: 10,
 };
 const underdog = Object.entries(underdogGoals).map(([tier, goal]) => ({
   id: `UNDERDOG_${tier}`,
@@ -287,7 +287,7 @@ const lateNightGoals = {
 const lateNight = Object.entries(lateNightGoals).map(([tier, goal]) => ({
   id: `LATE_NIGHT_${tier}`,
   name: `야식 ${goal}판`,
-  description: `심야 시간대(00~05시)에 ${goal}판을 플레이하세요`,
+  description: `심야 시간대에 ${goal}판을 플레이하세요`,
   emoji: '🌙',
   tier,
   category: 'late_night',
