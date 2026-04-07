@@ -74,7 +74,7 @@ function checkAchievement(def, user, extra) {
     return user.win >= goal;
   }
   if (category === 'games') {
-    return user.win + user.lose >= goal;
+    return user.win + user.lose + (extra.externalGames || 0) >= goal;
   }
   if (category === 'streak') {
     if (def.id.startsWith('WIN_STREAK')) return (extra.bestWinStreak || 0) >= goal;
@@ -128,13 +128,21 @@ async function processAchievements(trigger, context) {
     const existingSet = new Set(existing.map((e) => `${e.puuid}:${e.achievementId}`));
 
     // 카테고리별 데이터 병렬 조회
+    const needsGames = defs.some((d) => d.category === 'games');
     const needsVoice = defs.some((d) => d.category === 'voice');
     const needsChallenge = defs.some((d) => d.category === 'challenge');
     const needsStats = defs.some(
       (d) => d.category === 'streak' || d.category === 'underdog' || d.category === 'late_night',
     );
 
-    const [voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
+    const [externalRecords, voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
+      needsGames
+        ? models.externalRecord.findAll({
+            where: { groupId, puuid: puuids },
+            attributes: ['puuid', 'win', 'lose'],
+            raw: true,
+          })
+        : [],
       needsVoice ? getVoiceDurations(users, groupId) : {},
       needsChallenge ? getMedalCounts(puuids, groupId) : {},
       needsStats
@@ -154,6 +162,11 @@ async function processAchievements(trigger, context) {
         : [],
     ]);
 
+    const externalGamesMap = {};
+    externalRecords.forEach((r) => {
+      externalGamesMap[r.puuid] = (externalGamesMap[r.puuid] || 0) + (r.win || 0) + (r.lose || 0);
+    });
+
     const statsMap = {};
     statsRows.forEach((s) => {
       if (!statsMap[s.puuid]) statsMap[s.puuid] = {};
@@ -169,6 +182,7 @@ async function processAchievements(trigger, context) {
 
       const userStats = statsMap[user.puuid] || {};
       const extra = {
+        externalGames: externalGamesMap[user.puuid] || 0,
         voiceDuration: voiceDurationMap[user.puuid] || 0,
         medalCounts: medalCountsMap[user.puuid] || { gold: 0, silver: 0, bronze: 0 },
         underdogWins: userStats[STAT_TYPES.UNDERDOG_WINS] || 0,
