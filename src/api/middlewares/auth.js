@@ -60,11 +60,11 @@ const requireGroupAdmin = async (req, res, next) => {
       { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
     );
 
-    const permissions = Number(memberRes.data.roles.length > 0
+    const permissions = memberRes.data.roles.length > 0
       ? await getComputedPermissions(group.discordGuildId, memberRes.data)
-      : 0);
+      : BigInt(0);
 
-    if ((permissions & ADMINISTRATOR) !== ADMINISTRATOR) {
+    if ((permissions & BigInt(ADMINISTRATOR)) !== BigInt(ADMINISTRATOR)) {
       return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
     }
 
@@ -85,15 +85,15 @@ async function getComputedPermissions(guildId, member) {
   );
   const guildRoles = rolesRes.data;
 
-  let permissions = 0;
+  let permissions = BigInt(0);
   // @everyone 역할 (id === guildId)
   const everyoneRole = guildRoles.find((r) => r.id === guildId);
-  if (everyoneRole) permissions |= Number(everyoneRole.permissions);
+  if (everyoneRole) permissions |= BigInt(everyoneRole.permissions);
 
   // 멤버가 가진 역할들의 permissions OR 합산
   for (const roleId of member.roles) {
     const role = guildRoles.find((r) => r.id === roleId);
-    if (role) permissions |= Number(role.permissions);
+    if (role) permissions |= BigInt(role.permissions);
   }
 
   return permissions;

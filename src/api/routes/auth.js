@@ -69,12 +69,11 @@ module.exports = (app) => {
       const guildIds = userGuilds.map((g) => g.id);
 
       // guildId → permissions 매핑 (ADMINISTRATOR = 0x8)
-      const ADMINISTRATOR = 0x8;
+      const ADMINISTRATOR = BigInt(0x8);
       const guildPermMap = {};
       userGuilds.forEach((g) => {
         const isOwner = g.owner === true;
-        const isAdmin = (Number(g.permissions) & ADMINISTRATOR) === ADMINISTRATOR;
-        logger.info(`[OAuth2] guild=${g.id} owner=${g.owner} permissions=${g.permissions} isOwner=${isOwner} isAdmin=${isAdmin}`);
+        const isAdmin = (BigInt(g.permissions) & ADMINISTRATOR) === ADMINISTRATOR;
         guildPermMap[g.id] = isOwner || isAdmin;
       });
 
