@@ -24,7 +24,7 @@ async function backfillStats(groupId, users) {
     userMap[u.puuid] = u;
   });
 
-  const stats = {}; // puuid → { underdog_wins, late_night_games, best_win_streak, best_lose_streak }
+  const stats = {}; // puuid → { underdog_wins, late_night_games, best_win_streak, best_lose_streak, best_rating }
   const streakState = {}; // puuid → { currentWin, currentLose }
 
   for (const match of matches) {
@@ -50,7 +50,13 @@ async function backfillStats(groupId, users) {
     for (const puuid of allPuuids) {
       if (!userMap[puuid]) continue;
       if (!stats[puuid])
-        stats[puuid] = { underdog_wins: 0, late_night_games: 0, best_win_streak: 0, best_lose_streak: 0 };
+        stats[puuid] = {
+          underdog_wins: 0,
+          late_night_games: 0,
+          best_win_streak: 0,
+          best_lose_streak: 0,
+          best_rating: 0,
+        };
       if (!streakState[puuid]) streakState[puuid] = { currentWin: 0, currentLose: 0 };
 
       const inTeam1 = team1Data.some((p) => p[0] === puuid);
@@ -59,6 +65,15 @@ async function backfillStats(groupId, users) {
       }
       if (isLateNight) {
         stats[puuid].late_night_games += 1;
+      }
+
+      // 스냅샷에서 역대 최고 레이팅
+      if (hasSnapshot) {
+        const teamData = inTeam1 ? team1Data : team2Data;
+        const player = teamData.find((p) => p[0] === puuid);
+        if (player && player[2] > stats[puuid].best_rating) {
+          stats[puuid].best_rating = player[2];
+        }
       }
 
       const won = (inTeam1 && match.winTeam === 1) || (!inTeam1 && match.winTeam === 2);
@@ -72,6 +87,15 @@ async function backfillStats(groupId, users) {
         ss.currentWin = 0;
         if (ss.currentLose > stats[puuid].best_lose_streak) stats[puuid].best_lose_streak = ss.currentLose;
       }
+    }
+  }
+
+  // 현재 레이팅과 비교 (스냅샷 이후 더 올랐을 수 있음)
+  for (const user of users) {
+    if (!stats[user.puuid]) continue;
+    const currentRating = Math.round(user.defaultRating + user.additionalRating);
+    if (currentRating > stats[user.puuid].best_rating) {
+      stats[user.puuid].best_rating = currentRating;
     }
   }
 

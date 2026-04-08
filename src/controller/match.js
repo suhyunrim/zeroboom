@@ -559,6 +559,13 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
       }
       if (winStreak > 0) statsUpdates.push(updateBestStat(puuid, STAT_TYPES.BEST_WIN_STREAK, winStreak));
       if (loseStreak > 0) statsUpdates.push(updateBestStat(puuid, STAT_TYPES.BEST_LOSE_STREAK, loseStreak));
+
+      // 역대 최고 레이팅
+      const user = userMap[puuid];
+      if (user) {
+        const currentRating = Math.round(user.defaultRating + user.additionalRating);
+        statsUpdates.push(updateBestStat(puuid, STAT_TYPES.BEST_RATING, currentRating));
+      }
     }
     await Promise.all(statsUpdates);
   }

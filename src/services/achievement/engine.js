@@ -81,9 +81,9 @@ function checkAchievement(def, user, extra) {
     if (def.id.startsWith('LOSE_STREAK')) return (extra.bestLoseStreak || 0) >= goal;
   }
   if (category === 'tier') {
-    const rating = user.defaultRating + user.additionalRating;
-    const userTier = getTierName(rating);
-    return TIERS.indexOf(userTier) >= TIERS.indexOf(goal);
+    const bestRating = extra.bestRating || user.defaultRating + user.additionalRating;
+    const bestTier = getTierName(bestRating);
+    return TIERS.indexOf(bestTier) >= TIERS.indexOf(goal);
   }
   if (category === 'voice') {
     const durationSeconds = extra.voiceDuration || 0;
@@ -132,7 +132,8 @@ async function processAchievements(trigger, context) {
     const needsVoice = defs.some((d) => d.category === 'voice');
     const needsChallenge = defs.some((d) => d.category === 'challenge');
     const needsStats = defs.some(
-      (d) => d.category === 'streak' || d.category === 'underdog' || d.category === 'late_night',
+      (d) =>
+        d.category === 'streak' || d.category === 'underdog' || d.category === 'late_night' || d.category === 'tier',
     );
 
     const [externalRecords, voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
@@ -155,6 +156,7 @@ async function processAchievements(trigger, context) {
                 STAT_TYPES.LATE_NIGHT_GAMES,
                 STAT_TYPES.BEST_WIN_STREAK,
                 STAT_TYPES.BEST_LOSE_STREAK,
+                STAT_TYPES.BEST_RATING,
               ],
             },
             raw: true,
@@ -189,6 +191,7 @@ async function processAchievements(trigger, context) {
         lateNightGames: userStats[STAT_TYPES.LATE_NIGHT_GAMES] || 0,
         bestWinStreak: userStats[STAT_TYPES.BEST_WIN_STREAK] || 0,
         bestLoseStreak: userStats[STAT_TYPES.BEST_LOSE_STREAK] || 0,
+        bestRating: userStats[STAT_TYPES.BEST_RATING] || 0,
       };
 
       for (const def of unchecked) {

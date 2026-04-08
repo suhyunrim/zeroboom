@@ -312,6 +312,7 @@ const STAT_TYPES = {
   LATE_NIGHT_GAMES: 'late_night_games',
   BEST_WIN_STREAK: 'best_win_streak',
   BEST_LOSE_STREAK: 'best_lose_streak',
+  BEST_RATING: 'best_rating',
 };
 
 module.exports = { definitions, TIERS, STAT_TYPES, getTierName };
