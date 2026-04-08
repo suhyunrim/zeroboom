@@ -1,4 +1,13 @@
-const { Client, GatewayIntentBits, REST, Routes, ComponentType, InteractionResponse, ChannelType, PermissionFlagsBits } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  ComponentType,
+  InteractionResponse,
+  ChannelType,
+  PermissionFlagsBits,
+} = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
@@ -41,7 +50,7 @@ function formatHonorResults(results, session) {
     ? `**🎉✨ 전원 투표 완료! ${cat.emoji} ${cat.label} 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n`
     : `**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
   for (const entry of sorted) {
-    const name = (allPlayers.find(p => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
+    const name = (allPlayers.find((p) => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
     text += `**${name}** - ${entry.votes}표\n`;
   }
   return text;
@@ -301,7 +310,7 @@ module.exports = async (app) => {
 
         const formatTeam = (teamResult) => {
           let totalRating = 0;
-          const lines = teamResult.assignments.map(a => {
+          const lines = teamResult.assignments.map((a) => {
             const playerData = playerDataMap[a.playerName];
             const rating = playerData?.rating || 500;
             totalRating += rating;
@@ -327,18 +336,30 @@ module.exports = async (app) => {
           const tierStep = getTierStep(avgRating);
           const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
           const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-          return isHighTier
-            ? `[${tierAbbr} ${getTierPoint(avgRating)}LP]`
-            : `[${tierName.charAt(0)}${tierStep}]`;
+          return isHighTier ? `[${tierAbbr} ${getTierPoint(avgRating)}LP]` : `[${tierName.charAt(0)}${tierStep}]`;
         };
 
         const embed = new EmbedBuilder()
           .setColor('#00ff00')
           .setTitle('🧪 포지션 매칭 확정!')
-          .setDescription(`**[${interaction.member.nickname}]**님이 Plan ${index + 1}을 선택했습니다.\n🟢 메인 / 🟡 서브 / 🔴 오프`)
+          .setDescription(
+            `**[${interaction.member.nickname}]**님이 Plan ${index + 1}을 선택했습니다.\n🟢 메인 / 🟡 서브 / 🔴 오프`,
+          )
           .addFields(
-            { name: `🐶 1팀 (${(selectedMatch.team1WinRate * 100).toFixed(1)}%) ${formatAvgTier(team1Result.avgRating)}`, value: team1Result.lines, inline: true },
-            { name: `🐱 2팀 (${((1 - selectedMatch.team1WinRate) * 100).toFixed(1)}%) ${formatAvgTier(team2Result.avgRating)}`, value: team2Result.lines, inline: true },
+            {
+              name: `🐶 1팀 (${(selectedMatch.team1WinRate * 100).toFixed(1)}%) ${formatAvgTier(
+                team1Result.avgRating,
+              )}`,
+              value: team1Result.lines,
+              inline: true,
+            },
+            {
+              name: `🐱 2팀 (${((1 - selectedMatch.team1WinRate) * 100).toFixed(1)}%) ${formatAvgTier(
+                team2Result.avgRating,
+              )}`,
+              value: team2Result.lines,
+              inline: true,
+            },
           );
 
         const buttons = new ActionRowBuilder()
@@ -394,7 +415,6 @@ module.exports = async (app) => {
         await interaction.followUp(editUI);
         return;
       }
-
 
       // posConfirm 버튼 (매칭 생성)
       if (split[0] === 'posConfirm') {
@@ -505,10 +525,7 @@ module.exports = async (app) => {
 
         // 투표 세션 및 DB 데이터 삭제
         honorVoteSessions.delete(gameId);
-        await Promise.all([
-          honorController.deleteVotesByGameId(gameId),
-          matchData.update({ winTeam: null }),
-        ]);
+        await Promise.all([honorController.deleteVotesByGameId(gameId), matchData.update({ winTeam: null })]);
         await matchController.applyMatchResult(gameId, previousWinTeam);
 
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -564,7 +581,9 @@ module.exports = async (app) => {
               raw: true,
             });
             const userMap = {};
-            users.forEach((u) => { userMap[u.puuid] = u.discordId || null; });
+            users.forEach((u) => {
+              userMap[u.puuid] = u.discordId || null;
+            });
             return puuids.map((puuid) => userMap[puuid] || null);
           };
           const [team1DiscordIds, team2DiscordIds] = await Promise.all([
@@ -606,18 +625,18 @@ module.exports = async (app) => {
         // 업적 달성 알림
         if (matchResult.newAchievements?.length > 0) {
           const { sendAchievementNotification } = require('../services/achievement/notifier');
-          sendAchievementNotification(interaction.channel, matchResult.newAchievements, matchData.groupId)
-            .catch((e) => logger.error('업적 알림 오류:', e));
+          sendAchievementNotification(interaction.channel, matchResult.newAchievements, matchData.groupId).catch((e) =>
+            logger.error('업적 알림 오류:', e),
+          );
         }
 
         // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
-        const changeButton = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId(`changeWinCommand|${split[1]}`)
-              .setLabel('승/패 변경하기')
-              .setStyle(ButtonStyle.Secondary),
-          );
+        const changeButton = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`changeWinCommand|${split[1]}`)
+            .setLabel('승/패 변경하기')
+            .setStyle(ButtonStyle.Secondary),
+        );
 
         // 먼저 reply로 응답
         await interaction.reply(
@@ -633,20 +652,19 @@ module.exports = async (app) => {
         const voteSession = {
           gameId: matchData.gameId,
           groupId: group.id,
-          team1: team1Data.map(p => ({ puuid: p[0], name: p[1] })),
-          team2: team2Data.map(p => ({ puuid: p[0], name: p[1] })),
+          team1: team1Data.map((p) => ({ puuid: p[0], name: p[1] })),
+          team2: team2Data.map((p) => ({ puuid: p[0], name: p[1] })),
           voters: new Set(),
           category,
         };
         honorVoteSessions.set(matchData.gameId, voteSession);
 
-        const honorButton = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId(`honorVoteStart|${matchData.gameId}`)
-              .setLabel(`${category.emoji} ${category.label} 투표하기`)
-              .setStyle(ButtonStyle.Primary),
-          );
+        const honorButton = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`honorVoteStart|${matchData.gameId}`)
+            .setLabel(`${category.emoji} ${category.label} 투표하기`)
+            .setStyle(ButtonStyle.Primary),
+        );
 
         const honorMessage = await interaction.channel.send({
           content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/10)`,
@@ -698,8 +716,8 @@ module.exports = async (app) => {
         const voterPuuid = voterUser.puuid;
 
         // 매치 참가자인지 확인
-        const inTeam1 = session.team1.find(p => p.puuid === voterPuuid);
-        const inTeam2 = session.team2.find(p => p.puuid === voterPuuid);
+        const inTeam1 = session.team1.find((p) => p.puuid === voterPuuid);
+        const inTeam2 = session.team2.find((p) => p.puuid === voterPuuid);
 
         if (!inTeam1 && !inTeam2) {
           await interaction.reply({ content: '참가한 사람만 투표할 수 있습니다.', ephemeral: true });
@@ -715,19 +733,13 @@ module.exports = async (app) => {
         // 같은 팀원만 표시 (자기 자신 제외)
         const myTeam = inTeam1 ? session.team1 : session.team2;
         const myTeamNumber = inTeam1 ? 1 : 2;
-        const teammates = myTeam.filter(p => p.puuid !== voterPuuid);
+        const teammates = myTeam.filter((p) => p.puuid !== voterPuuid);
 
         const selectMenu = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId(`honorVote|${gameId}|${myTeamNumber}`)
             .setPlaceholder(session.category.question)
-            .addOptions(
-              teammates.map(p =>
-                new StringSelectMenuOptionBuilder()
-                  .setLabel(p.name)
-                  .setValue(p.puuid),
-              ),
-            ),
+            .addOptions(teammates.map((p) => new StringSelectMenuOptionBuilder().setLabel(p.name).setValue(p.puuid))),
         );
 
         await interaction.reply({
@@ -781,7 +793,10 @@ module.exports = async (app) => {
           const time = slashSplit[2];
           const data = conceptData.get(`${groupName}/${time}`);
           if (!data) {
-            await interaction.reply({ content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.', ephemeral: true });
+            await interaction.reply({
+              content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.',
+              ephemeral: true,
+            });
             return;
           }
           const matchMakeCommand = commandList.get('매칭생성');
@@ -811,7 +826,10 @@ module.exports = async (app) => {
             return;
           }
         } else {
-          await interaction.reply({ content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.', ephemeral: true });
+          await interaction.reply({
+            content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.',
+            ephemeral: true,
+          });
           return;
         }
       }
@@ -866,7 +884,7 @@ module.exports = async (app) => {
 
         if (result.status === 200) {
           session.voters.add(voterPuuid);
-          const targetPlayer = [...session.team1, ...session.team2].find(p => p.puuid === selectedPuuid);
+          const targetPlayer = [...session.team1, ...session.team2].find((p) => p.puuid === selectedPuuid);
           const targetName = (targetPlayer && targetPlayer.name) || '알 수 없음';
           await interaction.update({ content: `✅ **${targetName}**에게 투표 완료!`, components: [] });
 
@@ -918,7 +936,7 @@ module.exports = async (app) => {
         // ephemeral 메시지 닫기
         await interaction.update({
           content: `✅ **${nickname}** 팀 설정: ${TEAM_EMOJI[selectedTeam]} ${selectedTeam}`,
-          components: []
+          components: [],
         });
         return;
       }
@@ -951,7 +969,7 @@ module.exports = async (app) => {
         // ephemeral 메시지 닫기
         await interaction.update({
           content: `✅ **${nickname}** 포지션 설정: ${POSITION_EMOJI[selectedPosition]} ${selectedPosition}`,
-          components: []
+          components: [],
         });
         return;
       }
@@ -971,13 +989,19 @@ module.exports = async (app) => {
         (async () => {
           if (oldState.channelId) {
             const activity = await models.voice_activity.findOne({
-              where: { discordId: memberId, guildId, [Op.or]: [{ lastLeftAt: null }, { lastLeftAt: { [Op.lt]: models.sequelize.col('lastJoinedAt') } }] },
+              where: {
+                discordId: memberId,
+                guildId,
+                [Op.or]: [{ lastLeftAt: null }, { lastLeftAt: { [Op.lt]: models.sequelize.col('lastJoinedAt') } }],
+              },
             });
             if (activity && activity.lastJoinedAt) {
               const now = new Date();
               // 비정상적으로 오래된 세션은 최대 7일까지만 처리
               const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-              const joinedAt = new Date(Math.max(new Date(activity.lastJoinedAt).getTime(), now.getTime() - MAX_DURATION_MS));
+              const joinedAt = new Date(
+                Math.max(new Date(activity.lastJoinedAt).getTime(), now.getTime() - MAX_DURATION_MS),
+              );
               const dailyDurations = [];
               let cursor = new Date(joinedAt);
               while (cursor < now) {
@@ -992,14 +1016,16 @@ module.exports = async (app) => {
                 }
                 cursor = nextDay;
               }
-              await Promise.all(dailyDurations.map(({ date, duration }) =>
-                models.sequelize.query(
-                  `INSERT INTO voice_activity_dailies (discordId, guildId, date, duration, createdAt, updatedAt)
+              await Promise.all(
+                dailyDurations.map(({ date, duration }) =>
+                  models.sequelize.query(
+                    `INSERT INTO voice_activity_dailies (discordId, guildId, date, duration, createdAt, updatedAt)
                    VALUES (:discordId, :guildId, :date, :duration, NOW(), NOW())
                    ON DUPLICATE KEY UPDATE duration = duration + :duration, updatedAt = NOW()`,
-                  { replacements: { discordId: memberId, guildId, date, duration } },
+                    { replacements: { discordId: memberId, guildId, date, duration } },
+                  ),
                 ),
-              ));
+              );
               await activity.update({ lastLeftAt: now });
             }
           }
@@ -1019,19 +1045,35 @@ module.exports = async (app) => {
         if (generator) {
           const guild = newState.guild;
           const member = newState.member;
-          const activeCount = await tempVoiceController.countActiveChannels(generator.id);
+          let nextCount = 1;
+          if (generator.defaultName.includes('{count}')) {
+            const escaped = generator.defaultName
+              .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              .replace('\\{username\\}', '.*')
+              .replace('\\{count\\}', '(\\d+)');
+            const pattern = new RegExp(`^${escaped}$`);
+            const usedNumbers = new Set();
+            const categoryChannels = guild.channels.cache.filter(
+              (ch) => ch.type === ChannelType.GuildVoice && ch.parentId === (generator.categoryId || null),
+            );
+            categoryChannels.forEach((ch) => {
+              const match = ch.name.match(pattern);
+              if (match) usedNumbers.add(Number(match[1]));
+            });
+            while (usedNumbers.has(nextCount)) nextCount += 1;
+          }
           const channelName = generator.defaultName
             .replace('{username}', member.displayName)
-            .replace('{count}', activeCount + 1);
+            .replace('{count}', nextCount);
 
           // 생성기 채널의 권한을 복사하고 소유자 권한 추가
           const generatorChannel = guild.channels.cache.get(generator.channelId);
           const permissionOverwrites = generatorChannel
             ? [...generatorChannel.permissionOverwrites.cache.values()].map((perm) => ({
-              id: perm.id,
-              allow: perm.allow,
-              deny: perm.deny,
-            }))
+                id: perm.id,
+                allow: perm.allow,
+                deny: perm.deny,
+              }))
             : [];
           permissionOverwrites.push({
             id: member.id,
