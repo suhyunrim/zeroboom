@@ -1129,6 +1129,36 @@ module.exports = async (app) => {
     }
   });
 
+  // 디스코드 서버 탈퇴 감지
+  client.on('guildMemberRemove', async (member) => {
+    try {
+      const group = await models.group.findOne({ where: { discordGuildId: member.guild.id } });
+      if (!group) return;
+      await models.user.update(
+        { leftGuildAt: new Date() },
+        { where: { groupId: group.id, discordId: member.id, leftGuildAt: null } },
+      );
+      logger.info(`서버 탈퇴 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+    } catch (e) {
+      logger.error('서버 탈퇴 처리 오류:', e);
+    }
+  });
+
+  // 디스코드 서버 재가입 감지
+  client.on('guildMemberAdd', async (member) => {
+    try {
+      const group = await models.group.findOne({ where: { discordGuildId: member.guild.id } });
+      if (!group) return;
+      await models.user.update(
+        { leftGuildAt: null },
+        { where: { groupId: group.id, discordId: member.id } },
+      );
+      logger.info(`서버 재가입 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+    } catch (e) {
+      logger.error('서버 재가입 처리 오류:', e);
+    }
+  });
+
   // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
   client.once('ready', async () => {
     try {
@@ -1136,6 +1166,36 @@ module.exports = async (app) => {
       logger.info('임시 음성 채널 정합성 확인 완료');
     } catch (e) {
       logger.error('임시 음성 채널 정합성 확인 오류:', e);
+    }
+
+    // 서버 멤버 탈퇴 동기화
+    try {
+      const groups = await models.group.findAll({ where: { discordGuildId: { [Op.ne]: null } } });
+      for (const group of groups) {
+        const guild = client.guilds.cache.get(group.discordGuildId);
+        if (!guild) continue;
+
+        const members = await guild.members.fetch();
+        const guildMemberIds = new Set(members.map((m) => m.id));
+
+        const users = await models.user.findAll({
+          where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
+          attributes: ['puuid', 'discordId'],
+        });
+
+        const leftUsers = users.filter((u) => !guildMemberIds.has(u.discordId));
+        if (leftUsers.length > 0) {
+          const puuids = leftUsers.map((u) => u.puuid);
+          await models.user.update(
+            { leftGuildAt: new Date() },
+            { where: { groupId: group.id, puuid: { [Op.in]: puuids } } },
+          );
+          logger.info(`서버 멤버 동기화: 그룹 ${group.id} - ${leftUsers.length}명 탈퇴 반영`);
+        }
+      }
+      logger.info('서버 멤버 탈퇴 동기화 완료');
+    } catch (e) {
+      logger.error('서버 멤버 탈퇴 동기화 오류:', e);
     }
   });
 

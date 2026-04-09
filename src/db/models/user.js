@@ -49,6 +49,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
+      leftGuildAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {},
   );

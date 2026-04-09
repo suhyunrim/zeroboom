@@ -31,6 +31,7 @@ module.exports = (app) => {
           'defaultRating',
           'additionalRating',
           'latestMatchDate',
+          'leftGuildAt',
           'createdAt',
         ],
         order: [['createdAt', 'ASC']],
@@ -73,6 +74,7 @@ module.exports = (app) => {
         rating: u.defaultRating + u.additionalRating,
         latestMatchDate: u.latestMatchDate,
         lastVoiceJoinedAt: voiceMap[u.discordId] || null,
+        leftGuildAt: u.leftGuildAt,
         createdAt: u.createdAt,
       }));
 
