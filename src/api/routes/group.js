@@ -5,11 +5,66 @@ const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
+const { Op } = require('sequelize');
+const { getGuildIconUrl } = require('../../utils/discordUtils');
+const auditLog = require('../../controller/audit-log');
 const groupController = require('../../controller/group');
 const tokenController = require('../../controller/token');
 
 module.exports = (app) => {
   app.use('/group', route);
+
+  // 방 정보 조회
+  route.get('/:groupId/info', verifyToken, requireGroupAdmin, async (req, res) => {
+    try {
+      const group = await models.group.findByPk(Number(req.params.groupId));
+      if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+
+      const [totalMembers, activeMembers, blacklistedMembers, leftGuildMembers, totalMatches] = await Promise.all([
+        models.user.count({ where: { groupId: group.id } }),
+        models.user.count({ where: { groupId: group.id, role: { [Op.ne]: 'outsider' }, leftGuildAt: null } }),
+        models.user.count({ where: { groupId: group.id, role: 'outsider' } }),
+        models.user.count({ where: { groupId: group.id, leftGuildAt: { [Op.ne]: null } } }),
+        models.match.count({ where: { groupId: group.id } }),
+      ]);
+
+      const client = req.app.discordClient;
+      const guild = group.discordGuildId ? client.guilds.cache.get(group.discordGuildId) : null;
+
+      return res.json({
+        id: group.id,
+        groupName: group.groupName,
+        discordGuildName: guild ? guild.name : null,
+        discordGuildIcon: group.discordGuildId ? getGuildIconUrl(client, group.discordGuildId) : null,
+        members: { total: totalMembers, active: activeMembers, blacklisted: blacklistedMembers, leftGuild: leftGuildMembers },
+        totalMatches,
+        settings: group.settings || {},
+        createdAt: group.createdAt,
+      });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
+  // 방 이름 변경
+  route.patch('/:groupId/name', verifyToken, requireGroupAdmin, async (req, res) => {
+    const { groupName } = req.body;
+    if (!groupName) return res.status(400).json({ result: 'groupName은 필수입니다.' });
+
+    const group = await models.group.findByPk(Number(req.params.groupId));
+    if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+
+    const oldName = group.groupName;
+    await group.update({ groupName });
+
+    auditLog.log({
+      groupId: group.id, actorDiscordId: req.user.discordId, actorName: req.user.name,
+      action: 'group.rename', details: { before: oldName, after: groupName }, source: 'web',
+    });
+
+    return res.json({ groupName });
+  });
 
   route.get('/ranking/period', async (req, res) => {
     const { groupId, startDate, endDate } = req.query;
