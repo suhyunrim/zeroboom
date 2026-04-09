@@ -854,6 +854,22 @@ module.exports = async (app) => {
 
           // 투표 모드
           if (voteSession) {
+            // 이미 확정된 플랜이 있으면 해당 플랜 버튼은 즉시 매치 생성
+            if (voteSession.confirmedPlan !== undefined) {
+              if (planIndex !== voteSession.confirmedPlan) {
+                await interaction.reply({ content: '비활성화된 플랜입니다.', ephemeral: true });
+                return;
+              }
+              const matchMakeCommand = commandList.get('매칭생성');
+              if (matchMakeCommand) {
+                const output = await matchMakeCommand.reactButton(interaction, match);
+                if (output) {
+                  await interaction.reply(output);
+                }
+              }
+              return;
+            }
+
             const userId = interaction.user.id;
 
             if (!voteSession.participants.has(userId)) {
@@ -886,18 +902,37 @@ module.exports = async (app) => {
             const secondCount = counts.length > 1 ? counts[1][1] : 0;
 
             if (leadCount > secondCount + remaining) {
-              // 투표 확정
-              matchVoteSessions.delete(sessionKey);
+              // 투표 확정 — 세션 유지하고 confirmedPlan 기록
+              voteSession.confirmedPlan = leadPlan;
               const winnerMatch = matches.get(`${sessionKey}/${leadPlan}`);
               const matchMakeCommand = commandList.get('매칭생성');
               if (matchMakeCommand && winnerMatch) {
-                // customId를 확정된 플랜으로 설정
                 interaction.customId = `${sessionKey}/${leadPlan}`;
                 const output = await matchMakeCommand.reactButton(interaction, winnerMatch);
                 if (output) {
+                  // 확정된 플랜만 active, 나머지 disabled
+                  const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+                  const newRows = [];
+                  const origComponents = interaction.message.components;
+                  for (const row of origComponents) {
+                    const newRow = new ActionRowBuilder();
+                    for (const btn of row.components) {
+                      const btnSplit = btn.customId.split('/');
+                      const btnPlanIndex = btnSplit[2];
+                      newRow.addComponents(
+                        new ButtonBuilder()
+                          .setCustomId(btn.customId)
+                          .setLabel(btn.label)
+                          .setStyle(btnPlanIndex === leadPlan ? ButtonStyle.Success : ButtonStyle.Secondary)
+                          .setDisabled(btnPlanIndex !== leadPlan),
+                      );
+                    }
+                    newRows.push(newRow);
+                  }
+
                   await interaction.update({
-                    content: `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다!**`,
-                    components: [],
+                    content: `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`,
+                    components: newRows,
                   });
                   await interaction.followUp(output);
                 }
