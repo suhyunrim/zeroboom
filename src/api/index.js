@@ -9,6 +9,7 @@ const blacklist = require('./routes/blacklist');
 const challenge = require('./routes/challenge');
 const match = require('./routes/match');
 const achievement = require('./routes/achievement');
+const tempVoice = require('./routes/temp-voice');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -27,6 +28,7 @@ module.exports = () => {
   challenge(app);
   match(app);
   achievement(app);
+  tempVoice(app);
 
   // v2
   groupsV2(app);
