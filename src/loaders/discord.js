@@ -960,17 +960,29 @@ module.exports = async (app) => {
                     newRows.push(newRow);
                   }
 
-                  await interaction.update({
-                    content: `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`,
-                    components: newRows,
-                  });
+                  // 원본 메시지 버튼 업데이트
+                  await interaction.update({ components: newRows });
+
+                  // 투표 현황 메시지 업데이트 또는 새로 전송
+                  const finalText = `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`;
+                  if (voteSession.statusMessage) {
+                    await voteSession.statusMessage.edit(finalText);
+                  } else {
+                    await interaction.followUp(finalText);
+                  }
                   await interaction.followUp(output);
                 }
               }
               return;
             }
 
-            await interaction.update({ content: statusText });
+            // 투표 현황 메시지: 첫 투표 시 새 메시지, 이후 edit
+            await interaction.deferUpdate();
+            if (voteSession.statusMessage) {
+              await voteSession.statusMessage.edit(statusText);
+            } else {
+              voteSession.statusMessage = await interaction.followUp(statusText);
+            }
             return;
           }
 
