@@ -9,11 +9,13 @@ module.exports = (app) => {
 
   route.get('/:groupId', verifyToken, requireGroupAdmin, async (req, res) => {
     const { groupId } = req.params;
-    const { page, limit, action } = req.query;
+    const { page, limit, action, startDate, endDate } = req.query;
     const result = await auditLogController.getByGroupId(Number(groupId), {
       page: Number(page) || 1,
       limit: Number(limit) || 50,
       action: action || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
     });
     return res.json(result);
   });
