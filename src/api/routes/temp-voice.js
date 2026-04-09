@@ -140,6 +140,12 @@ module.exports = (app) => {
 
     const voiceChannels = guild.channels.cache
       .filter((ch) => ch.type === ChannelType.GuildVoice)
+      .sort((a, b) => {
+        const aPPos = a.parent ? a.parent.position : -1;
+        const bPPos = b.parent ? b.parent.position : -1;
+        if (aPPos !== bPPos) return aPPos - bPPos;
+        return a.position - b.position;
+      })
       .map((ch) => ({
         id: ch.id,
         name: ch.name,
