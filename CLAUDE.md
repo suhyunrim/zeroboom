@@ -5,7 +5,7 @@
 **아래 규칙은 어떤 상황에서도 예외 없이 지켜야 한다. 위반 시 작업을 즉시 중단한다.**
 
 1. **커밋/푸시/배포는 사용자가 명시적으로 요청할 때만 수행한다.** 디버그 로그 추가, 사소한 수정 등 어떤 이유로도 자의적으로 커밋/푸시/prod 머지하지 않는다. 반드시 사용자에게 먼저 확인을 받는다.
-2. **라이브 배포는 반드시 `scripts/deploy.sh`를 사용한다.** 수동으로 `docker restart`나 직접 컨테이너를 재시작하면 Docker 네트워크 IP가 변경되어 nginx 502 에러가 발생한다. 배포 명령어: `PROJECT_DIR_LIVE=/home/ubuntu/zeroboom/zeroboom-live PROJECT_DIR_TEST=/home/ubuntu/zeroboom/zeroboom-test bash scripts/deploy.sh live`
+2. **라이브 배포는 prod 브랜치에 머지/푸시하면 GitHub Actions로 자동 배포된다.** 수동으로 `docker restart`나 직접 컨테이너를 재시작하면 Docker 네트워크 IP가 변경되어 nginx 502 에러가 발생한다. 테섭 수동 배포가 필요한 경우: `sudo docker compose -f docker-compose.yml -f docker-compose.test.yml build --no-cache app-test && sudo docker compose -f docker-compose.yml -f docker-compose.test.yml up -d app-test`
 3. **라이브 서비스에 영향을 주는 모든 작업은 사용자 확인 후 진행한다.** 서버 재시작, DB 변경, 배포 등은 반드시 사전 동의를 받는다.
 
 ---
