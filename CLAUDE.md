@@ -246,6 +246,11 @@ app.js
 - **커밋과 푸시는 사용자가 명시적으로 요청할 때만 수행한다.**
 - 자의적으로 커밋하거나 푸시하지 않는다.
 
+### 감사 로그 (Audit Log)
+- **API 및 주요 액션에는 가능한 한 `auditLog.log()`를 남긴다.**
+- 데이터 변경(생성/수정/삭제), 설정 변경, 권한 변경 등 대부분의 액션에 audit log를 추가한다.
+- 패턴: `auditLog.log({ groupId, actorDiscordId, actorName, action, details: { before, after }, source })`
+
 ### 코드 스타일
 - ESLint + Prettier 사용
 - 비동기 함수는 async/await 패턴 사용

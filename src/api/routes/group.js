@@ -100,6 +100,12 @@ module.exports = (app) => {
     const currentSettings = group.settings || {};
     const newSettings = { ...currentSettings, ...req.body };
     await group.update({ settings: newSettings });
+
+    auditLog.log({
+      groupId: group.id, actorDiscordId: req.user.discordId, actorName: req.user.name,
+      action: 'group.settings.update', details: { before: currentSettings, after: newSettings }, source: 'web',
+    });
+
     return res.json(newSettings);
   });
 
