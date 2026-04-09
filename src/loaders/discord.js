@@ -866,6 +866,7 @@ module.exports = async (app) => {
           const sessionKey = `${customSplit[0]}/${customSplit[1]}`;
           const planIndex = customSplit[2];
           const voteSession = matchVoteSessions.get(sessionKey);
+          logger.info(`[매칭버튼] customId=${interaction.customId}, sessionKey=${sessionKey}, voteSession=${!!voteSession}, allSessions=${[...matchVoteSessions.keys()].join(',')}`);
 
           // 투표 모드
           if (voteSession) {
