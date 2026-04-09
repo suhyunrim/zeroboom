@@ -15,6 +15,7 @@ const models = require('../db/models');
 const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
+const auditLog = require('../controller/audit-log');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 
 const VOTE_CATEGORIES = [
@@ -528,6 +529,12 @@ module.exports = async (app) => {
         await Promise.all([honorController.deleteVotesByGameId(gameId), matchData.update({ winTeam: null })]);
         await matchController.applyMatchResult(gameId, previousWinTeam);
 
+        const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+        auditLog.log({
+          groupId: group?.id, actorDiscordId: interaction.user.id, actorName: interaction.member.nickname,
+          action: 'match.cancel', details: { gameId, previousWinTeam }, source: 'discord',
+        }).catch((e) => logger.error('감사 로그 오류:', e));
+
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const buttons = new ActionRowBuilder()
           .addComponents(
@@ -621,6 +628,11 @@ module.exports = async (app) => {
         await matchData.update({ winTeam });
         const matchResult = await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
+
+        auditLog.log({
+          groupId: group.id, actorDiscordId: interaction.user.id, actorName: interaction.member.nickname,
+          action: 'match.confirm', details: { gameId: matchData.gameId, winTeam, previousWinTeam }, source: 'discord',
+        }).catch((e) => logger.error('감사 로그 오류:', e));
 
         // 업적 달성 알림
         if (matchResult.newAchievements?.length > 0) {

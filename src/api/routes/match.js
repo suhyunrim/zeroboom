@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const controller = require('../../controller/match');
+const auditLog = require('../../controller/audit-log');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
 const route = Router();
@@ -23,6 +24,16 @@ module.exports = (app) => {
     const { groupId } = req.params;
     const { matchId } = req.body;
     const result = await controller.cancelMatch(Number(groupId), Number(matchId));
+    if (result.status === 200) {
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'match.cancel',
+        details: { matchId: Number(matchId) },
+        source: 'web',
+      });
+    }
     return res.status(result.status).json(result.result);
   });
 
@@ -30,6 +41,16 @@ module.exports = (app) => {
     const { groupId } = req.params;
     const { matchId, date, winTeam } = req.body;
     const result = await controller.duplicateMatch(Number(groupId), Number(matchId), date, Number(winTeam));
+    if (result.status === 200) {
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'match.duplicate',
+        details: { originalMatchId: Number(matchId), date, winTeam: Number(winTeam) },
+        source: 'web',
+      });
+    }
     return res.status(result.status).json(result.result);
   });
 };

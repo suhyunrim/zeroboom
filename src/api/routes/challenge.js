@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 const challengeController = require('../../controller/challenge');
+const auditLog = require('../../controller/audit-log');
 
 const route = Router();
 
@@ -36,6 +37,16 @@ module.exports = (app) => {
       { title, description, gameType, startAt, endAt, scoringType, isVisible, displayOrder },
       req.user.puuid,
     );
+    if (result.status === 201) {
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'challenge.create',
+        details: { title, gameType, startAt, endAt, scoringType },
+        source: 'web',
+      });
+    }
     return res.status(result.status).json({ result: result.result });
   });
 
@@ -47,6 +58,16 @@ module.exports = (app) => {
     const { challengeId } = req.params;
 
     const result = await challengeController.updateChallenge(Number(challengeId), req.body);
+    if (result.status === 200) {
+      auditLog.log({
+        groupId: Number(req.params.groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'challenge.update',
+        details: { challengeId: Number(challengeId), changes: req.body },
+        source: 'web',
+      });
+    }
     return res.status(result.status).json({ result: result.result });
   });
 
@@ -58,6 +79,16 @@ module.exports = (app) => {
     const { challengeId } = req.params;
 
     const result = await challengeController.cancelChallenge(Number(challengeId));
+    if (result.status === 200) {
+      auditLog.log({
+        groupId: Number(req.params.groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'challenge.cancel',
+        details: { challengeId: Number(challengeId) },
+        source: 'web',
+      });
+    }
     return res.status(result.status).json({ result: result.result });
   });
 

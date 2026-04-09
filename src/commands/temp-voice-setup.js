@@ -1,6 +1,7 @@
 const { ChannelType } = require('discord.js');
 const models = require('../db/models');
 const tempVoiceController = require('../controller/temp-voice');
+const auditLog = require('../controller/audit-log');
 
 exports.run = async (groupName, interaction) => {
   if (!interaction.memberPermissions.has('ManageChannels')) {
@@ -22,7 +23,19 @@ exports.run = async (groupName, interaction) => {
 
   const existing = await tempVoiceController.findGenerator(channel.id);
   if (existing) {
-    await tempVoiceController.updateGenerator(channel.id, { defaultName, defaultUserLimit, categoryId: channel.parentId });
+    await tempVoiceController.updateGenerator(channel.id, {
+      defaultName,
+      defaultUserLimit,
+      categoryId: channel.parentId,
+    });
+    auditLog.log({
+      groupId: group.id,
+      actorDiscordId: interaction.user.id,
+      actorName: interaction.member.nickname,
+      action: 'generator.update',
+      details: { channelId: channel.id, channelName: channel.name, defaultName, defaultUserLimit },
+      source: 'discord',
+    });
     return (
       `✅ **${channel.name}** 생성기 설정이 업데이트되었습니다.\n` +
       `- 이름 패턴: \`${defaultName}\`\n` +
@@ -37,6 +50,15 @@ exports.run = async (groupName, interaction) => {
     categoryId: channel.parentId,
     defaultName,
     defaultUserLimit,
+  });
+
+  auditLog.log({
+    groupId: group.id,
+    actorDiscordId: interaction.user.id,
+    actorName: interaction.member.nickname,
+    action: 'generator.create',
+    details: { channelId: channel.id, channelName: channel.name, defaultName, defaultUserLimit },
+    source: 'discord',
   });
 
   return (

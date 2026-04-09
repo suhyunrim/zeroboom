@@ -1,4 +1,6 @@
 const tempVoiceController = require('../controller/temp-voice');
+const auditLog = require('../controller/audit-log');
+const models = require('../db/models');
 
 exports.run = async (groupName, interaction) => {
   if (!interaction.memberPermissions.has('ManageChannels')) {
@@ -12,6 +14,13 @@ exports.run = async (groupName, interaction) => {
   }
 
   await tempVoiceController.deleteGenerator(channel.id);
+
+  const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+  auditLog.log({
+    groupId: group?.id, actorDiscordId: interaction.user.id, actorName: interaction.member.nickname,
+    action: 'generator.delete', details: { channelId: channel.id, channelName: channel.name }, source: 'discord',
+  });
+
   return `✅ **${channel.name}** 채널의 임시 음성 채널 생성기 설정이 해제되었습니다.`;
 };
 

@@ -4,6 +4,7 @@ const { logger } = require('../../loaders/logger');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 const { getRating, convertAbbreviationTier, isValidTier } = require('../../services/user');
 const challengeController = require('../../controller/challenge');
+const auditLog = require('../../controller/audit-log');
 
 const route = Router();
 
@@ -21,7 +22,17 @@ module.exports = (app) => {
     try {
       const users = await models.user.findAll({
         where: { groupId: Number(groupId) },
-        attributes: ['puuid', 'discordId', 'role', 'win', 'lose', 'defaultRating', 'additionalRating', 'latestMatchDate', 'createdAt'],
+        attributes: [
+          'puuid',
+          'discordId',
+          'role',
+          'win',
+          'lose',
+          'defaultRating',
+          'additionalRating',
+          'latestMatchDate',
+          'createdAt',
+        ],
         order: [['createdAt', 'ASC']],
       });
 
@@ -45,7 +56,9 @@ module.exports = (app) => {
           where: { guildId: group.discordGuildId, discordId: discordIds },
           attributes: ['discordId', 'lastJoinedAt'],
         });
-        activities.forEach((a) => { voiceMap[a.discordId] = a.lastJoinedAt; });
+        activities.forEach((a) => {
+          voiceMap[a.discordId] = a.lastJoinedAt;
+        });
       }
 
       const result = users.map((u) => ({
@@ -135,6 +148,15 @@ module.exports = (app) => {
       await models.user.update({ role: 'outsider' }, { where: { puuid, groupId: Number(groupId) } });
       await challengeController.invalidateLeaderboardCache(Number(groupId));
 
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'user.blacklist',
+        details: { puuid, previousRole: user.role },
+        source: 'web',
+      });
+
       return res.status(200).json({ result: '블랙리스트에 등록되었습니다.' });
     } catch (e) {
       logger.error(e);
@@ -169,11 +191,18 @@ module.exports = (app) => {
         return res.status(404).json({ result: '해당 유저를 찾을 수 없습니다.' });
       }
 
+      const oldRating = user.defaultRating;
       const newRating = getRating(fullTier);
-      await models.user.update(
-        { defaultRating: newRating },
-        { where: { puuid, groupId: Number(groupId) } },
-      );
+      await models.user.update({ defaultRating: newRating }, { where: { puuid, groupId: Number(groupId) } });
+
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'user.rating_change',
+        details: { puuid, tier: fullTier, before: oldRating, after: newRating },
+        source: 'web',
+      });
 
       return res.status(200).json({
         result: {
@@ -210,6 +239,15 @@ module.exports = (app) => {
 
       await models.user.update({ role: 'member' }, { where: { puuid, groupId: Number(groupId) } });
       await challengeController.invalidateLeaderboardCache(Number(groupId));
+
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'user.unblacklist',
+        details: { puuid },
+        source: 'web',
+      });
 
       return res.status(200).json({ result: '블랙리스트에서 해제되었습니다.' });
     } catch (e) {

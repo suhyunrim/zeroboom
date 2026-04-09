@@ -1,18 +1,23 @@
-const matchController = require('../controller/match');
-const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const matchController = require('../controller/match');
+const auditLog = require('../controller/audit-log');
+const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
 const models = require('../db/models');
 const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
 const { selectAllConcepts } = require('../match-maker/concept-scorers');
 
 const POSITION_ABBR = {
-  TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', UTILITY: 'SUP',
+  TOP: 'TOP',
+  JUNGLE: 'JG',
+  MIDDLE: 'MID',
+  BOTTOM: 'AD',
+  UTILITY: 'SUP',
 };
 
 // Riot API 포지션명 → position-optimizer 포지션명 변환
-const toOptimizerPos = (pos) => pos === 'UTILITY' ? 'SUPPORT' : pos;
+const toOptimizerPos = (pos) => (pos === 'UTILITY' ? 'SUPPORT' : pos);
 
-const MAX_MATCH_COUNT = 6
+const MAX_MATCH_COUNT = 6;
 
 exports.run = async (groupName, interaction) => {
   const userPool = new Array();
@@ -53,7 +58,7 @@ exports.run = async (groupName, interaction) => {
   });
 
   const result = await matchController.generateMatch(groupName, team1, team2, userPool, 999, discordIdMap);
-  if (typeof(result.result) == 'string') {
+  if (typeof result.result === 'string') {
     return result.result;
   }
 
@@ -66,12 +71,34 @@ exports.run = async (groupName, interaction) => {
     if (ratingCache[summonerName]) return ratingCache[summonerName];
 
     const summonerData = await models.summoner.findOne({ where: { name: summonerName } });
-    if (!summonerData) return { name: summonerName, rating: 500, position: null, win: 0, lose: 0, puuid: null, mainPositionRate: 0, subPosition: null, subPositionRate: 0 };
+    if (!summonerData)
+      return {
+        name: summonerName,
+        rating: 500,
+        position: null,
+        win: 0,
+        lose: 0,
+        puuid: null,
+        mainPositionRate: 0,
+        subPosition: null,
+        subPositionRate: 0,
+      };
 
     const userData = await models.user.findOne({
       where: { groupId: group.id, puuid: summonerData.puuid },
     });
-    if (!userData) return { name: summonerName, rating: 500, position: summonerData.mainPosition, win: 0, lose: 0, puuid: summonerData.puuid, mainPositionRate: summonerData.mainPositionRate || 0, subPosition: summonerData.subPosition, subPositionRate: summonerData.subPositionRate || 0 };
+    if (!userData)
+      return {
+        name: summonerName,
+        rating: 500,
+        position: summonerData.mainPosition,
+        win: 0,
+        lose: 0,
+        puuid: summonerData.puuid,
+        mainPositionRate: summonerData.mainPositionRate || 0,
+        subPosition: summonerData.subPosition,
+        subPositionRate: summonerData.subPositionRate || 0,
+      };
 
     const rating = userData.defaultRating + userData.additionalRating;
     ratingCache[summonerName] = {
@@ -122,10 +149,13 @@ exports.run = async (groupName, interaction) => {
   }
 
   result.result = result.result.filter((elem) => {
-    for (let [key, value] of groups) {
-      const team1Simplified = elem.team1Names.map(name => name.replaceAll(' ', ''));
-      const team2Simplified = elem.team2Names.map(name => name.replaceAll(' ', ''));
-      if ((team1Simplified.includes(value[0]) && team1Simplified.includes(value[1])) || (team2Simplified.includes(value[0]) && team2Simplified.includes(value[1]))) {
+    for (const [key, value] of groups) {
+      const team1Simplified = elem.team1Names.map((name) => name.replaceAll(' ', ''));
+      const team2Simplified = elem.team2Names.map((name) => name.replaceAll(' ', ''));
+      if (
+        (team1Simplified.includes(value[0]) && team1Simplified.includes(value[1])) ||
+        (team2Simplified.includes(value[0]) && team2Simplified.includes(value[1]))
+      ) {
         return false;
       }
     }
@@ -145,7 +175,7 @@ exports.run = async (groupName, interaction) => {
     for (const selected of filteredResults) {
       const selectedTeam1Set = new Set(selected.team1Names);
       // team1 기준 공통 멤버 수 계산
-      const commonCount = [...team1Set].filter(name => selectedTeam1Set.has(name)).length;
+      const commonCount = [...team1Set].filter((name) => selectedTeam1Set.has(name)).length;
       // 4명 공통 = 1명만 다름 → 제외
       if (commonCount === 4) {
         isDuplicate = true;
@@ -182,14 +212,22 @@ exports.run = async (groupName, interaction) => {
     }
   }
 
-  return { embeds: [formatMatches(result.result)], components: [...rows], fetchReply: true, match: result.result, allMatches, ratingCache, time };
+  return {
+    embeds: [formatMatches(result.result)],
+    components: [...rows],
+    fetchReply: true,
+    match: result.result,
+    allMatches,
+    ratingCache,
+    time,
+  };
 };
 
 exports.reactButton = async (interaction, match) => {
-  const customId = interaction.customId;
+  const { customId } = interaction;
   const split = customId.split('/');
   const index = Number(split[2]);
-  const team1WinRate = match.team1WinRate;
+  const { team1WinRate } = match;
   const teams = [[], []];
   const teamsForDB = [[], []];
   const teamRatings = [0, 0];
@@ -229,7 +267,7 @@ exports.reactButton = async (interaction, match) => {
       const posTag = `[${POSITION_ABBR[summonerData.mainPosition] || summonerData.mainPosition || '??'}]`;
       teams[i].push({
         name: `${tierDisplay}${posTag}${summonerData.name}`,
-        rating: rating,
+        rating,
       });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
       teamDiscordIds[i].push(userData.discordId || null);
@@ -244,6 +282,15 @@ exports.reactButton = async (interaction, match) => {
     groupId: group.id,
     team1: teamsForDB[0],
     team2: teamsForDB[1],
+  });
+
+  auditLog.log({
+    groupId: group.id,
+    actorDiscordId: interaction.user.id,
+    actorName: interaction.member.nickname,
+    action: 'match.create',
+    details: { gameId: matchQueryResult.gameId },
+    source: 'discord',
   });
 
   const buttons = new ActionRowBuilder()
@@ -266,12 +313,11 @@ exports.reactButton = async (interaction, match) => {
         .setStyle(ButtonStyle.Secondary),
     );
 
-  const label = match.conceptLabel
-    ? `${match.conceptEmoji} ${match.conceptLabel}`
-    : `Plan ${index + 1}`;
+  const label = match.conceptLabel ? `${match.conceptEmoji} ${match.conceptLabel}` : `Plan ${index + 1}`;
 
   const output = {
-    content: `**[${interaction.member.nickname}]님이 [${match.conceptLabel || `Plan ${index + 1}`}]을 선택하였습니다!!**`,
+    content: `**[${interaction.member.nickname}]님이 [${match.conceptLabel ||
+      `Plan ${index + 1}`}]을 선택하였습니다!!**`,
     embeds: [formatMatchWithRating(label, teams[0], teamRatings[0], teams[1], teamRatings[1], team1WinRate)],
     components: [buttons],
     teamDiscordIds,
@@ -291,7 +337,7 @@ exports.generateConceptMatches = (allMatches, ratingCache, groupName, time) => {
     ratingInfoMap[name] = info;
     playerDataMap[name] = {
       puuid: info.puuid,
-      name: name,
+      name,
       rating: info.rating,
       mainPos: toOptimizerPos(info.position),
       subPos: toOptimizerPos(info.subPosition),

@@ -3,6 +3,7 @@ const { ChannelType } = require('discord.js');
 const models = require('../../db/models');
 const tempVoiceController = require('../../controller/temp-voice');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
+const auditLog = require('../../controller/audit-log');
 
 const route = Router();
 
@@ -59,6 +60,19 @@ module.exports = (app) => {
         defaultUserLimit: defaultUserLimit || 0,
         categoryId: channel.parentId,
       });
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: req.user.discordId,
+        actorName: req.user.name,
+        action: 'generator.update',
+        details: {
+          channelId,
+          channelName: channel.name,
+          defaultName: defaultName || '{username}의 채널',
+          defaultUserLimit: defaultUserLimit || 0,
+        },
+        source: 'web',
+      });
       return res.json({ result: '생성기 설정이 업데이트되었습니다.' });
     }
 
@@ -69,6 +83,20 @@ module.exports = (app) => {
       categoryId: channel.parentId,
       defaultName: defaultName || '{username}의 채널',
       defaultUserLimit: defaultUserLimit || 0,
+    });
+
+    auditLog.log({
+      groupId: Number(groupId),
+      actorDiscordId: req.user.discordId,
+      actorName: req.user.name,
+      action: 'generator.create',
+      details: {
+        channelId,
+        channelName: channel.name,
+        defaultName: defaultName || '{username}의 채널',
+        defaultUserLimit: defaultUserLimit || 0,
+      },
+      source: 'web',
     });
 
     return res.status(201).json({ result: '생성기가 등록되었습니다.' });
@@ -84,6 +112,14 @@ module.exports = (app) => {
     }
 
     await tempVoiceController.deleteGenerator(channelId);
+    auditLog.log({
+      groupId: Number(req.params.groupId),
+      actorDiscordId: req.user.discordId,
+      actorName: req.user.name,
+      action: 'generator.delete',
+      details: { channelId },
+      source: 'web',
+    });
     return res.json({ result: '생성기가 해제되었습니다.' });
   });
 
