@@ -271,6 +271,21 @@ module.exports = async (app) => {
                       groupName: group.groupName,
                     });
                   }
+                  // 투표 모드 세션 생성
+                  if (group.settings && group.settings.matchVoteMode) {
+                    const participantDiscordIds = new Set();
+                    if (output.ratingCache) {
+                      Object.values(output.ratingCache).forEach((info) => {
+                        if (info.discordId) participantDiscordIds.add(info.discordId);
+                      });
+                    }
+                    matchVoteSessions.set(`${group.groupName}/${output.time}`, {
+                      votes: {},
+                      voteCounts: {},
+                      participants: participantDiscordIds,
+                      totalPlans: output.match.length,
+                    });
+                  }
                 }
               }
               await interaction.reply(output);
@@ -866,7 +881,6 @@ module.exports = async (app) => {
           const sessionKey = `${customSplit[0]}/${customSplit[1]}`;
           const planIndex = customSplit[2];
           const voteSession = matchVoteSessions.get(sessionKey);
-          logger.info(`[매칭버튼] customId=${interaction.customId}, sessionKey=${sessionKey}, voteSession=${!!voteSession}, allSessions=${[...matchVoteSessions.keys()].join(',')}`);
 
           // 투표 모드
           if (voteSession) {
