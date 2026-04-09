@@ -1039,6 +1039,19 @@ module.exports = async (app) => {
                 ),
               );
               await activity.update({ lastLeftAt: now });
+
+              // 보이스 업적 체크 (알림 없이 달성만 기록)
+              const group = await models.group.findOne({ where: { discordGuildId: guildId } });
+              if (group) {
+                const user = await models.user.findOne({ where: { groupId: group.id, discordId: memberId } });
+                if (user) {
+                  const { processAchievements } = require('../services/achievement/engine');
+                  await processAchievements('voice_leave', {
+                    groupId: group.id,
+                    userMap: { [user.puuid]: user },
+                  });
+                }
+              }
             }
           }
           if (newState.channelId) {

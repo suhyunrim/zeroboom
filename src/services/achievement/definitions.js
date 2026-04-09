@@ -203,7 +203,7 @@ const voice = Object.entries(voiceGoals).map(([tier, goal]) => ({
   emoji: '🎙️',
   tier,
   category: 'voice',
-  trigger: 'match_result',
+  trigger: 'voice_leave',
   goal,
 }));
 
