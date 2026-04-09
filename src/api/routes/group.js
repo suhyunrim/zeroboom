@@ -2,6 +2,8 @@ const { Router } = require('express');
 
 const route = Router();
 const { logger } = require('../../loaders/logger');
+const models = require('../../db/models');
+const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
 const groupController = require('../../controller/group');
 const tokenController = require('../../controller/token');
@@ -27,6 +29,23 @@ module.exports = (app) => {
       logger.error(e);
       return res.status(500).json({ result: e.message });
     }
+  });
+
+  // 그룹 설정 조회
+  route.get('/:groupId/settings', verifyToken, requireGroupAdmin, async (req, res) => {
+    const group = await models.group.findByPk(Number(req.params.groupId), { attributes: ['settings'] });
+    if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+    return res.json(group.settings || {});
+  });
+
+  // 그룹 설정 업데이트
+  route.patch('/:groupId/settings', verifyToken, requireGroupAdmin, async (req, res) => {
+    const group = await models.group.findByPk(Number(req.params.groupId));
+    if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+    const currentSettings = group.settings || {};
+    const newSettings = { ...currentSettings, ...req.body };
+    await group.update({ settings: newSettings });
+    return res.json(newSettings);
   });
 
   route.get('/ranking', async (req, res) => {

@@ -21,6 +21,10 @@ module.exports = (sequelize, DataTypes) => {
       revisionDate: {
         type: DataTypes.DATE,
       },
+      settings: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
     },
     {},
   );

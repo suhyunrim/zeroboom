@@ -72,6 +72,7 @@ module.exports = async (app) => {
   const conceptData = new Map(); // 컨셉 매칭용 데이터 (allMatches, ratingCache)
   const pickUsersData = new Map();
   const honorVoteSessions = new Map();
+  const matchVoteSessions = new Map(); // 매칭 투표 세션
 
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
@@ -109,6 +110,23 @@ module.exports = async (app) => {
               allMatches: output.allMatches,
               ratingCache: output.ratingCache,
               groupName,
+            });
+          }
+          // 투표 모드 확인 및 세션 생성
+          const group = await models.group.findOne({ where: { groupName } });
+          if (group && group.settings && group.settings.matchVoteMode) {
+            // 참가자 discordId 수집 (ratingCache에서)
+            const participantDiscordIds = new Set();
+            if (output.ratingCache) {
+              Object.values(output.ratingCache).forEach((info) => {
+                if (info.discordId) participantDiscordIds.add(info.discordId);
+              });
+            }
+            matchVoteSessions.set(`${groupName}/${output.time}`, {
+              votes: {}, // { discordId: planIndex }
+              voteCounts: {}, // { planIndex: count }
+              participants: participantDiscordIds,
+              totalPlans: output.match.length,
             });
           }
         }
@@ -829,6 +847,69 @@ module.exports = async (app) => {
 
         const match = matches.get(interaction.customId);
         if (match) {
+          const customSplit = interaction.customId.split('/');
+          const sessionKey = `${customSplit[0]}/${customSplit[1]}`;
+          const planIndex = customSplit[2];
+          const voteSession = matchVoteSessions.get(sessionKey);
+
+          // 투표 모드
+          if (voteSession) {
+            const userId = interaction.user.id;
+
+            if (!voteSession.participants.has(userId)) {
+              await interaction.reply({ content: '매칭 참가자만 투표할 수 있습니다.', ephemeral: true });
+              return;
+            }
+            if (voteSession.votes[userId] !== undefined) {
+              await interaction.reply({ content: '이미 투표했습니다.', ephemeral: true });
+              return;
+            }
+
+            voteSession.votes[userId] = planIndex;
+            voteSession.voteCounts[planIndex] = (voteSession.voteCounts[planIndex] || 0) + 1;
+
+            const totalVoted = Object.keys(voteSession.votes).length;
+            const remaining = voteSession.participants.size - totalVoted;
+
+            // 투표 현황 텍스트
+            const statusLines = [];
+            for (let i = 0; i < voteSession.totalPlans; i++) {
+              const count = voteSession.voteCounts[String(i)] || 0;
+              const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, 10 - count));
+              statusLines.push(`${i + 1}번: ${bar} ${count}표`);
+            }
+            const statusText = `**📊 매칭 투표 (${totalVoted}/${voteSession.participants.size})**\n${statusLines.join('\n')}`;
+
+            // 확정 체크: 최다득표가 뒤집힐 수 없는지
+            const counts = Object.entries(voteSession.voteCounts).sort((a, b) => b[1] - a[1]);
+            const [leadPlan, leadCount] = counts[0] || [null, 0];
+            const secondCount = counts.length > 1 ? counts[1][1] : 0;
+
+            if (leadCount > secondCount + remaining) {
+              // 투표 확정
+              matchVoteSessions.delete(sessionKey);
+              const winnerMatch = matches.get(`${sessionKey}/${leadPlan}`);
+              const matchMakeCommand = commandList.get('매칭생성');
+              if (matchMakeCommand && winnerMatch) {
+                // customId를 확정된 플랜으로 설정
+                interaction.customId = `${sessionKey}/${leadPlan}`;
+                const output = await matchMakeCommand.reactButton(interaction, winnerMatch);
+                if (output) {
+                  await interaction.update({
+                    content: `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다!**`,
+                    components: [],
+                  });
+                  await interaction.followUp(output);
+                }
+              }
+              return;
+            }
+
+            await interaction.update({ content: statusText });
+            return;
+          }
+
+          // 즉시 선택 모드 (기존)
           const matchMakeCommand = commandList.get('매칭생성');
           if (matchMakeCommand) {
             const output = await matchMakeCommand.reactButton(interaction, match);

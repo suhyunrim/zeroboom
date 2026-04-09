@@ -108,6 +108,7 @@ exports.run = async (groupName, interaction) => {
       win: userData.win || 0,
       lose: userData.lose || 0,
       puuid: summonerData.puuid,
+      discordId: userData.discordId || null,
       mainPositionRate: summonerData.mainPositionRate || 0,
       subPosition: summonerData.subPosition,
       subPositionRate: summonerData.subPositionRate || 0,
