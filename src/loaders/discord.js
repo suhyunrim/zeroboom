@@ -521,6 +521,21 @@ module.exports = async (app) => {
               groupName: group.groupName,
             });
           }
+          // 투표 모드 세션 생성
+          if (group.settings && group.settings.matchVoteMode) {
+            const participantDiscordIds = new Set();
+            if (result.ratingCache) {
+              Object.values(result.ratingCache).forEach((info) => {
+                if (info.discordId) participantDiscordIds.add(info.discordId);
+              });
+            }
+            matchVoteSessions.set(`${group.groupName}/${result.time}`, {
+              votes: {},
+              voteCounts: {},
+              participants: participantDiscordIds,
+              totalPlans: result.match.length,
+            });
+          }
         }
 
         await interaction.update({ components: [] });
