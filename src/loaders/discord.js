@@ -1370,8 +1370,8 @@ module.exports = async (app) => {
         return;
       }
 
-      // 온보딩 활성화 확인 (기본값: true)
-      if (group.settings?.onboardingEnabled === false) return;
+      // 온보딩 활성화 확인 (기본값: false, 그룹 설정에서 명시적으로 켜야 동작)
+      if (!group.settings?.onboardingEnabled) return;
 
       // 온보딩 DM 전송
       await startOnboarding(member, group);
