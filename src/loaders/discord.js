@@ -1426,6 +1426,52 @@ module.exports = async (app) => {
     } catch (e) {
       logger.error('서버 멤버 탈퇴 동기화 오류:', e);
     }
+
+    // 봇 다운타임 중 가입한 유저에게 온보딩 DM 전송
+    try {
+      const lastHeartbeat = await models.app_status.findByPk('lastHeartbeat');
+      const downSince = lastHeartbeat ? new Date(lastHeartbeat.value) : null;
+
+      if (downSince) {
+        const groups = await models.group.findAll({ where: { discordGuildId: { [Op.ne]: null } } });
+        for (const group of groups) {
+          if (!group.settings?.onboardingEnabled) continue;
+
+          const guild = client.guilds.cache.get(group.discordGuildId);
+          if (!guild) continue;
+
+          const members = await guild.members.fetch();
+          const missedMembers = members.filter((m) =>
+            !m.user.bot && m.joinedAt && m.joinedAt > downSince,
+          );
+
+          for (const [, member] of missedMembers) {
+            const existingUser = await models.user.findOne({
+              where: { groupId: group.id, discordId: member.id },
+            });
+            if (existingUser) continue;
+
+            await startOnboarding(member, group);
+            logger.info(`다운타임 온보딩 DM 전송: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+          }
+        }
+      }
+      logger.info('다운타임 온보딩 체크 완료');
+    } catch (e) {
+      logger.error('다운타임 온보딩 체크 오류:', e);
+    }
+
+    // 시작 시각 기록
+    models.app_status.upsert({ key: 'startedAt', value: new Date().toISOString() })
+      .catch((e) => logger.error('startedAt 기록 오류:', e));
+
+    // Heartbeat 시작 (1분 간격)
+    const updateHeartbeat = () => {
+      models.app_status.upsert({ key: 'lastHeartbeat', value: new Date().toISOString() })
+        .catch((e) => logger.error('Heartbeat 업데이트 오류:', e));
+    };
+    updateHeartbeat();
+    setInterval(updateHeartbeat, 60 * 1000);
   });
 
   app.discordClient = client;
