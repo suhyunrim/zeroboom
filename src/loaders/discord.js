@@ -24,6 +24,7 @@ const {
   handleOnboardButton,
   handleOnboardModalSubmit,
 } = require('../discord/onboarding');
+const { initEmojis } = require('../discord/emoji-manager');
 
 const VOTE_CATEGORIES = [
   { emoji: '⚔️', label: '캐리 머신', question: '이번 경기 가장 잘한 사람은?' },
@@ -1382,6 +1383,13 @@ module.exports = async (app) => {
 
   // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
   client.once('ready', async () => {
+    // 커스텀 이모지 초기화
+    try {
+      await initEmojis(client);
+    } catch (e) {
+      logger.error('커스텀 이모지 초기화 오류:', e);
+    }
+
     try {
       await tempVoiceController.cleanupOrphanedChannels(client);
       logger.info('임시 음성 채널 정합성 확인 완료');

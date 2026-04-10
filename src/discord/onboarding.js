@@ -12,15 +12,27 @@ const { logger } = require('../loaders/logger');
 const models = require('../db/models');
 const { registerUser } = require('../services/user');
 const auditLog = require('../controller/audit-log');
+const { getEmojiObject } = require('./emoji-manager');
 
-// 포지션 목록
-const POSITIONS = [
-  { label: 'TOP', value: 'TOP', emoji: '⚔️', description: '탑 라인' },
-  { label: 'JUNGLE', value: 'JUNGLE', emoji: '🐺', description: '정글' },
-  { label: 'MIDDLE', value: 'MIDDLE', emoji: '✨', description: '미드 라인' },
-  { label: 'BOTTOM', value: 'BOTTOM', emoji: '🏹', description: 'AD 캐리' },
-  { label: 'UTILITY', value: 'UTILITY', emoji: '💖', description: '서포터' },
-];
+// 포지션 폴백 이모지 (커스텀 이모지 없을 때)
+const POSITION_FALLBACK_EMOJI = {
+  TOP: '⚔️',
+  JUNGLE: '🐺',
+  MIDDLE: '✨',
+  BOTTOM: '🏹',
+  UTILITY: '💖',
+};
+
+// 포지션 SelectMenu 옵션 빌더 (커스텀 이모지 동적 적용)
+function buildPositionOptions() {
+  return [
+    { label: 'TOP', value: 'TOP', emoji: getEmojiObject('TOP') || '⚔️', description: '탑 라인' },
+    { label: 'JUNGLE', value: 'JUNGLE', emoji: getEmojiObject('JUNGLE') || '🐺', description: '정글' },
+    { label: 'MIDDLE', value: 'MIDDLE', emoji: getEmojiObject('MIDDLE') || '✨', description: '미드 라인' },
+    { label: 'BOTTOM', value: 'BOTTOM', emoji: getEmojiObject('BOTTOM') || '🏹', description: 'AD 캐리' },
+    { label: 'UTILITY', value: 'UTILITY', emoji: getEmojiObject('UTILITY') || '💖', description: '서포터' },
+  ];
+}
 
 // 티어 카테고리 (2줄, 각 5개)
 const TIER_ROW_1 = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM'];
@@ -32,8 +44,8 @@ const NON_STEP_TIERS = ['MASTER', 'GRANDMASTER', 'CHALLENGER'];
 // 티어 단계
 const TIER_STEPS = ['IV', 'III', 'II', 'I'];
 
-// 티어 이모지
-const TIER_EMOJI = {
+// 티어 폴백 이모지 (커스텀 이모지 없을 때)
+const TIER_FALLBACK_EMOJI = {
   IRON: '🪨',
   BRONZE: '🥉',
   SILVER: '🥈',
@@ -46,14 +58,25 @@ const TIER_EMOJI = {
   CHALLENGER: '👑',
 };
 
-// 포지션 이모지
-const POSITION_EMOJI = {
-  TOP: '⚔️',
-  JUNGLE: '🐺',
-  MIDDLE: '✨',
-  BOTTOM: '🏹',
-  UTILITY: '💖',
-};
+/**
+ * 티어 버튼용 이모지 객체 반환 (커스텀 이모지 또는 유니코드 폴백)
+ */
+function getTierButtonEmoji(tier) {
+  return getEmojiObject(tier) || TIER_FALLBACK_EMOJI[tier];
+}
+
+/**
+ * 텍스트 표시용 이모지 문자열 반환
+ */
+function getTierDisplayEmoji(tier) {
+  const obj = getEmojiObject(tier);
+  return obj ? `<:${obj.name}:${obj.id}>` : TIER_FALLBACK_EMOJI[tier];
+}
+
+function getPositionDisplayEmoji(position) {
+  const obj = getEmojiObject(position);
+  return obj ? `<:${obj.name}:${obj.id}>` : POSITION_FALLBACK_EMOJI[position];
+}
 
 /**
  * 온보딩 DM 전송 시작
@@ -78,7 +101,7 @@ async function startOnboarding(member, group, { testMode = false } = {}) {
     const positionSelect = new StringSelectMenuBuilder()
       .setCustomId(`${prefix}|pos|${member.guild.id}`)
       .setPlaceholder('포지션을 선택하세요')
-      .addOptions(POSITIONS);
+      .addOptions(buildPositionOptions());
 
     await dm.send({
       embeds: [embed],
@@ -106,7 +129,7 @@ async function handleOnboardSelectMenu(interaction) {
     const embed = new EmbedBuilder()
       .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
       .setTitle('🎮 티어를 선택해주세요')
-      .setDescription(`포지션: ${POSITION_EMOJI[position]} **${position}**\n\n자신의 티어를 선택해주세요.`);
+      .setDescription(`포지션: ${getPositionDisplayEmoji(position)} **${position}**\n\n자신의 티어를 선택해주세요.`);
 
     // 티어 카테고리 버튼 2줄
     const row1 = new ActionRowBuilder().addComponents(
@@ -114,7 +137,7 @@ async function handleOnboardSelectMenu(interaction) {
         new ButtonBuilder()
           .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
           .setLabel(tier)
-          .setEmoji(TIER_EMOJI[tier])
+          .setEmoji(getTierButtonEmoji(tier))
           .setStyle(ButtonStyle.Secondary),
       ),
     );
@@ -124,7 +147,7 @@ async function handleOnboardSelectMenu(interaction) {
         new ButtonBuilder()
           .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
           .setLabel(tier)
-          .setEmoji(TIER_EMOJI[tier])
+          .setEmoji(getTierButtonEmoji(tier))
           .setStyle(ButtonStyle.Secondary),
       ),
     );
@@ -159,9 +182,9 @@ async function handleOnboardButton(interaction) {
     // 단계 선택 버튼 (IV, III, II, I)
     const embed = new EmbedBuilder()
       .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
-      .setTitle(`${TIER_EMOJI[tierCategory]} ${tierCategory} - 단계를 선택해주세요`)
+      .setTitle(`${getTierDisplayEmoji(tierCategory)} ${tierCategory} - 단계를 선택해주세요`)
       .setDescription(
-        `포지션: ${POSITION_EMOJI[position]} **${position}**\n티어: ${TIER_EMOJI[tierCategory]} **${tierCategory}**`,
+        `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n티어: ${getTierDisplayEmoji(tierCategory)} **${tierCategory}**`,
       );
 
     const row = new ActionRowBuilder().addComponents(
@@ -214,8 +237,8 @@ async function showNameInput(interaction, guildId, position, tier, prefix = 'onb
     .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
     .setTitle('🎮 거의 다 됐어요!')
     .setDescription(
-      `포지션: ${POSITION_EMOJI[position]} **${position}**\n` +
-      `티어: ${TIER_EMOJI[tierCategory]} **${tierDisplay}**\n\n` +
+      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
+      `티어: ${getTierDisplayEmoji(tierCategory)} **${tierDisplay}**\n\n` +
       '아래 버튼을 눌러 롤 닉네임을 입력해주세요.',
     );
 
@@ -272,8 +295,8 @@ async function handleOnboardModalSubmit(interaction, client) {
         .setDescription(
           '**아래 정보로 등록됩니다 (테스트 모드 - DB 저장 안 됨)**\n\n' +
           `소환사: **${summonerName}**\n` +
-          `포지션: ${POSITION_EMOJI[position]} **${position}**\n` +
-          `티어: ${TIER_EMOJI[tierCategory]} **${tier}**\n` +
+          `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
+          `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n` +
           `그룹: **${group.groupName}**`,
         );
       await interaction.editReply({ embeds: [embed] });
@@ -289,8 +312,8 @@ async function handleOnboardModalSubmit(interaction, client) {
         .setTitle('✅ 등록 완료!')
         .setDescription(
           `${result.result}\n\n` +
-          `포지션: ${POSITION_EMOJI[position]} **${position}**\n` +
-          `티어: ${TIER_EMOJI[tierCategory]} **${tier}**\n\n` +
+          `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
+          `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n\n` +
           '내전에서 만나요! 🎮',
         );
 
