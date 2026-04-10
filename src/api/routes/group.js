@@ -109,6 +109,34 @@ module.exports = (app) => {
     return res.json(newSettings);
   });
 
+  // Discord 서버 역할 목록 조회
+  route.get('/:groupId/discord-roles', verifyToken, requireGroupAdmin, async (req, res) => {
+    try {
+      const group = await models.group.findByPk(Number(req.params.groupId));
+      if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+      if (!group.discordGuildId) return res.status(400).json({ result: 'Discord 서버가 연결되지 않았습니다.' });
+
+      const client = req.app.discordClient;
+      const guild = client.guilds.cache.get(group.discordGuildId);
+      if (!guild) return res.status(404).json({ result: 'Discord 서버를 찾을 수 없습니다.' });
+
+      const roles = guild.roles.cache
+        .filter((role) => !role.managed && role.id !== guild.id) // 봇 관리 역할, @everyone 제외
+        .sort((a, b) => b.position - a.position)
+        .map((role) => ({
+          id: role.id,
+          name: role.name,
+          color: role.hexColor,
+          position: role.position,
+        }));
+
+      return res.json(roles);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
   route.get('/ranking', async (req, res) => {
     const { groupName } = req.query;
 

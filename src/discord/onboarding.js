@@ -271,8 +271,8 @@ async function handleOnboardModalSubmit(interaction, client) {
 
       await interaction.editReply({ embeds: [embed] });
 
-      // Discord Role 부여
-      await assignDiscordRole(client, guildId, interaction.user.id, group);
+      // Discord Role 부여 (기본 역할 + 포지션 역할 + 티어 역할)
+      await assignDiscordRoles(client, guildId, interaction.user.id, group, position, tierCategory);
 
       // 감사 로그
       auditLog.log({
@@ -308,19 +308,36 @@ async function handleOnboardModalSubmit(interaction, client) {
 }
 
 /**
- * Discord Role 부여
+ * Discord Role 부여 (기본 + 포지션 + 티어)
  */
-async function assignDiscordRole(client, guildId, discordId, group) {
+async function assignDiscordRoles(client, guildId, discordId, group, position, tierCategory) {
   try {
-    const roleId = group.settings?.onboardingRoleId;
-    if (!roleId) return;
-
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return;
 
     const member = await guild.members.fetch(discordId);
-    await member.roles.add(roleId);
-    logger.info(`온보딩 역할 부여: ${discordId} - 그룹 ${group.id} - 역할 ${roleId}`);
+    const settings = group.settings || {};
+    const roleIds = [];
+
+    // 기본 인증 역할
+    if (settings.onboardingRoleId) {
+      roleIds.push(settings.onboardingRoleId);
+    }
+
+    // 포지션별 역할
+    if (settings.onboardingPositionRoles?.[position]) {
+      roleIds.push(settings.onboardingPositionRoles[position]);
+    }
+
+    // 티어별 역할
+    if (settings.onboardingTierRoles?.[tierCategory]) {
+      roleIds.push(settings.onboardingTierRoles[tierCategory]);
+    }
+
+    if (roleIds.length === 0) return;
+
+    await member.roles.add(roleIds);
+    logger.info(`온보딩 역할 부여: ${discordId} - 그룹 ${group.id} - 역할 [${roleIds.join(', ')}]`);
   } catch (e) {
     logger.error(`온보딩 역할 부여 실패: ${e.message}`);
   }
