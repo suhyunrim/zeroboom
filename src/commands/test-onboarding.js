@@ -11,7 +11,7 @@ exports.run = async (groupName, interaction) => {
 };
 
 exports.conf = {
-  enabled: !!process.env.COMMAND_PREFIX,
+  enabled: true,
   requireGroup: true,
   aliases: ['온보딩테스트'],
   args: [],
