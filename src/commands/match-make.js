@@ -3,19 +3,8 @@ const matchController = require('../controller/match');
 const auditLog = require('../controller/audit-log');
 const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
 const models = require('../db/models');
-const { getTierName, getTierPoint, getTierStep } = require('../utils/tierUtils');
+const { formatTierBadge, POSITION_ABBR, normalizePosition } = require('../utils/tierUtils');
 const { selectAllConcepts } = require('../match-maker/concept-scorers');
-
-const POSITION_ABBR = {
-  TOP: 'TOP',
-  JUNGLE: 'JG',
-  MIDDLE: 'MID',
-  BOTTOM: 'AD',
-  UTILITY: 'SUP',
-};
-
-// Riot API 포지션명 → position-optimizer 포지션명 변환
-const toOptimizerPos = (pos) => (pos === 'UTILITY' ? 'SUPPORT' : pos);
 
 const MAX_MATCH_COUNT = 6;
 
@@ -124,21 +113,13 @@ exports.run = async (groupName, interaction) => {
     team1WithRating.sort((a, b) => b.rating - a.rating);
     team2WithRating.sort((a, b) => b.rating - a.rating);
 
-    const formatTierDisplay = (name, rating, position) => {
-      const tierName = getTierName(rating);
-      const tierStep = getTierStep(rating);
+    const formatPlayerDisplay = ({ name, rating, position }) => {
       const posTag = `[${POSITION_ABBR[position] || position || '??'}]`;
-      const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-      if (isHighTier) {
-        const tierPoint = getTierPoint(rating);
-        const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-        return `[${tierAbbr} ${tierPoint}LP]${posTag}${name}`;
-      }
-      return `[${tierName.charAt(0)}${tierStep}]${posTag}${name}`;
+      return `${formatTierBadge(rating)}${posTag}${name}`;
     };
 
-    match.team1 = team1WithRating.map(({ name, rating, position }) => formatTierDisplay(name, rating, position));
-    match.team2 = team2WithRating.map(({ name, rating, position }) => formatTierDisplay(name, rating, position));
+    match.team1 = team1WithRating.map(formatPlayerDisplay);
+    match.team2 = team2WithRating.map(formatPlayerDisplay);
 
     // 평균 레이팅 계산
     match.team1AvgRating = team1WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
@@ -259,15 +240,9 @@ exports.reactButton = async (interaction, match) => {
       }
 
       const rating = userData.defaultRating + userData.additionalRating;
-      const tierName = getTierName(rating);
-      const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-      const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-      const tierDisplay = isHighTier
-        ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
-        : `[${tierName.charAt(0)}${getTierStep(rating)}]`;
       const posTag = `[${POSITION_ABBR[summonerData.mainPosition] || summonerData.mainPosition || '??'}]`;
       teams[i].push({
-        name: `${tierDisplay}${posTag}${summonerData.name}`,
+        name: `${formatTierBadge(rating)}${posTag}${summonerData.name}`,
         rating,
       });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
@@ -340,8 +315,8 @@ exports.generateConceptMatches = (allMatches, ratingCache, groupName, time) => {
       puuid: info.puuid,
       name,
       rating: info.rating,
-      mainPos: toOptimizerPos(info.position),
-      subPos: toOptimizerPos(info.subPosition),
+      mainPos: normalizePosition(info.position),
+      subPos: normalizePosition(info.subPosition),
       mainPositionRate: info.mainPositionRate,
       subPositionRate: info.subPositionRate,
     };

@@ -8,6 +8,7 @@ const {
   InteractionResponse,
   ChannelType,
   PermissionFlagsBits,
+  Partials,
 } = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
@@ -353,9 +354,8 @@ module.exports = async (app) => {
 
         // 결과 메시지
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-        const { getTierName, getTierStep, getTierPoint } = require('../utils/tierUtils');
+        const { formatTierBadge, formatAvgTierBadge, POSITION_ABBR } = require('../utils/tierUtils');
 
-        const positionAbbr = { TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', SUPPORT: 'SUP' };
         const typeEmoji = { MAIN: '🟢', SUB: '🟡', OFF: '🔴' };
 
         const formatTeam = (teamResult) => {
@@ -364,14 +364,7 @@ module.exports = async (app) => {
             const playerData = playerDataMap[a.playerName];
             const rating = playerData?.rating || 500;
             totalRating += rating;
-            const tierName = getTierName(rating);
-            const tierStep = getTierStep(rating);
-            const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-            const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-            const tierDisplay = isHighTier
-              ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
-              : `[${tierName.charAt(0)}${tierStep}]`;
-            return `${typeEmoji[a.assignmentType]}\`${tierDisplay}[${positionAbbr[a.position]}]${a.playerName}\``;
+            return `${typeEmoji[a.assignmentType]}\`${formatTierBadge(rating)}[${POSITION_ABBR[a.position]}]${a.playerName}\``;
           });
           const avgRating = totalRating / 5;
           return { lines: lines.join('\n'), avgRating };
@@ -379,15 +372,6 @@ module.exports = async (app) => {
 
         const team1Result = formatTeam(po.teamA);
         const team2Result = formatTeam(po.teamB);
-
-        // 평균 티어 포맷 함수
-        const formatAvgTier = (avgRating) => {
-          const tierName = getTierName(avgRating);
-          const tierStep = getTierStep(avgRating);
-          const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-          const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-          return isHighTier ? `[${tierAbbr} ${getTierPoint(avgRating)}LP]` : `[${tierName.charAt(0)}${tierStep}]`;
-        };
 
         const embed = new EmbedBuilder()
           .setColor('#00ff00')
@@ -397,14 +381,14 @@ module.exports = async (app) => {
           )
           .addFields(
             {
-              name: `🐶 1팀 (${(selectedMatch.team1WinRate * 100).toFixed(1)}%) ${formatAvgTier(
+              name: `🐶 1팀 (${(selectedMatch.team1WinRate * 100).toFixed(1)}%) ${formatAvgTierBadge(
                 team1Result.avgRating,
               )}`,
               value: team1Result.lines,
               inline: true,
             },
             {
-              name: `🐱 2팀 (${((1 - selectedMatch.team1WinRate) * 100).toFixed(1)}%) ${formatAvgTier(
+              name: `🐱 2팀 (${((1 - selectedMatch.team1WinRate) * 100).toFixed(1)}%) ${formatAvgTierBadge(
                 team2Result.avgRating,
               )}`,
               value: team2Result.lines,
@@ -594,10 +578,16 @@ module.exports = async (app) => {
         await matchController.applyMatchResult(gameId, previousWinTeam);
 
         const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
-        auditLog.log({
-          groupId: group?.id, actorDiscordId: interaction.user.id, actorName: interaction.member.nickname,
-          action: 'match.cancel', details: { gameId, previousWinTeam }, source: 'discord',
-        }).catch((e) => logger.error('감사 로그 오류:', e));
+        auditLog
+          .log({
+            groupId: group?.id,
+            actorDiscordId: interaction.user.id,
+            actorName: interaction.member.nickname,
+            action: 'match.cancel',
+            details: { gameId, previousWinTeam },
+            source: 'discord',
+          })
+          .catch((e) => logger.error('감사 로그 오류:', e));
 
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const buttons = new ActionRowBuilder()
@@ -693,10 +683,16 @@ module.exports = async (app) => {
         const matchResult = await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
 
-        auditLog.log({
-          groupId: group.id, actorDiscordId: interaction.user.id, actorName: interaction.member.nickname,
-          action: 'match.confirm', details: { gameId: matchData.gameId, winTeam, previousWinTeam }, source: 'discord',
-        }).catch((e) => logger.error('감사 로그 오류:', e));
+        auditLog
+          .log({
+            groupId: group.id,
+            actorDiscordId: interaction.user.id,
+            actorName: interaction.member.nickname,
+            action: 'match.confirm',
+            details: { gameId: matchData.gameId, winTeam, previousWinTeam },
+            source: 'discord',
+          })
+          .catch((e) => logger.error('감사 로그 오류:', e));
 
         // 업적 달성 알림
         if (matchResult.newAchievements?.length > 0) {
@@ -940,7 +936,9 @@ module.exports = async (app) => {
               const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, 10 - count));
               statusLines.push(`${i + 1}번: ${bar} ${count}표`);
             }
-            const statusText = `**📊 매칭 투표 (${totalVoted}/${voteSession.participants.size})**\n${statusLines.join('\n')}`;
+            const statusText = `**📊 매칭 투표 (${totalVoted}/${voteSession.participants.size})**\n${statusLines.join(
+              '\n',
+            )}`;
 
             // 확정 체크: 최다득표가 뒤집힐 수 없는지
             const counts = Object.entries(voteSession.voteCounts).sort((a, b) => b[1] - a[1]);
@@ -980,7 +978,8 @@ module.exports = async (app) => {
                   await interaction.update({ components: newRows });
 
                   // 투표 현황 메시지 업데이트 또는 새로 전송
-                  const finalText = `${statusText}\n\n✅ **${Number(leadPlan) + 1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`;
+                  const finalText = `${statusText}\n\n✅ **${Number(leadPlan) +
+                    1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`;
                   if (voteSession.statusMessage) {
                     await voteSession.statusMessage.edit(finalText);
                   } else {

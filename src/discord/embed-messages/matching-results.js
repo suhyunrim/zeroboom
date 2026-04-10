@@ -1,27 +1,14 @@
 const { EmbedBuilder } = require('discord.js');
-const { getTierName, getTierStep, getTierPoint } = require('../../utils/tierUtils');
+const { formatAvgTierBadge } = require('../../utils/tierUtils');
 
 const formatPercentage = (value) => `${(value * 100).toFixed(2)}%`;
-
-const formatAvgTier = (avgRating) => {
-  if (!avgRating || avgRating <= 0) return '';
-  const tierName = getTierName(avgRating);
-  const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-  if (isHighTier) {
-    const tierPoint = getTierPoint(avgRating);
-    const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-    return `[평균 ${tierAbbr} ${tierPoint}LP]`;
-  }
-  const tierStep = getTierStep(avgRating);
-  return `[평균 ${tierName.charAt(0)}${tierStep}]`;
-};
 
 // 한글/이모지 등 double-width 문자를 고려한 시각적 너비 계산
 const visualWidth = (str) => {
   let width = 0;
   for (const char of str) {
     const code = char.codePointAt(0);
-    width += code > 0x7F ? 2 : 1;
+    width += code > 0x7f ? 2 : 1;
   }
   return width;
 };
@@ -31,12 +18,14 @@ const TARGET_WIDTH = 28;
 const INVISIBLE_SPACE = '\u2800';
 
 const format = (label, team, winRate, emoji, avgRating = 0) => {
-  let message = team.map((name) => {
-    const content = emoji + name;
-    const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
-    return `\`${content}\`` + INVISIBLE_SPACE.repeat(padding);
-  }).join('\n');
-  const avgTierStr = formatAvgTier(avgRating);
+  let message = team
+    .map((name) => {
+      const content = emoji + name;
+      const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
+      return `\`${content}\`` + INVISIBLE_SPACE.repeat(padding);
+    })
+    .join('\n');
+  const avgTierStr = formatAvgTierBadge(avgRating);
   return {
     name: `**${label}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}`,
     value: message,
@@ -46,28 +35,46 @@ const format = (label, team, winRate, emoji, avgRating = 0) => {
 
 module.exports.formatMatchWithRating = (label, team1, team1Rating, team2, team2Rating, team1WinRate) => {
   const fields = [];
-  fields.push(format(label, team1.map(elem => elem.name), team1WinRate, '🐶', team1Rating));
-  fields.push(format(label, team2.map(elem => elem.name), 1 - team1WinRate, '🐱', team2Rating));
+  fields.push(
+    format(
+      label,
+      team1.map((elem) => elem.name),
+      team1WinRate,
+      '🐶',
+      team1Rating,
+    ),
+  );
+  fields.push(
+    format(
+      label,
+      team2.map((elem) => elem.name),
+      1 - team1WinRate,
+      '🐱',
+      team2Rating,
+    ),
+  );
   return new EmbedBuilder().addFields(fields);
 };
 
 module.exports.formatMatches = (matches) => {
   const fields = [];
 
-  matches.forEach(({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating, conceptLabel, conceptEmoji, conceptDesc }, idx) => {
-    if (conceptDesc) {
-      if (fields.length !== 0) {
+  matches.forEach(
+    ({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating, conceptLabel, conceptEmoji, conceptDesc }, idx) => {
+      if (conceptDesc) {
+        if (fields.length !== 0) {
+          fields.push({ name: '\u200B', value: '\u200B' });
+        }
+        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '\u200B', inline: false });
+      } else if (fields.length !== 0) {
         fields.push({ name: '\u200B', value: '\u200B' });
       }
-      fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '\u200B', inline: false });
-    } else if (fields.length !== 0) {
-      fields.push({ name: '\u200B', value: '\u200B' });
-    }
-    const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
-    const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
-    fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating));
-    fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating));
-  });
+      const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
+      const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
+      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating));
+      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating));
+    },
+  );
 
   return new EmbedBuilder().addFields(fields);
 };

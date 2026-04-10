@@ -2,6 +2,7 @@
  * 인원뽑기 관련 공통 유틸리티
  */
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, EmbedBuilder } = require('discord.js');
+const { normalizePosition } = require('./tierUtils');
 
 // 공통 상수
 const PICK_COUNT = 10;
@@ -9,29 +10,29 @@ const MAX_TOGGLE_MEMBERS = 24;
 
 // 포지션 이모지 매핑
 const POSITION_EMOJI = {
-  '상관X': '🎲',
-  '탑': '⚔️',
-  '정글': '🐺',
-  '미드': '✨',
-  '원딜': '🏹',
-  '서폿': '💖'
+  상관X: '🎲',
+  탑: '⚔️',
+  정글: '🐺',
+  미드: '✨',
+  원딜: '🏹',
+  서폿: '💖',
 };
 
 // 팀 이모지 매핑
 const TEAM_EMOJI = {
-  '랜덤팀': '🎲',
+  랜덤팀: '🎲',
   '1팀': '🔵',
-  '2팀': '🔴'
+  '2팀': '🔴',
 };
 
 // 포지션 정렬 순서
 const POSITION_ORDER = {
-  '탑': 1,
-  '정글': 2,
-  '미드': 3,
-  '원딜': 4,
-  '서폿': 5,
-  '상관X': 6
+  탑: 1,
+  정글: 2,
+  미드: 3,
+  원딜: 4,
+  서폿: 5,
+  상관X: 6,
 };
 
 // 닉네임 파싱용 특수문자
@@ -103,9 +104,8 @@ const buildToggleButtons = (memberList, excludedIds, timeKey) => {
     const emoji = isExcluded ? '❌' : '✅';
     const style = isExcluded ? ButtonStyle.Secondary : ButtonStyle.Success;
 
-    const displayName = member.lolNickname.length > 15
-      ? member.lolNickname.substring(0, 12) + '...'
-      : member.lolNickname;
+    const displayName =
+      member.lolNickname.length > 15 ? member.lolNickname.substring(0, 12) + '...' : member.lolNickname;
 
     // customId에 discordId 사용 (특수문자 문제 방지)
     currentRow.addComponents(
@@ -178,9 +178,11 @@ const buildResultButtons = (time) => {
  * 토글 메시지 생성
  */
 const buildToggleMessage = (channelName, memberCount, includedCount) => {
-  return `**${channelName}**에 **${memberCount}명**이 있습니다.\n` +
+  return (
+    `**${channelName}**에 **${memberCount}명**이 있습니다.\n` +
     `제외할 멤버를 클릭하세요. (현재 ${includedCount}명 참가)\n` +
-    `✅ = 참가 / ❌ = 제외`;
+    `✅ = 참가 / ❌ = 제외`
+  );
 };
 
 /**
@@ -298,24 +300,24 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
   if (team1.length > 0) {
     embed.addFields({
       name: '🔵 1팀',
-      value: team1.map(e => e.line).join('\n') || '\u200B',
-      inline: true
+      value: team1.map((e) => e.line).join('\n') || '\u200B',
+      inline: true,
     });
   }
 
   if (team2.length > 0) {
     embed.addFields({
       name: '🔴 2팀',
-      value: team2.map(e => e.line).join('\n') || '\u200B',
-      inline: true
+      value: team2.map((e) => e.line).join('\n') || '\u200B',
+      inline: true,
     });
   }
 
   if (random.length > 0) {
     embed.addFields({
       name: '🎲 랜덤팀',
-      value: random.map(e => e.line).join('\n') || '\u200B',
-      inline: false
+      value: random.map((e) => e.line).join('\n') || '\u200B',
+      inline: false,
     });
   }
 
@@ -332,7 +334,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
           .setCustomId(`posEditUser|${timeKey}|${globalIdx}`)
           .setLabel(`${globalIdx + 1}. ${displayName}`)
           .setStyle(ButtonStyle.Secondary);
-      })
+      }),
     );
     rows.push(row);
   }
@@ -341,7 +343,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
     new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
       .setLabel('🎮 매칭 생성')
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
   );
   rows.push(confirmRow);
 
@@ -372,7 +374,7 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
     .addOptions([
       { label: '랜덤팀', value: '랜덤팀', emoji: '🎲', description: '자동으로 팀 배정' },
       { label: '1팀', value: '1팀', emoji: '🔵', description: 'Blue Side' },
-      { label: '2팀', value: '2팀', emoji: '🔴', description: 'Red Side' }
+      { label: '2팀', value: '2팀', emoji: '🔴', description: 'Red Side' },
     ]);
 
   const positionSelect = new StringSelectMenuBuilder()
@@ -384,17 +386,125 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
       { label: '정글', value: '정글', emoji: '🐺', description: 'Jungle' },
       { label: '미드', value: '미드', emoji: '✨', description: 'Mid Lane' },
       { label: '원딜', value: '원딜', emoji: '🏹', description: 'ADC' },
-      { label: '서폿', value: '서폿', emoji: '💖', description: 'Support' }
+      { label: '서폿', value: '서폿', emoji: '💖', description: 'Support' },
     ]);
 
   return {
     content,
     components: [
       new ActionRowBuilder().addComponents(teamSelect),
-      new ActionRowBuilder().addComponents(positionSelect)
+      new ActionRowBuilder().addComponents(positionSelect),
     ],
     ephemeral: true,
   };
+};
+
+/**
+ * pickedUsers/pickedMembersData에서 discordId로 소환사명을 조회하여 fakeOptions 생성
+ * @param {Array<string>} pickedUsers - 뽑힌 유저 닉네임 목록
+ * @param {Array<Object>} pickedMembersData - 뽑힌 유저 멤버 데이터 (discordId 포함)
+ * @param {number} groupId - 그룹 ID
+ * @param {Object} models - DB 모델
+ * @returns {Promise<Array<{name: string, value: string, discordId: string|null}>>}
+ */
+const buildFakeOptions = async (pickedUsers, pickedMembersData, groupId, models) => {
+  const fakeOptions = [];
+  for (let index = 0; index < pickedUsers.length; index++) {
+    const parsedName = pickedUsers[index];
+    const memberData = pickedMembersData ? pickedMembersData[index] : null;
+    let actualName = parsedName;
+
+    if (memberData && memberData.discordId) {
+      const userData = await models.user.findOne({
+        where: { groupId, discordId: memberData.discordId },
+      });
+      if (userData) {
+        const summonerData = await models.summoner.findOne({
+          where: { puuid: userData.puuid },
+        });
+        if (summonerData) {
+          actualName = summonerData.name;
+        }
+      }
+    }
+
+    fakeOptions.push({
+      name: `유저${index + 1}`,
+      value: actualName,
+      discordId: memberData?.discordId || null,
+    });
+  }
+  return fakeOptions;
+};
+
+/**
+ * pickedUsers/pickedMembersData에서 유저 정보를 조회하여 playerDataMap과 fakeOptions를 동시에 생성
+ * (포지션 매칭 등 상세 유저 정보가 필요한 경우 사용)
+ * @returns {Promise<{playerDataMap: Object, fakeOptions: Array, error: string|null}>}
+ */
+const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, models) => {
+  const playerDataMap = {};
+  const fakeOptions = [];
+
+  for (let i = 0; i < pickedUsers.length; i++) {
+    const parsedName = pickedUsers[i];
+    const memberData = pickedMembersData ? pickedMembersData[i] : null;
+
+    let summonerData = null;
+    let userData = null;
+
+    // discordId로 먼저 조회
+    if (memberData && memberData.discordId) {
+      userData = await models.user.findOne({
+        where: { groupId, discordId: memberData.discordId },
+      });
+      if (userData) {
+        summonerData = await models.summoner.findOne({
+          where: { puuid: userData.puuid },
+        });
+      }
+    }
+
+    // discordId로 못 찾으면 이름으로 조회
+    if (!summonerData) {
+      summonerData = await models.summoner.findOne({
+        where: { name: parsedName },
+      });
+      if (summonerData) {
+        userData = await models.user.findOne({
+          where: { groupId, puuid: summonerData.puuid },
+        });
+      }
+    }
+
+    if (!summonerData || !userData) {
+      return { playerDataMap: null, fakeOptions: null, error: `유저 정보를 찾을 수 없습니다: ${parsedName}` };
+    }
+
+    const actualName = summonerData.name;
+    const rating = userData.defaultRating + userData.additionalRating;
+
+    const discordId = memberData?.discordId || null;
+
+    playerDataMap[actualName] = {
+      puuid: summonerData.puuid,
+      name: actualName,
+      rating,
+      discordId,
+      mainPos: normalizePosition(summonerData.mainPosition),
+      subPos: normalizePosition(summonerData.subPosition),
+      mainPositionRate: summonerData.mainPositionRate || 0,
+      subPositionRate: summonerData.subPositionRate || 0,
+    };
+
+    fakeOptions.push({
+      name: `유저${i + 1}`,
+      value: actualName,
+      discordId,
+    });
+  }
+
+  return { playerDataMap, fakeOptions, error: null };
 };
 
 /**
@@ -421,40 +531,10 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
         return { content: '그룹 정보를 찾을 수 없습니다.', ephemeral: true };
       }
 
-      // discordId로 실제 소환사 이름을 조회하여 fakeOptions 생성
-      const fakeOptions = [];
-      for (let index = 0; index < data.pickedUsers.length; index++) {
-        const parsedName = data.pickedUsers[index];
-        const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
-        let actualName = parsedName;
-
-        // discordId가 있으면 DB에서 실제 소환사 이름 조회
-        if (memberData && memberData.discordId) {
-          const userData = await models.user.findOne({
-            where: { groupId: group.id, discordId: memberData.discordId },
-          });
-          if (userData) {
-            const summonerData = await models.summoner.findOne({
-              where: { puuid: userData.puuid },
-            });
-            if (summonerData) {
-              actualName = summonerData.name;
-            }
-          }
-        }
-
-        fakeOptions.push({
-          name: `유저${index + 1}`,
-          value: actualName,
-          discordId: memberData?.discordId || null,
-        });
-      }
-
+      const fakeOptions = await buildFakeOptions(data.pickedUsers, data.pickedMembersData, group.id, models);
       const fakeInteraction = {
         ...interaction,
-        options: {
-          data: fakeOptions,
-        },
+        options: { data: fakeOptions },
       };
 
       const result = await matchMake.run(group.groupName, fakeInteraction);
@@ -484,7 +564,6 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
     }
 
     if (action === 'conceptMatch') {
-      // 먼저 매칭 생성 (match와 동일한 로직)
       const group = await models.group.findOne({
         where: { discordGuildId: interaction.guildId },
       });
@@ -492,29 +571,7 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
         return { content: '그룹 정보를 찾을 수 없습니다.', ephemeral: true };
       }
 
-      const fakeOptions = [];
-      for (let index = 0; index < data.pickedUsers.length; index++) {
-        const parsedName = data.pickedUsers[index];
-        const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
-        let actualName = parsedName;
-        if (memberData && memberData.discordId) {
-          const userData = await models.user.findOne({
-            where: { groupId: group.id, discordId: memberData.discordId },
-          });
-          if (userData) {
-            const summonerData = await models.summoner.findOne({
-              where: { puuid: userData.puuid },
-            });
-            if (summonerData) actualName = summonerData.name;
-          }
-        }
-        fakeOptions.push({
-          name: `유저${index + 1}`,
-          value: actualName,
-          discordId: memberData?.discordId || null,
-        });
-      }
-
+      const fakeOptions = await buildFakeOptions(data.pickedUsers, data.pickedMembersData, group.id, models);
       const fakeInteraction = { ...interaction, options: { data: fakeOptions } };
       const matchResult = await matchMake.run(group.groupName, fakeInteraction);
       if (typeof matchResult === 'string' || !matchResult.allMatches) {
@@ -523,7 +580,10 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
 
       // 컨셉 매칭 결과 생성
       const conceptOutput = matchMake.generateConceptMatches(
-        matchResult.allMatches, matchResult.ratingCache, group.groupName, matchResult.time,
+        matchResult.allMatches,
+        matchResult.ratingCache,
+        group.groupName,
+        matchResult.time,
       );
       if (conceptOutput.error) {
         return { content: conceptOutput.error, ephemeral: true };
@@ -543,8 +603,8 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
  * 포지션 매칭 생성 핸들러
  */
 const handlePositionMatch = async (interaction, data, models, matchMake) => {
-  const { optimizePositionsForMatches, POSITIONS, POSITION_KR } = require('../match-maker/position-optimizer');
-  const { getTierName, getTierStep, getTierPoint } = require('./tierUtils');
+  const { optimizePositionsForMatches } = require('../match-maker/position-optimizer');
+  const { formatTierBadge, formatAvgTierBadge, POSITION_ABBR } = require('./tierUtils');
 
   const group = await models.group.findOne({
     where: { discordGuildId: interaction.guildId },
@@ -555,70 +615,14 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   }
 
   // 1. 유저 정보 수집 및 playerDataMap 생성
-  const playerDataMap = {};
-  const fakeOptions = [];
-
-  for (let i = 0; i < data.pickedUsers.length; i++) {
-    const parsedName = data.pickedUsers[i];
-    const memberData = data.pickedMembersData ? data.pickedMembersData[i] : null;
-
-    let summonerData = null;
-    let userData = null;
-
-    // discordId로 먼저 조회
-    if (memberData && memberData.discordId) {
-      userData = await models.user.findOne({
-        where: { groupId: group.id, discordId: memberData.discordId },
-      });
-      if (userData) {
-        summonerData = await models.summoner.findOne({
-          where: { puuid: userData.puuid },
-        });
-      }
-    }
-
-    // discordId로 못 찾으면 이름으로 조회
-    if (!summonerData) {
-      summonerData = await models.summoner.findOne({
-        where: { name: parsedName },
-      });
-      if (summonerData) {
-        userData = await models.user.findOne({
-          where: { groupId: group.id, puuid: summonerData.puuid },
-        });
-      }
-    }
-
-    if (!summonerData || !userData) {
-      return { content: `유저 정보를 찾을 수 없습니다: ${parsedName}`, ephemeral: true };
-    }
-
-    const actualName = summonerData.name;
-    const rating = userData.defaultRating + userData.additionalRating;
-
-    // 포지션 변환 (UTILITY -> SUPPORT)
-    const normalizePosition = (pos) => {
-      if (!pos) return null;
-      if (pos === 'UTILITY') return 'SUPPORT';
-      return pos;
-    };
-
-    playerDataMap[actualName] = {
-      puuid: summonerData.puuid,
-      name: actualName,
-      rating,
-      discordId: memberData?.discordId || null,
-      mainPos: normalizePosition(summonerData.mainPosition),
-      subPos: normalizePosition(summonerData.subPosition),
-      mainPositionRate: summonerData.mainPositionRate || 0,
-      subPositionRate: summonerData.subPositionRate || 0,
-    };
-
-    fakeOptions.push({
-      name: `유저${i + 1}`,
-      value: actualName,
-      discordId: memberData?.discordId || null,
-    });
+  const { playerDataMap, fakeOptions, error } = await buildPlayerDataMap(
+    data.pickedUsers,
+    data.pickedMembersData,
+    group.id,
+    models,
+  );
+  if (error) {
+    return { content: error, ephemeral: true };
   }
 
   // 2. 기존 매칭 생성 (상위 100개)
@@ -643,40 +647,22 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   }
 
   // 4. 결과 포맷팅
-  const positionAbbr = { TOP: 'TOP', JUNGLE: 'JG', MIDDLE: 'MID', BOTTOM: 'AD', SUPPORT: 'SUP' };
   const typeEmoji = { MAIN: '🟢', SUB: '🟡', OFF: '🔴' };
 
   const formatTeamField = (teamResult, teamEmoji, teamName, winRate) => {
     let totalRating = 0;
-    const lines = teamResult.assignments.map(a => {
+    const lines = teamResult.assignments.map((a) => {
       const playerData = playerDataMap[a.playerName];
       const rating = playerData?.rating || 500;
       totalRating += rating;
-      const tierName = getTierName(rating);
-      const tierStep = getTierStep(rating);
-      const isHighTier = tierName === 'MASTER' || tierName === 'GRANDMASTER' || tierName === 'CHALLENGER';
-      const tierAbbr = tierName === 'GRANDMASTER' ? 'GM' : tierName.charAt(0);
-      const tierDisplay = isHighTier
-        ? `[${tierAbbr} ${getTierPoint(rating)}LP]`
-        : `[${tierName.charAt(0)}${tierStep}]`;
-
-      return `${typeEmoji[a.assignmentType]}\`${tierDisplay}[${positionAbbr[a.position]}]${a.playerName}\``;
+      return `${typeEmoji[a.assignmentType]}\`${formatTierBadge(rating)}[${POSITION_ABBR[a.position]}]${a.playerName}\``;
     });
 
     const winRateStr = `${(winRate * 100).toFixed(1)}%`;
-
-    // 평균 티어 계산
     const avgRating = totalRating / 5;
-    const avgTierName = getTierName(avgRating);
-    const avgTierStep = getTierStep(avgRating);
-    const avgIsHighTier = avgTierName === 'MASTER' || avgTierName === 'GRANDMASTER' || avgTierName === 'CHALLENGER';
-    const avgTierAbbr = avgTierName === 'GRANDMASTER' ? 'GM' : avgTierName.charAt(0);
-    const avgTierDisplay = avgIsHighTier
-      ? `[평균 ${avgTierAbbr} ${getTierPoint(avgRating)}LP]`
-      : `[평균 ${avgTierName.charAt(0)}${avgTierStep}]`;
 
     return {
-      name: `${teamEmoji} ${teamName} (${winRateStr}) ${avgTierDisplay}`,
+      name: `${teamEmoji} ${teamName} (${winRateStr}) ${formatAvgTierBadge(avgRating)}`,
       value: lines.join('\n'),
       inline: true,
     };
@@ -692,7 +678,7 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   };
 
   // 메인/서브 포지션별로 유저 수집
-  Object.values(playerDataMap).forEach(p => {
+  Object.values(playerDataMap).forEach((p) => {
     if (p.mainPos && positionUsers[p.mainPos]) {
       positionUsers[p.mainPos].push({ name: p.name, rate: p.mainPositionRate || 0 });
     }
@@ -702,7 +688,7 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   });
 
   // 각 포지션별로 비율 높은 순 정렬
-  Object.keys(positionUsers).forEach(pos => {
+  Object.keys(positionUsers).forEach((pos) => {
     positionUsers[pos].sort((a, b) => b.rate - a.rate);
   });
 
@@ -710,15 +696,15 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
 
   // mainPositionRate가 0인 유저 수집 (데이터 없음)
   const noDataUsers = Object.values(playerDataMap)
-    .filter(p => !p.mainPositionRate || p.mainPositionRate === 0)
-    .map(p => p.name);
+    .filter((p) => !p.mainPositionRate || p.mainPositionRate === 0)
+    .map((p) => p.name);
 
   // 포지션별 유저 표시
   const posOrderList = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'SUPPORT'];
   const positionLines = [];
-  posOrderList.forEach(pos => {
-    const abbr = positionAbbr[pos];
-    const users = positionUsers[pos].filter(u => u.rate >= 20);
+  posOrderList.forEach((pos) => {
+    const abbr = POSITION_ABBR[pos] || pos;
+    const users = positionUsers[pos].filter((u) => u.rate >= 20);
     if (users.length === 0) {
       positionLines.push(`**${abbr}**: -`);
     } else {
@@ -811,6 +797,10 @@ module.exports = {
   buildToggleMessage,
   buildPositionUI,
   buildUserEditUI,
+
+  // 데이터 빌더
+  buildFakeOptions,
+  buildPlayerDataMap,
 
   // 핸들러
   handleToggle,
