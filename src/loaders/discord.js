@@ -1,6 +1,7 @@
 const {
   Client,
   GatewayIntentBits,
+  Partials,
   REST,
   Routes,
   ComponentType,
@@ -17,6 +18,12 @@ const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
 const auditLog = require('../controller/audit-log');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
+const {
+  startOnboarding,
+  handleOnboardSelectMenu,
+  handleOnboardButton,
+  handleOnboardModalSubmit,
+} = require('../discord/onboarding');
 
 const VOTE_CATEGORIES = [
   { emoji: '⚔️', label: '캐리 머신', question: '이번 경기 가장 잘한 사람은?' },
@@ -65,7 +72,9 @@ module.exports = async (app) => {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.DirectMessages,
     ],
+    partials: [Partials.Channel],
   });
 
   const matches = new Map();
@@ -180,6 +189,12 @@ module.exports = async (app) => {
 
     try {
       const split = interaction.customId.split('|');
+
+      // 온보딩 버튼 핸들러
+      if (split[0] === 'onboard') {
+        await handleOnboardButton(interaction);
+        return;
+      }
 
       // pickToggle 버튼 (토글 모드)
       if (split[0] === 'pickToggle') {
@@ -1014,10 +1029,16 @@ module.exports = async (app) => {
       return;
     }
 
-    const commandList = await commandListLoader();
-
     try {
       const split = interaction.customId.split('|');
+
+      // 온보딩 SelectMenu 핸들러
+      if (split[0] === 'onboard') {
+        await handleOnboardSelectMenu(interaction);
+        return;
+      }
+
+      const commandList = await commandListLoader();
 
       // honorVote SelectMenu (명예 투표)
       if (split[0] === 'honorVote') {
@@ -1300,6 +1321,21 @@ module.exports = async (app) => {
     }
   });
 
+  // 온보딩 Modal 제출 핸들러
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isModalSubmit()) return;
+
+    try {
+      const split = interaction.customId.split('|');
+      if (split[0] === 'onboard') {
+        await handleOnboardModalSubmit(interaction, client);
+        return;
+      }
+    } catch (e) {
+      logger.error('모달 처리 오류:', e);
+    }
+  });
+
   // 디스코드 서버 탈퇴 감지
   client.on('guildMemberRemove', async (member) => {
     try {
@@ -1315,18 +1351,32 @@ module.exports = async (app) => {
     }
   });
 
-  // 디스코드 서버 재가입 감지
+  // 디스코드 서버 가입/재가입 감지 + 온보딩
   client.on('guildMemberAdd', async (member) => {
     try {
       const group = await models.group.findOne({ where: { discordGuildId: member.guild.id } });
       if (!group) return;
-      await models.user.update(
-        { leftGuildAt: null },
-        { where: { groupId: group.id, discordId: member.id } },
-      );
-      logger.info(`서버 재가입 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+
+      // 기존 유저면 leftGuildAt 리셋, 온보딩 생략
+      const existingUser = await models.user.findOne({
+        where: { groupId: group.id, discordId: member.id },
+      });
+      if (existingUser) {
+        await models.user.update(
+          { leftGuildAt: null },
+          { where: { groupId: group.id, discordId: member.id } },
+        );
+        logger.info(`서버 재가입 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+        return;
+      }
+
+      // 온보딩 활성화 확인 (기본값: true)
+      if (group.settings?.onboardingEnabled === false) return;
+
+      // 온보딩 DM 전송
+      await startOnboarding(member, group);
     } catch (e) {
-      logger.error('서버 재가입 처리 오류:', e);
+      logger.error('서버 가입/온보딩 처리 오류:', e);
     }
   });
 
