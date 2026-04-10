@@ -191,7 +191,7 @@ module.exports = async (app) => {
       const split = interaction.customId.split('|');
 
       // 온보딩 버튼 핸들러
-      if (split[0] === 'onboard') {
+      if (split[0] === 'onboard' || split[0] === 'onboardTest') {
         await handleOnboardButton(interaction);
         return;
       }
@@ -1033,7 +1033,7 @@ module.exports = async (app) => {
       const split = interaction.customId.split('|');
 
       // 온보딩 SelectMenu 핸들러
-      if (split[0] === 'onboard') {
+      if (split[0] === 'onboard' || split[0] === 'onboardTest') {
         await handleOnboardSelectMenu(interaction);
         return;
       }
@@ -1327,7 +1327,7 @@ module.exports = async (app) => {
 
     try {
       const split = interaction.customId.split('|');
-      if (split[0] === 'onboard') {
+      if (split[0] === 'onboard' || split[0] === 'onboardTest') {
         await handleOnboardModalSubmit(interaction, client);
         return;
       }

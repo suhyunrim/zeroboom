@@ -72,6 +72,10 @@ module.exports = async () => {
 	logger.info(`Loading a total of ${files.length} commands.`);
 	for (let fileName of files) {
 		const props = require(`../commands/${fileName}`);
+		if (props.conf.enabled === false) {
+			logger.info(`Command Skipped (disabled): ${props.help.name}`);
+			continue;
+		}
 		logger.info(`Command Loaded! ${props.help.name} 👌`);
 		commandList.push(props);
 	}

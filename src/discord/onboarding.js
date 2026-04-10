@@ -57,20 +57,26 @@ const POSITION_EMOJI = {
 
 /**
  * 온보딩 DM 전송 시작
+ * @param {Object} options
+ * @param {boolean} [options.testMode=false] - true면 DB 저장 없이 테스트만 진행
  */
-async function startOnboarding(member, group) {
+async function startOnboarding(member, group, { testMode = false } = {}) {
+  const prefix = testMode ? 'onboardTest' : 'onboard';
   try {
     const dm = await member.createDM();
 
     const embed = new EmbedBuilder()
-      .setColor('#0099ff')
-      .setTitle(`🎮 ${member.guild.name}에 오신 것을 환영합니다!`)
+      .setColor(testMode ? '#ffa500' : '#0099ff')
+      .setTitle(testMode
+        ? '🧪 온보딩 테스트 모드'
+        : `🎮 ${member.guild.name}에 오신 것을 환영합니다!`)
       .setDescription(
+        (testMode ? '⚠️ 테스트 모드: DB 저장 없이 플로우만 확인합니다.\n\n' : '') +
         '내전 참가를 위해 간단한 등록을 진행합니다.\n먼저 **주 포지션**을 선택해주세요.',
       );
 
     const positionSelect = new StringSelectMenuBuilder()
-      .setCustomId(`onboard|pos|${member.guild.id}`)
+      .setCustomId(`${prefix}|pos|${member.guild.id}`)
       .setPlaceholder('포지션을 선택하세요')
       .addOptions(POSITIONS);
 
@@ -90,6 +96,7 @@ async function startOnboarding(member, group) {
  */
 async function handleOnboardSelectMenu(interaction) {
   const split = interaction.customId.split('|');
+  const prefix = split[0]; // 'onboard' 또는 'onboardTest'
   const step = split[1]; // 'pos'
   const guildId = split[2];
 
@@ -97,7 +104,7 @@ async function handleOnboardSelectMenu(interaction) {
     const position = interaction.values[0];
 
     const embed = new EmbedBuilder()
-      .setColor('#0099ff')
+      .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
       .setTitle('🎮 티어를 선택해주세요')
       .setDescription(`포지션: ${POSITION_EMOJI[position]} **${position}**\n\n자신의 티어를 선택해주세요.`);
 
@@ -105,7 +112,7 @@ async function handleOnboardSelectMenu(interaction) {
     const row1 = new ActionRowBuilder().addComponents(
       TIER_ROW_1.map((tier) =>
         new ButtonBuilder()
-          .setCustomId(`onboard|tier|${guildId}|${position}|${tier}`)
+          .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
           .setLabel(tier)
           .setEmoji(TIER_EMOJI[tier])
           .setStyle(ButtonStyle.Secondary),
@@ -115,7 +122,7 @@ async function handleOnboardSelectMenu(interaction) {
     const row2 = new ActionRowBuilder().addComponents(
       TIER_ROW_2.map((tier) =>
         new ButtonBuilder()
-          .setCustomId(`onboard|tier|${guildId}|${position}|${tier}`)
+          .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
           .setLabel(tier)
           .setEmoji(TIER_EMOJI[tier])
           .setStyle(ButtonStyle.Secondary),
@@ -134,6 +141,7 @@ async function handleOnboardSelectMenu(interaction) {
  */
 async function handleOnboardButton(interaction) {
   const split = interaction.customId.split('|');
+  const prefix = split[0]; // 'onboard' 또는 'onboardTest'
   const step = split[1];
 
   if (step === 'tier') {
@@ -144,23 +152,23 @@ async function handleOnboardButton(interaction) {
     // MASTER/GM/CHALLENGER는 단계 없음 → 바로 닉네임 입력
     if (NON_STEP_TIERS.includes(tierCategory)) {
       const tier = `${tierCategory} I`;
-      await showNameInput(interaction, guildId, position, tier);
+      await showNameInput(interaction, guildId, position, tier, prefix);
       return;
     }
 
     // 단계 선택 버튼 (IV, III, II, I)
     const embed = new EmbedBuilder()
-      .setColor('#0099ff')
+      .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
       .setTitle(`${TIER_EMOJI[tierCategory]} ${tierCategory} - 단계를 선택해주세요`)
       .setDescription(
         `포지션: ${POSITION_EMOJI[position]} **${position}**\n티어: ${TIER_EMOJI[tierCategory]} **${tierCategory}**`,
       );
 
     const row = new ActionRowBuilder().addComponents(
-      TIER_STEPS.map((step) =>
+      TIER_STEPS.map((s) =>
         new ButtonBuilder()
-          .setCustomId(`onboard|tierStep|${guildId}|${position}|${tierCategory}_${step}`)
-          .setLabel(`${tierCategory} ${step}`)
+          .setCustomId(`${prefix}|tierStep|${guildId}|${position}|${tierCategory}_${s}`)
+          .setLabel(`${tierCategory} ${s}`)
           .setStyle(ButtonStyle.Primary),
       ),
     );
@@ -173,14 +181,14 @@ async function handleOnboardButton(interaction) {
     const guildId = split[2];
     const position = split[3];
     const tier = split[4].replace('_', ' '); // "GOLD_II" → "GOLD II"
-    await showNameInput(interaction, guildId, position, tier);
+    await showNameInput(interaction, guildId, position, tier, prefix);
   } else if (step === 'name') {
     const guildId = split[2];
     const position = split[3];
     const tier = split[4];
 
     const modal = new ModalBuilder()
-      .setCustomId(`onboard|nameSubmit|${guildId}|${position}|${tier}`)
+      .setCustomId(`${prefix}|nameSubmit|${guildId}|${position}|${tier}`)
       .setTitle('롤 닉네임 입력');
 
     const nameInput = new TextInputBuilder()
@@ -198,12 +206,12 @@ async function handleOnboardButton(interaction) {
 /**
  * 닉네임 입력 UI 표시
  */
-async function showNameInput(interaction, guildId, position, tier) {
+async function showNameInput(interaction, guildId, position, tier, prefix = 'onboard') {
   const tierDisplay = tier.replace('_', ' ');
   const tierCategory = tierDisplay.split(' ')[0];
 
   const embed = new EmbedBuilder()
-    .setColor('#0099ff')
+    .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
     .setTitle('🎮 거의 다 됐어요!')
     .setDescription(
       `포지션: ${POSITION_EMOJI[position]} **${position}**\n` +
@@ -216,12 +224,12 @@ async function showNameInput(interaction, guildId, position, tier) {
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`onboard|name|${guildId}|${position}|${tierEncoded}`)
+      .setCustomId(`${prefix}|name|${guildId}|${position}|${tierEncoded}`)
       .setLabel('롤 닉네임 입력')
       .setEmoji('✏️')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId('onboard|rso|disabled')
+      .setCustomId(`${prefix}|rso|disabled`)
       .setLabel('라이엇 계정 인증 (준비 중)')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(true),
@@ -238,10 +246,13 @@ async function showNameInput(interaction, guildId, position, tier) {
  */
 async function handleOnboardModalSubmit(interaction, client) {
   const split = interaction.customId.split('|');
+  const prefix = split[0]; // 'onboard' 또는 'onboardTest'
+  const isTestMode = prefix === 'onboardTest';
   const guildId = split[2];
   const position = split[3];
   const tier = split[4].replace('_', ' '); // "GOLD_II" → "GOLD II"
   const summonerName = interaction.fields.getTextInputValue('summonerName').trim();
+  const tierCategory = tier.split(' ')[0];
 
   await interaction.deferReply();
 
@@ -253,12 +264,26 @@ async function handleOnboardModalSubmit(interaction, client) {
       return;
     }
 
+    // 테스트 모드: DB 저장/역할 부여 없이 결과만 표시
+    if (isTestMode) {
+      const embed = new EmbedBuilder()
+        .setColor('#ffa500')
+        .setTitle('🧪 테스트 완료')
+        .setDescription(
+          '**아래 정보로 등록됩니다 (테스트 모드 - DB 저장 안 됨)**\n\n' +
+          `소환사: **${summonerName}**\n` +
+          `포지션: ${POSITION_EMOJI[position]} **${position}**\n` +
+          `티어: ${TIER_EMOJI[tierCategory]} **${tier}**\n` +
+          `그룹: **${group.groupName}**`,
+        );
+      await interaction.editReply({ embeds: [embed] });
+      return;
+    }
+
     // 유저 등록 (기존 서비스 재사용)
     const result = await registerUser(group.groupName, summonerName, tier, interaction.user.id);
 
     if (result.status === 200) {
-      const tierCategory = tier.split(' ')[0];
-
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
         .setTitle('✅ 등록 완료!')
@@ -288,7 +313,7 @@ async function handleOnboardModalSubmit(interaction, client) {
       const tierEncoded = tier.replace(' ', '_');
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`onboard|name|${guildId}|${position}|${tierEncoded}`)
+          .setCustomId(`${prefix}|name|${guildId}|${position}|${tierEncoded}`)
           .setLabel('다시 입력하기')
           .setEmoji('🔄')
           .setStyle(ButtonStyle.Primary),
