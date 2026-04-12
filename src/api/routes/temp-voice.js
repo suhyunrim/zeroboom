@@ -138,19 +138,12 @@ module.exports = (app) => {
       return res.status(404).json({ result: '디스코드 서버를 찾을 수 없습니다.' });
     }
 
-    // 생성기 채널 + 생성된 임시 채널 ID 수집
-    const generators = await models.temp_voice_generator.findAll({
-      where: { guildId: group.discordGuildId },
-      attributes: ['channelId'],
-    });
+    // 생성된 임시 채널 제외 (생성기 채널은 설정용으로 노출)
     const tempChannels = await models.temp_voice_channel.findAll({
       where: { guildId: group.discordGuildId },
       attributes: ['channelId'],
     });
-    const excludeIds = new Set([
-      ...generators.map((g) => g.channelId),
-      ...tempChannels.map((t) => t.channelId),
-    ]);
+    const excludeIds = new Set(tempChannels.map((t) => t.channelId));
 
     const voiceChannels = guild.channels.cache
       .filter((ch) => ch.type === ChannelType.GuildVoice && !excludeIds.has(ch.id))
