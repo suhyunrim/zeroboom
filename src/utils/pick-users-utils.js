@@ -419,7 +419,7 @@ const lookupUserAndSummoner = async (parsedName, discordId, groupId, models) => 
   }
 
   // discordId로 못 찾으면 이름으로 조회
-  if (!summonerData) {
+  if (!summonerData && parsedName) {
     summonerData = await models.summoner.findOne({
       where: { name: parsedName },
     });

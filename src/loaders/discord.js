@@ -8,7 +8,6 @@ const {
   InteractionResponse,
   ChannelType,
   PermissionFlagsBits,
-  Partials,
 } = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
