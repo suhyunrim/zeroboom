@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { definitions } = require('./definitions');
+const { definitions, TIERS } = require('./definitions');
 const models = require('../../db/models');
 const { logger } = require('../../loaders/logger');
 
@@ -15,6 +15,35 @@ const TIER_COLORS = {
   CHALLENGER: '#F1C40F',
 };
 
+/**
+ * 같은 유저 + 같은 카테고리의 업적이 여러 개면 가장 높은 티어만 남김
+ */
+function filterHighestPerCategory(achievements, defMap) {
+  // puuid+category별로 그룹핑
+  const groups = {};
+  for (const unlock of achievements) {
+    const def = defMap[unlock.achievementId];
+    if (!def) continue;
+    const key = unlock.puuid + '|' + def.category;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ unlock, def });
+  }
+
+  const result = [];
+  for (const entries of Object.values(groups)) {
+    if (entries.length === 1) {
+      result.push(entries[0].unlock);
+    } else {
+      // 같은 카테고리가 여러 개면 티어가 가장 높은 것만
+      entries.sort(function(a, b) {
+        return TIERS.indexOf(b.def.tier) - TIERS.indexOf(a.def.tier);
+      });
+      result.push(entries[0].unlock);
+    }
+  }
+  return result;
+}
+
 async function sendAchievementNotification(channel, newAchievements, groupId) {
   try {
     if (!newAchievements || newAchievements.length === 0) return;
@@ -22,8 +51,11 @@ async function sendAchievementNotification(channel, newAchievements, groupId) {
     const defMap = {};
     definitions.forEach((d) => { defMap[d.id] = d; });
 
+    // 같은 유저+카테고리에서 가장 높은 티어 업적만 표시
+    const filtered = filterHighestPerCategory(newAchievements, defMap);
+
     // 소환사 이름 조회
-    const puuids = [...new Set(newAchievements.map((a) => a.puuid))];
+    const puuids = [...new Set(filtered.map((a) => a.puuid))];
     const summoners = await models.summoner.findAll({
       where: { puuid: puuids },
       attributes: ['puuid', 'name'],
@@ -34,7 +66,7 @@ async function sendAchievementNotification(channel, newAchievements, groupId) {
     // 가장 높은 티어 색상 사용
     const tierOrder = Object.keys(TIER_COLORS);
     let highestTierIdx = 0;
-    const lines = newAchievements.map((unlock) => {
+    const lines = filtered.map((unlock) => {
       const def = defMap[unlock.achievementId];
       if (!def) return null;
       const name = nameMap[unlock.puuid] || '알 수 없음';
