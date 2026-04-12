@@ -24,6 +24,7 @@ module.exports = (app) => {
         where: { groupId: Number(groupId) },
         attributes: [
           'puuid',
+          'primaryPuuid',
           'discordId',
           'role',
           'win',
@@ -37,11 +38,22 @@ module.exports = (app) => {
         order: [['createdAt', 'ASC']],
       });
 
-      const puuids = users.map((u) => u.puuid);
-      const discordIds = users.map((u) => u.discordId).filter(Boolean);
+      // 본캐/부캐 분리
+      const mainUsers = users.filter((u) => !u.primaryPuuid);
+      const subAccounts = users.filter((u) => u.primaryPuuid);
+
+      // 본캐 puuid → 부캐 목록 매핑
+      const subAccountMap = {};
+      subAccounts.forEach((sub) => {
+        if (!subAccountMap[sub.primaryPuuid]) subAccountMap[sub.primaryPuuid] = [];
+        subAccountMap[sub.primaryPuuid].push(sub.puuid);
+      });
+
+      const allPuuids = users.map((u) => u.puuid);
+      const discordIds = mainUsers.map((u) => u.discordId).filter(Boolean);
       const [summoners, group] = await Promise.all([
         models.summoner.findAll({
-          where: { puuid: puuids },
+          where: { puuid: allPuuids },
           attributes: ['puuid', 'name'],
         }),
         models.group.findByPk(Number(groupId), { attributes: ['discordGuildId'] }),
@@ -62,21 +74,31 @@ module.exports = (app) => {
         });
       }
 
-      const result = users.map((u) => ({
-        puuid: u.puuid,
-        discordId: u.discordId,
-        name: nameMap[u.puuid] || '알 수 없음',
-        role: u.role,
-        win: u.win,
-        lose: u.lose,
-        defaultRating: u.defaultRating,
-        additionalRating: u.additionalRating,
-        rating: u.defaultRating + u.additionalRating,
-        latestMatchDate: u.latestMatchDate,
-        lastVoiceJoinedAt: voiceMap[u.discordId] || null,
-        leftGuildAt: u.leftGuildAt,
-        createdAt: u.createdAt,
-      }));
+      const result = mainUsers.map((u) => {
+        const subPuuids = subAccountMap[u.puuid] || [];
+        const entry = {
+          puuid: u.puuid,
+          discordId: u.discordId,
+          name: nameMap[u.puuid] || '알 수 없음',
+          role: u.role,
+          win: u.win,
+          lose: u.lose,
+          defaultRating: u.defaultRating,
+          additionalRating: u.additionalRating,
+          rating: u.defaultRating + u.additionalRating,
+          latestMatchDate: u.latestMatchDate,
+          lastVoiceJoinedAt: voiceMap[u.discordId] || null,
+          leftGuildAt: u.leftGuildAt,
+          createdAt: u.createdAt,
+        };
+        if (subPuuids.length > 0) {
+          entry.subAccounts = subPuuids.map((sp) => ({
+            puuid: sp,
+            name: nameMap[sp] || '알 수 없음',
+          }));
+        }
+        return entry;
+      });
 
       return res.status(200).json({ result });
     } catch (e) {
