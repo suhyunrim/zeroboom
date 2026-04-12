@@ -39,11 +39,10 @@ function isDiscordAdmin(member) {
 
 /**
  * 그룹의 모든 유저에 대해 Discord 관리자 권한을 DB role에 동기화
- * @param {Guild} guild - Discord.js Guild
+ * @param {Collection} members - guild.members.fetch() 결과
  * @param {Object} group - DB group 레코드
  */
-async function syncAdminRoles(guild, group) {
-  const members = await guild.members.fetch();
+async function syncAdminRoles(members, group) {
   const users = await models.user.findAll({
     where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
     attributes: ['puuid', 'discordId', 'role'],
@@ -1472,7 +1471,7 @@ module.exports = async (app) => {
       logger.error('임시 음성 채널 정합성 확인 오류:', e);
     }
 
-    // 서버 멤버 탈퇴 동기화
+    // 서버 멤버 탈퇴 + 관리자 권한 동기화 (guild.members.fetch 1회로 통합)
     try {
       const groups = await models.group.findAll({ where: { discordGuildId: { [Op.ne]: null } } });
       for (const group of groups) {
@@ -1480,13 +1479,13 @@ module.exports = async (app) => {
         if (!guild) continue;
 
         const members = await guild.members.fetch();
-        const guildMemberIds = new Set(members.map((m) => m.id));
 
+        // 탈퇴 동기화
+        const guildMemberIds = new Set(members.map((m) => m.id));
         const users = await models.user.findAll({
           where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
           attributes: ['puuid', 'discordId'],
         });
-
         const leftUsers = users.filter((u) => !guildMemberIds.has(u.discordId));
         if (leftUsers.length > 0) {
           const puuids = leftUsers.map((u) => u.puuid);
@@ -1496,27 +1495,16 @@ module.exports = async (app) => {
           );
           logger.info(`서버 멤버 동기화: 그룹 ${group.id} - ${leftUsers.length}명 탈퇴 반영`);
         }
-      }
-      logger.info('서버 멤버 탈퇴 동기화 완료');
-    } catch (e) {
-      logger.error('서버 멤버 탈퇴 동기화 오류:', e);
-    }
 
-    // 관리자 권한 동기화
-    try {
-      const groups = await models.group.findAll({ where: { discordGuildId: { [Op.ne]: null } } });
-      for (const group of groups) {
-        const guild = client.guilds.cache.get(group.discordGuildId);
-        if (!guild) continue;
-
-        const { promoted, demoted } = await syncAdminRoles(guild, group);
+        // 관리자 권한 동기화
+        const { promoted, demoted } = await syncAdminRoles(members, group);
         if (promoted > 0 || demoted > 0) {
           logger.info(`관리자 동기화: 그룹 ${group.id} - ${promoted}명 승격, ${demoted}명 해제`);
         }
       }
-      logger.info('관리자 권한 동기화 완료');
+      logger.info('서버 멤버 동기화 완료');
     } catch (e) {
-      logger.error('관리자 권한 동기화 오류:', e);
+      logger.error('서버 멤버 동기화 오류:', e);
     }
 
     // 봇 다운타임 중 가입한 유저에게 온보딩 DM 전송
