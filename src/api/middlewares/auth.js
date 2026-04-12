@@ -1,11 +1,6 @@
 const jwt = require('jsonwebtoken');
-const axios = require('axios');
 const config = require('../../config');
 const models = require('../../db/models');
-const { logger } = require('../../loaders/logger');
-
-const DISCORD_API = 'https://discord.com/api/v10';
-const ADMINISTRATOR = 0x8;
 
 /**
  * JWT 토큰 검증 미들웨어
@@ -28,7 +23,7 @@ const verifyToken = (req, res, next) => {
 
 /**
  * 그룹 관리자 권한 확인 미들웨어
- * Bot API로 해당 Discord 서버에서 실제 ADMINISTRATOR 권한이 있는지 실시간 검증
+ * DB의 user.role === 'admin' 으로 확인 (Discord 권한은 이벤트/시작 시 동기화)
  */
 const requireGroupAdmin = async (req, res, next) => {
   const groupId = Number(req.params.groupId || req.body.groupId);
@@ -39,64 +34,19 @@ const requireGroupAdmin = async (req, res, next) => {
   }
 
   try {
-    const group = await models.group.findByPk(groupId, {
-      attributes: ['discordGuildId'],
+    const user = await models.user.findOne({
+      where: { groupId, discordId },
+      attributes: ['role'],
     });
-    if (!group || !group.discordGuildId) {
-      return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
-    }
 
-    // 서버 소유자는 역할과 무관하게 모든 권한 보유
-    const guildRes = await axios.get(
-      `${DISCORD_API}/guilds/${group.discordGuildId}`,
-      { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
-    );
-    if (guildRes.data.owner_id === discordId) {
-      return next();
-    }
-
-    const memberRes = await axios.get(
-      `${DISCORD_API}/guilds/${group.discordGuildId}/members/${discordId}`,
-      { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
-    );
-
-    const permissions = memberRes.data.roles.length > 0
-      ? await getComputedPermissions(group.discordGuildId, memberRes.data)
-      : BigInt(0);
-
-    if ((permissions & BigInt(ADMINISTRATOR)) !== BigInt(ADMINISTRATOR)) {
+    if (!user || user.role !== 'admin') {
       return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
     }
 
     return next();
   } catch (e) {
-    logger.error('Discord 권한 확인 에러:', e.response?.data || e.message);
     return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
   }
 };
-
-/**
- * 길드 역할 목록에서 멤버의 permissions 합산
- */
-async function getComputedPermissions(guildId, member) {
-  const rolesRes = await axios.get(
-    `${DISCORD_API}/guilds/${guildId}/roles`,
-    { headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` } },
-  );
-  const guildRoles = rolesRes.data;
-
-  let permissions = BigInt(0);
-  // @everyone 역할 (id === guildId)
-  const everyoneRole = guildRoles.find((r) => r.id === guildId);
-  if (everyoneRole) permissions |= BigInt(everyoneRole.permissions);
-
-  // 멤버가 가진 역할들의 permissions OR 합산
-  for (const roleId of member.roles) {
-    const role = guildRoles.find((r) => r.id === roleId);
-    if (role) permissions |= BigInt(role.permissions);
-  }
-
-  return permissions;
-}
 
 module.exports = { verifyToken, requireGroupAdmin };

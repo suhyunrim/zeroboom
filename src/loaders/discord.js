@@ -26,6 +26,51 @@ const {
 } = require('../discord/onboarding');
 const { initEmojis } = require('../discord/emoji-manager');
 
+const ADMINISTRATOR = BigInt(0x8);
+
+/**
+ * Discord 멤버가 ADMINISTRATOR 권한을 가지고 있는지 확인
+ * @param {GuildMember} member - Discord.js GuildMember
+ * @returns {boolean}
+ */
+function isDiscordAdmin(member) {
+  return member.permissions.has(PermissionFlagsBits.Administrator) || member.guild.ownerId === member.id;
+}
+
+/**
+ * 그룹의 모든 유저에 대해 Discord 관리자 권한을 DB role에 동기화
+ * @param {Guild} guild - Discord.js Guild
+ * @param {Object} group - DB group 레코드
+ */
+async function syncAdminRoles(guild, group) {
+  const members = await guild.members.fetch();
+  const users = await models.user.findAll({
+    where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
+    attributes: ['puuid', 'discordId', 'role'],
+  });
+
+  let promoted = 0;
+  let demoted = 0;
+
+  for (const user of users) {
+    const member = members.get(user.discordId);
+    if (!member) continue;
+
+    const shouldBeAdmin = isDiscordAdmin(member);
+    const isAdmin = user.role === 'admin';
+
+    if (shouldBeAdmin && !isAdmin) {
+      await models.user.update({ role: 'admin' }, { where: { groupId: group.id, puuid: user.puuid } });
+      promoted++;
+    } else if (!shouldBeAdmin && isAdmin) {
+      await models.user.update({ role: 'member' }, { where: { groupId: group.id, puuid: user.puuid } });
+      demoted++;
+    }
+  }
+
+  return { promoted, demoted };
+}
+
 const VOTE_CATEGORIES = [
   { emoji: '⚔️', label: '캐리 머신', question: '이번 경기 가장 잘한 사람은?' },
   { emoji: '💰', label: '가성비 왕', question: '레이팅 대비 가장 활약한 사람은?' },
@@ -1379,6 +1424,38 @@ module.exports = async (app) => {
     }
   });
 
+  // 역할/권한 변경 감지 → DB admin role 동기화
+  client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    try {
+      // 역할이 변경되지 않았으면 스킵
+      if (oldMember.roles.cache.size === newMember.roles.cache.size
+        && oldMember.roles.cache.every((r) => newMember.roles.cache.has(r.id))) {
+        return;
+      }
+
+      const group = await models.group.findOne({ where: { discordGuildId: newMember.guild.id } });
+      if (!group) return;
+
+      const user = await models.user.findOne({
+        where: { groupId: group.id, discordId: newMember.id },
+      });
+      if (!user || user.role === 'outsider') return;
+
+      const shouldBeAdmin = isDiscordAdmin(newMember);
+      const isAdmin = user.role === 'admin';
+
+      if (shouldBeAdmin && !isAdmin) {
+        await models.user.update({ role: 'admin' }, { where: { groupId: group.id, puuid: user.puuid } });
+        logger.info(`관리자 권한 부여: ${newMember.displayName} (${newMember.id}) - 그룹 ${group.id}`);
+      } else if (!shouldBeAdmin && isAdmin) {
+        await models.user.update({ role: 'member' }, { where: { groupId: group.id, puuid: user.puuid } });
+        logger.info(`관리자 권한 해제: ${newMember.displayName} (${newMember.id}) - 그룹 ${group.id}`);
+      }
+    } catch (e) {
+      logger.error('역할 변경 처리 오류:', e);
+    }
+  });
+
   // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
   client.once('ready', async () => {
     // 커스텀 이모지 초기화
@@ -1423,6 +1500,23 @@ module.exports = async (app) => {
       logger.info('서버 멤버 탈퇴 동기화 완료');
     } catch (e) {
       logger.error('서버 멤버 탈퇴 동기화 오류:', e);
+    }
+
+    // 관리자 권한 동기화
+    try {
+      const groups = await models.group.findAll({ where: { discordGuildId: { [Op.ne]: null } } });
+      for (const group of groups) {
+        const guild = client.guilds.cache.get(group.discordGuildId);
+        if (!guild) continue;
+
+        const { promoted, demoted } = await syncAdminRoles(guild, group);
+        if (promoted > 0 || demoted > 0) {
+          logger.info(`관리자 동기화: 그룹 ${group.id} - ${promoted}명 승격, ${demoted}명 해제`);
+        }
+      }
+      logger.info('관리자 권한 동기화 완료');
+    } catch (e) {
+      logger.error('관리자 권한 동기화 오류:', e);
     }
 
     // 봇 다운타임 중 가입한 유저에게 온보딩 DM 전송
