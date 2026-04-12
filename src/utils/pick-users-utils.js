@@ -400,38 +400,56 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
 };
 
 /**
+ * discordId 또는 닉네임으로 user/summoner 데이터를 조회
+ * @returns {Promise<{userData: Object|null, summonerData: Object|null}>}
+ */
+const lookupUserAndSummoner = async (parsedName, discordId, groupId, models) => {
+  let userData = null;
+  let summonerData = null;
+
+  if (discordId) {
+    userData = await models.user.findOne({
+      where: { groupId, discordId },
+    });
+    if (userData) {
+      summonerData = await models.summoner.findOne({
+        where: { puuid: userData.puuid },
+      });
+    }
+  }
+
+  // discordId로 못 찾으면 이름으로 조회
+  if (!summonerData) {
+    summonerData = await models.summoner.findOne({
+      where: { name: parsedName },
+    });
+    if (summonerData) {
+      userData = await models.user.findOne({
+        where: { groupId, puuid: summonerData.puuid },
+      });
+    }
+  }
+
+  return { userData, summonerData };
+};
+
+/**
  * pickedUsers/pickedMembersData에서 discordId로 소환사명을 조회하여 fakeOptions 생성
- * @param {Array<string>} pickedUsers - 뽑힌 유저 닉네임 목록
- * @param {Array<Object>} pickedMembersData - 뽑힌 유저 멤버 데이터 (discordId 포함)
- * @param {number} groupId - 그룹 ID
- * @param {Object} models - DB 모델
- * @returns {Promise<Array<{name: string, value: string, discordId: string|null}>>}
  */
 const buildFakeOptions = async (pickedUsers, pickedMembersData, groupId, models) => {
   const fakeOptions = [];
   for (let index = 0; index < pickedUsers.length; index++) {
     const parsedName = pickedUsers[index];
     const memberData = pickedMembersData ? pickedMembersData[index] : null;
-    let actualName = parsedName;
+    const discordId = (memberData && memberData.discordId) || null;
 
-    if (memberData && memberData.discordId) {
-      const userData = await models.user.findOne({
-        where: { groupId, discordId: memberData.discordId },
-      });
-      if (userData) {
-        const summonerData = await models.summoner.findOne({
-          where: { puuid: userData.puuid },
-        });
-        if (summonerData) {
-          actualName = summonerData.name;
-        }
-      }
-    }
+    const { summonerData } = await lookupUserAndSummoner(null, discordId, groupId, models);
+    const actualName = (summonerData && summonerData.name) || parsedName;
 
     fakeOptions.push({
       name: `유저${index + 1}`,
       value: actualName,
-      discordId: memberData?.discordId || null,
+      discordId,
     });
   }
   return fakeOptions;
@@ -440,7 +458,6 @@ const buildFakeOptions = async (pickedUsers, pickedMembersData, groupId, models)
 /**
  * pickedUsers/pickedMembersData에서 유저 정보를 조회하여 playerDataMap과 fakeOptions를 동시에 생성
  * (포지션 매칭 등 상세 유저 정보가 필요한 경우 사용)
- * @returns {Promise<{playerDataMap: Object, fakeOptions: Array, error: string|null}>}
  */
 const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, models) => {
   const playerDataMap = {};
@@ -449,33 +466,9 @@ const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, model
   for (let i = 0; i < pickedUsers.length; i++) {
     const parsedName = pickedUsers[i];
     const memberData = pickedMembersData ? pickedMembersData[i] : null;
+    const discordId = (memberData && memberData.discordId) || null;
 
-    let summonerData = null;
-    let userData = null;
-
-    // discordId로 먼저 조회
-    if (memberData && memberData.discordId) {
-      userData = await models.user.findOne({
-        where: { groupId, discordId: memberData.discordId },
-      });
-      if (userData) {
-        summonerData = await models.summoner.findOne({
-          where: { puuid: userData.puuid },
-        });
-      }
-    }
-
-    // discordId로 못 찾으면 이름으로 조회
-    if (!summonerData) {
-      summonerData = await models.summoner.findOne({
-        where: { name: parsedName },
-      });
-      if (summonerData) {
-        userData = await models.user.findOne({
-          where: { groupId, puuid: summonerData.puuid },
-        });
-      }
-    }
+    const { userData, summonerData } = await lookupUserAndSummoner(parsedName, discordId, groupId, models);
 
     if (!summonerData || !userData) {
       return { playerDataMap: null, fakeOptions: null, error: `유저 정보를 찾을 수 없습니다: ${parsedName}` };
@@ -483,8 +476,6 @@ const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, model
 
     const actualName = summonerData.name;
     const rating = userData.defaultRating + userData.additionalRating;
-
-    const discordId = memberData?.discordId || null;
 
     playerDataMap[actualName] = {
       puuid: summonerData.puuid,
@@ -653,9 +644,11 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
     let totalRating = 0;
     const lines = teamResult.assignments.map((a) => {
       const playerData = playerDataMap[a.playerName];
-      const rating = playerData?.rating || 500;
+      const rating = (playerData && playerData.rating) || 500;
       totalRating += rating;
-      return `${typeEmoji[a.assignmentType]}\`${formatTierBadge(rating)}[${POSITION_ABBR[a.position]}]${a.playerName}\``;
+      return `${typeEmoji[a.assignmentType]}\`${formatTierBadge(rating)}[${POSITION_ABBR[a.position]}]${
+        a.playerName
+      }\``;
     });
 
     const winRateStr = `${(winRate * 100).toFixed(1)}%`;
