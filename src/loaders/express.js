@@ -22,7 +22,7 @@ module.exports = (app) => {
   app.use(config.api.prefix, routes());
   // Sentry 에러 핸들러 — 다른 에러 핸들러보다 먼저 등록
   if (config.sentry.dsn) {
-    app.use(Sentry.Handlers.errorHandler());
+    Sentry.setupExpressErrorHandler(app);
   }
 
   app.use((req, res, next) => {

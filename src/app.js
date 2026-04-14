@@ -15,8 +15,8 @@ const riotMatchController = require('./controller/riot-match');
 const startServer = async () => {
   const app = express();
 
-  // Sentry 요청 핸들러를 가장 먼저 등록
-  sentryLoader(app);
+  // Sentry 초기화
+  sentryLoader();
 
   app.use(bodyParser.urlencoded({ extended: false }));
 
