@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@hapi/joi": "^17.1.1",
+    "@sentry/node": "^10.48.0",
     "@whipping-cream/thresh": "^1.2.0",
     "arpad": "1.0.2",
     "axios": "^1.1.3",

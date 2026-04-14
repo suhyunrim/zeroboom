@@ -28,6 +28,9 @@ module.exports = {
     redirectUri: process.env.DISCORD_REDIRECT_URI,
   },
   frontendUrl: process.env.FRONTEND_URL,
+  sentry: {
+    dsn: process.env.SENTRY_DSN || '',
+  },
   api: {
     prefix: '/api',
   },

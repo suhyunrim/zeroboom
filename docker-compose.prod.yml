@@ -31,6 +31,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       COMMAND_PREFIX: ${COMMAND_PREFIX:-}
       FRONTEND_URL: ${FRONTEND_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       db:
         condition: service_healthy

@@ -1,6 +1,7 @@
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const methodOverride = require('method-override');
+const Sentry = require('@sentry/node');
 
 const { logMiddleWare } = require('./logger');
 const routes = require('../api');
@@ -19,6 +20,11 @@ module.exports = (app) => {
   app.use(methodOverride());
   app.use(bodyParser.json());
   app.use(config.api.prefix, routes());
+  // Sentry 에러 핸들러 — 다른 에러 핸들러보다 먼저 등록
+  if (config.sentry.dsn) {
+    app.use(Sentry.Handlers.errorHandler());
+  }
+
   app.use((req, res, next) => {
     const err = new Error('Not Found');
     err.status = 404;

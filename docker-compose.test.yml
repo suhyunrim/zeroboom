@@ -23,6 +23,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       COMMAND_PREFIX: ${COMMAND_PREFIX:-}
       FRONTEND_URL: ${FRONTEND_URL_TEST:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     networks:
       - live_network
 

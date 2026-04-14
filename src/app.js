@@ -2,6 +2,7 @@ const express = require('express');
 const moment = require('moment');
 const bodyParser = require('body-parser');
 const loader = require('./loaders');
+const sentryLoader = require('./loaders/sentry');
 const { port } = require('./config');
 const { logger } = require('./loaders/logger');
 const path = require('path');
@@ -13,6 +14,10 @@ const riotMatchController = require('./controller/riot-match');
 
 const startServer = async () => {
   const app = express();
+
+  // Sentry 요청 핸들러를 가장 먼저 등록
+  sentryLoader(app);
+
   app.use(bodyParser.urlencoded({ extended: false }));
 
   app.use(express.static(path.join(__dirname, '/../public')));
@@ -39,6 +44,15 @@ const startServer = async () => {
 };
 
 startServer();
+
+// 처리되지 않은 예외를 Sentry로 전송
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+});
 
 const retrieveRiotMatches = async () => {
   const targetDate = moment.utc().subtract(30, 'days');
