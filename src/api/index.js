@@ -11,6 +11,7 @@ const match = require('./routes/match');
 const achievement = require('./routes/achievement');
 const tempVoice = require('./routes/temp-voice');
 const auditLog = require('./routes/audit-log');
+const balanceReport = require('./routes/balance-report');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -31,6 +32,7 @@ module.exports = () => {
   achievement(app);
   tempVoice(app);
   auditLog(app);
+  balanceReport(app);
 
   // v2
   groupsV2(app);
