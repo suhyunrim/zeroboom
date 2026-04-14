@@ -17,6 +17,7 @@ const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
 const { logger } = require('./logger');
 const models = require('../db/models');
+const { MatchVoteSession } = require('../services/match-vote');
 const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
@@ -181,12 +182,9 @@ module.exports = async (app) => {
                 if (info.discordId) participantDiscordIds.add(info.discordId);
               });
             }
-            matchVoteSessions.set(`${groupName}/${output.time}`, {
-              votes: {}, // { discordId: planIndex }
-              voteCounts: {}, // { planIndex: count }
-              participants: participantDiscordIds,
-              totalPlans: output.match.length,
-            });
+            matchVoteSessions.set(`${groupName}/${output.time}`,
+              new MatchVoteSession(participantDiscordIds, output.match.length),
+            );
           }
         }
 
@@ -344,12 +342,9 @@ module.exports = async (app) => {
                         if (info.discordId) participantDiscordIds.add(info.discordId);
                       });
                     }
-                    matchVoteSessions.set(`${group.groupName}/${output.time}`, {
-                      votes: {},
-                      voteCounts: {},
-                      participants: participantDiscordIds,
-                      totalPlans: output.match.length,
-                    });
+                    matchVoteSessions.set(`${group.groupName}/${output.time}`,
+                      new MatchVoteSession(participantDiscordIds, output.match.length),
+                    );
                   }
                 }
               }
@@ -592,12 +587,9 @@ module.exports = async (app) => {
                 if (info.discordId) participantDiscordIds.add(info.discordId);
               });
             }
-            matchVoteSessions.set(`${group.groupName}/${result.time}`, {
-              votes: {},
-              voteCounts: {},
-              participants: participantDiscordIds,
-              totalPlans: result.match.length,
-            });
+            matchVoteSessions.set(`${group.groupName}/${result.time}`,
+              new MatchVoteSession(participantDiscordIds, result.match.length),
+            );
           }
         }
 
@@ -961,41 +953,33 @@ module.exports = async (app) => {
             }
 
             const userId = interaction.user.id;
+            const voteResult = voteSession.addVote(userId, planIndex);
 
-            if (!voteSession.participants.has(userId)) {
-              await interaction.reply({ content: '매칭 참가자만 투표할 수 있습니다.', ephemeral: true });
+            if (!voteResult.success) {
+              const errorMessages = {
+                not_participant: '매칭 참가자만 투표할 수 있습니다.',
+                already_voted: '이미 투표했습니다.',
+                already_confirmed: '이미 투표가 확정되었습니다.',
+              };
+              await interaction.reply({ content: errorMessages[voteResult.error], ephemeral: true });
               return;
             }
-            if (voteSession.votes[userId] !== undefined) {
-              await interaction.reply({ content: '이미 투표했습니다.', ephemeral: true });
-              return;
-            }
 
-            voteSession.votes[userId] = planIndex;
-            voteSession.voteCounts[planIndex] = (voteSession.voteCounts[planIndex] || 0) + 1;
-
-            const totalVoted = Object.keys(voteSession.votes).length;
-            const remaining = voteSession.participants.size - totalVoted;
+            const status = voteResult.status;
 
             // 투표 현황 텍스트
             const statusLines = [];
             for (let i = 0; i < voteSession.totalPlans; i++) {
-              const count = voteSession.voteCounts[String(i)] || 0;
+              const count = status.voteCounts[String(i)] || 0;
               const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, 10 - count));
               statusLines.push(`${i + 1}번: ${bar} ${count}표`);
             }
-            const statusText = `**📊 매칭 투표 (${totalVoted}/${voteSession.participants.size})**\n${statusLines.join(
+            const statusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n${statusLines.join(
               '\n',
             )}`;
 
-            // 확정 체크: 최다득표가 뒤집힐 수 없는지
-            const counts = Object.entries(voteSession.voteCounts).sort((a, b) => b[1] - a[1]);
-            const [leadPlan, leadCount] = counts[0] || [null, 0];
-            const secondCount = counts.length > 1 ? counts[1][1] : 0;
-
-            if (leadCount > secondCount + remaining) {
-              // 투표 확정 — 세션 유지하고 confirmedPlan 기록
-              voteSession.confirmedPlan = leadPlan;
+            if (voteResult.confirmed) {
+              const leadPlan = voteResult.confirmedPlan;
               const winnerMatch = matches.get(`${sessionKey}/${leadPlan}`);
               const matchMakeCommand = commandList.get('매칭생성');
               if (matchMakeCommand && winnerMatch) {
