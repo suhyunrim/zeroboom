@@ -143,7 +143,7 @@ const generateReport = async (groupId, startDate, endDate) => {
   const ratingBrackets = analyzeRatingBrackets(independentMatches);
   const tierSpread = analyzeTierSpread(independentMatches);
   const positionAnalysis = analyzePositions(independentMatches, summonerMap);
-  const setAnalysis = analyzeSetResults(validMatches, sets);
+  const setAnalysis = analyzeSetResults(validMatches, sets, summonerMap);
   const monthlyTrend = analyzeMonthlyTrend(independentMatches);
 
   return {
@@ -388,7 +388,30 @@ const analyzePositions = (matches, summonerMap) => {
 /**
  * 세트 결과 분석 (2:0 / 2:1 비율)
  */
-const analyzeSetResults = (matches, sets) => {
+const analyzeSetResults = (matches, sets, summonerMap) => {
+  const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
+
+  const getPlayerPositionRates = (puuid) => {
+    const s = summonerMap[puuid];
+    if (!s) return {};
+    const rates = {};
+    if (s.mainPosition && s.mainPositionRate) rates[s.mainPosition] = s.mainPositionRate;
+    if (s.subPosition && s.subPositionRate >= 10) rates[s.subPosition] = s.subPositionRate;
+    return rates;
+  };
+
+  const getTeamPositionScore = (team) => {
+    let score = 0;
+    POSITIONS.forEach(pos => {
+      let maxRate = 0;
+      team.forEach(p => {
+        const rates = getPlayerPositionRates(p[0]);
+        if (rates[pos] && rates[pos] > maxRate) maxRate = rates[pos];
+      });
+      score += maxRate;
+    });
+    return Math.round(score * 10) / 10;
+  };
 
   // 2~3경기 세트만 분석 (1경기 단독은 세트가 아님)
   const validSets = sets.filter(s => s.length >= 2);
@@ -401,14 +424,20 @@ const analyzeSetResults = (matches, sets) => {
   let underdogTwoZeroWin = 0;
   let underdogTwoOneWin = 0;
 
+  // 포지션 점수 차이 vs 2:0 비율
+  const posScoreBrackets = [
+    { label: '0~20', min: 0, max: 20, twoZero: 0, twoOne: 0 },
+    { label: '21~50', min: 21, max: 50, twoZero: 0, twoOne: 0 },
+    { label: '51~80', min: 51, max: 80, twoZero: 0, twoOne: 0 },
+    { label: '81+', min: 81, max: Infinity, twoZero: 0, twoOne: 0 },
+  ];
+
   validSets.forEach(set => {
-    // 첫 매치 기준으로 우위팀 결정
     const firstMatch = set[0];
     const team1Sum = getTeamRatingSum(firstMatch.team1);
     const team2Sum = getTeamRatingSum(firstMatch.team2);
     const favoredTeam = team1Sum >= team2Sum ? 1 : 2;
 
-    // 세트 승패 집계
     const wins = { 1: 0, 2: 0 };
     set.forEach(m => { wins[m.winTeam]++; });
 
@@ -419,17 +448,26 @@ const analyzeSetResults = (matches, sets) => {
     }
 
     const isFavoredWin = setWinner === favoredTeam;
+    const isTwoZero = set.length === 2;
 
-    if (set.length === 2) {
-      // 2경기 = 2:0
+    if (isTwoZero) {
       twoZero++;
       if (isFavoredWin) favoredTwoZeroWin++;
       else underdogTwoZeroWin++;
-    } else if (set.length === 3) {
-      // 3경기 = 2:1
+    } else {
       twoOne++;
       if (isFavoredWin) favoredTwoOneWin++;
       else underdogTwoOneWin++;
+    }
+
+    // 포지션 점수 차이 구간 집계
+    const score1 = getTeamPositionScore(firstMatch.team1);
+    const score2 = getTeamPositionScore(firstMatch.team2);
+    const scoreDiff = Math.abs(score1 - score2);
+    const bracket = posScoreBrackets.find(b => scoreDiff >= b.min && scoreDiff <= b.max);
+    if (bracket) {
+      if (isTwoZero) bracket.twoZero++;
+      else bracket.twoOne++;
     }
   });
 
@@ -451,6 +489,15 @@ const analyzeSetResults = (matches, sets) => {
       favoredWin: favoredTwoOneWin,
       underdogWin: underdogTwoOneWin,
     },
+    positionScoreImpact: posScoreBrackets.map(b => {
+      const total = b.twoZero + b.twoOne;
+      return {
+        label: b.label,
+        totalSets: total,
+        twoZeroCount: b.twoZero,
+        twoZeroRate: total ? Math.round((b.twoZero / total) * 1000) / 10 : 0,
+      };
+    }),
   };
 };
 
