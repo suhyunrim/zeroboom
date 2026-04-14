@@ -133,15 +133,22 @@ const generateReport = async (groupId, startDate, endDate) => {
   const summonerMap = {};
   summoners.forEach(s => { summonerMap[s.puuid] = s; });
 
-  const summary = analyzeSummary(validMatches);
-  const ratingBrackets = analyzeRatingBrackets(validMatches);
-  const tierSpread = analyzeTierSpread(validMatches);
-  const positionAnalysis = analyzePositions(validMatches, summonerMap);
-  const setAnalysis = analyzeSetResults(validMatches);
-  const monthlyTrend = analyzeMonthlyTrend(validMatches);
+  // 세트 그룹핑
+  const sets = groupMatchesIntoSets(validMatches);
+
+  // 독립 매치: 세트 첫 판 + 단독 매치 (레이팅 편향 제거)
+  const independentMatches = sets.map(s => s[0]);
+
+  const summary = analyzeSummary(independentMatches);
+  const ratingBrackets = analyzeRatingBrackets(independentMatches);
+  const tierSpread = analyzeTierSpread(independentMatches);
+  const positionAnalysis = analyzePositions(independentMatches, summonerMap);
+  const setAnalysis = analyzeSetResults(validMatches, sets);
+  const monthlyTrend = analyzeMonthlyTrend(independentMatches);
 
   return {
     totalMatches: validMatches.length,
+    independentMatches: independentMatches.length,
     period: {
       start: validMatches.length ? validMatches[0].createdAt : null,
       end: validMatches.length ? validMatches[validMatches.length - 1].createdAt : null,
@@ -381,8 +388,7 @@ const analyzePositions = (matches, summonerMap) => {
 /**
  * 세트 결과 분석 (2:0 / 2:1 비율)
  */
-const analyzeSetResults = (matches) => {
-  const sets = groupMatchesIntoSets(matches);
+const analyzeSetResults = (matches, sets) => {
 
   // 2~3경기 세트만 분석 (1경기 단독은 세트가 아님)
   const validSets = sets.filter(s => s.length >= 2);
