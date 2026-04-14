@@ -107,8 +107,9 @@ module.exports.predictWinRate = async (groupName, team1, team2) => {
 
 module.exports.generateMatch = async (groupName, team1Names, team2Names, userPool, matchCount, discordIdMap = {}) => {
   try {
-    if (team1Names.length + team2Names.length + userPool.length !== 10) {
-      throw '자동매칭에 필요한 유저 수는 10명입니다.';
+    const { pickCount } = require('../config');
+    if (team1Names.length + team2Names.length + userPool.length !== pickCount) {
+      throw `자동매칭에 필요한 유저 수는 ${pickCount}명입니다.`;
     }
 
     const allNames = team1Names.concat(team2Names).concat(userPool);
