@@ -56,7 +56,7 @@ class MatchVoteSession {
     const [leadPlan, leadCount] = counts[0] || [null, 0];
     const secondCount = counts.length > 1 ? counts[1][1] : 0;
 
-    if (leadCount > secondCount + remaining) {
+    if (leadCount >= secondCount + remaining) {
       this.confirmedPlan = leadPlan;
       return true;
     }
