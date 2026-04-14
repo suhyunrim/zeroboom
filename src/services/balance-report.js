@@ -348,6 +348,7 @@ const analyzePositions = (matches, summonerMap) => {
 
   const positionOverlapCount = {};
   let totalScore = 0;
+  let totalScoreDiff = 0;
   let totalCoverage = 0;
   let teamCount = 0;
 
@@ -361,6 +362,7 @@ const analyzePositions = (matches, summonerMap) => {
     const avgScore = (score1 + score2) / 2;
 
     totalScore += score1 + score2;
+    totalScoreDiff += Math.abs(score1 - score2);
     totalCoverage += getTeamPositionCoverage(m.team1) + getTeamPositionCoverage(m.team2);
     teamCount += 2;
 
@@ -396,8 +398,18 @@ const analyzePositions = (matches, summonerMap) => {
       rate: totalOverlaps ? Math.round((count / totalOverlaps) * 1000) / 10 : 0,
     }));
 
+  const avgDiff = matches.length ? totalScoreDiff / matches.length : 0;
+  const getBalanceLabel = (diff) => {
+    if (diff <= 20) return '좋음';
+    if (diff <= 50) return '보통';
+    if (diff <= 80) return '나쁨';
+    return '매우 나쁨';
+  };
+
   return {
     avgPositionScore: teamCount ? Math.round(totalScore / teamCount * 10) / 10 : 0,
+    avgPositionScoreDiff: Math.round(avgDiff * 10) / 10,
+    avgPositionBalance: getBalanceLabel(avgDiff),
     avgPositionCoverage: teamCount ? Math.round((totalCoverage / teamCount) * 10) / 10 : 0,
     scoreBrackets: scoreBrackets.map(b => ({
       label: b.label,
