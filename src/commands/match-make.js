@@ -219,12 +219,12 @@ exports.reactButton = async (interaction, match) => {
     where: { discordGuildId: interaction.guildId },
   });
 
-  const members = [...(match.team1Names || match.team1), ...(match.team2Names || match.team2)];
-  for (let i = 0; i < 2; ++i) {
-    const startIndex = i * 5;
-    for (let j = startIndex; j < startIndex + 5; ++j) {
-      const memberName = members[j];
+  const team1Members = match.team1Names || match.team1;
+  const team2Members = match.team2Names || match.team2;
+  const teamMembers = [team1Members, team2Members];
 
+  for (let i = 0; i < 2; ++i) {
+    for (const memberName of teamMembers[i]) {
       const summonerData = await models.summoner.findOne({
         where: { name: memberName },
       });
@@ -250,7 +250,7 @@ exports.reactButton = async (interaction, match) => {
       teamRatings[i] += rating;
     }
 
-    teamRatings[i] /= 5;
+    teamRatings[i] /= teamMembers[i].length;
     teams[i].sort((a, b) => b.rating - a.rating);
   }
 
