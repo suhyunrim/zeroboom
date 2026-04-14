@@ -149,6 +149,27 @@ module.exports = async (app) => {
             interaction.reply('[Error] 방 등록을 해주세요. 사용법: /방등록 그룹이름');
             return;
           }
+
+          // 미등록 유저 온보딩 안내
+          const registeredUser = await models.user.findOne({
+            where: { groupId: group.id, discordId: interaction.user.id },
+          });
+          if (!registeredUser) {
+            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`onboard|start|${interaction.guildId}`)
+                .setLabel('소환사 등록하기')
+                .setEmoji('✏️')
+                .setStyle(ButtonStyle.Primary),
+            );
+            await interaction.reply({
+              content: '아직 소환사 등록이 되어있지 않습니다. 아래 버튼을 눌러 등록해주세요!',
+              components: [row],
+              ephemeral: true,
+            });
+            return;
+          }
         }
       }
 
@@ -1403,6 +1424,33 @@ module.exports = async (app) => {
         { body: commandJsons },
       );
       logger.info(`봇 초대: [${guild.name}] 슬래시 명령어 등록 완료`);
+
+      // 기본 채널에 온보딩 공지 메시지 발송
+      const defaultChannel = guild.systemChannel
+        || guild.channels.cache.find(ch => ch.type === ChannelType.GuildText && ch.permissionsFor(guild.members.me).has('SendMessages'));
+
+      if (defaultChannel) {
+        const { EmbedBuilder: EB, ActionRowBuilder: ARB, ButtonBuilder: BB, ButtonStyle: BS } = require('discord.js');
+        const embed = new EB()
+          .setColor('#0099ff')
+          .setTitle('🎮 ZeroBoom 봇이 등록되었습니다!')
+          .setDescription(
+            `**${guild.name}** 내전 그룹이 생성되었습니다.\n\n` +
+            '내전에 참가하려면 소환사 등록이 필요합니다.\n' +
+            '아래 버튼을 눌러 간단한 등록을 진행해주세요!',
+          );
+
+        const row = new ARB().addComponents(
+          new BB()
+            .setCustomId(`onboard|start|${guild.id}`)
+            .setLabel('소환사 등록하기')
+            .setEmoji('✏️')
+            .setStyle(BS.Primary),
+        );
+
+        await defaultChannel.send({ embeds: [embed], components: [row] });
+        logger.info(`봇 초대: [${guild.name}] 온보딩 공지 메시지 전송`);
+      }
     } catch (e) {
       logger.error('봇 초대 자동 등록 오류:', e);
     }

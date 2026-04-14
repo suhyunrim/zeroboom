@@ -167,6 +167,38 @@ async function handleOnboardButton(interaction) {
   const prefix = split[0]; // 'onboard' 또는 'onboardTest'
   const step = split[1];
 
+  // 채널 공지에서 "소환사 등록하기" 버튼 클릭 → DM으로 온보딩 시작
+  if (step === 'start') {
+    const guildId = split[2];
+    try {
+      const group = await models.group.findOne({ where: { discordGuildId: guildId } });
+      if (!group) {
+        await interaction.reply({ content: '등록된 그룹을 찾을 수 없습니다.', ephemeral: true });
+        return;
+      }
+
+      // 이미 등록된 유저인지 확인
+      const existingUser = await models.user.findOne({
+        where: { groupId: group.id, discordId: interaction.user.id },
+      });
+      if (existingUser) {
+        await interaction.reply({ content: '이미 등록되어 있습니다! 🎮', ephemeral: true });
+        return;
+      }
+
+      const member = interaction.guild
+        ? await interaction.guild.members.fetch(interaction.user.id)
+        : interaction.member;
+
+      await startOnboarding(member, group);
+      await interaction.reply({ content: 'DM으로 등록 안내를 보냈습니다! 확인해주세요 📩', ephemeral: true });
+    } catch (e) {
+      logger.error('온보딩 시작 버튼 오류:', e);
+      await interaction.reply({ content: 'DM 전송에 실패했습니다. DM 설정을 확인해주세요.', ephemeral: true });
+    }
+    return;
+  }
+
   if (step === 'tier') {
     const guildId = split[2];
     const position = split[3];
