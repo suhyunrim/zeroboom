@@ -78,14 +78,30 @@ function getPositionDisplayEmoji(position) {
   return obj ? `<:${obj.name}:${obj.id}>` : POSITION_FALLBACK_EMOJI[position];
 }
 
+// 온보딩 진행 중인 유저 추적 (discordId Set)
+const onboardingInProgress = new Set();
+
 /**
  * 온보딩 DM 전송 시작
  * @param {Object} options
  * @param {boolean} [options.testMode=false] - true면 DB 저장 없이 테스트만 진행
+ * @returns {boolean} DM 전송 여부
  */
 async function startOnboarding(member, group, { testMode = false } = {}) {
   const prefix = testMode ? 'onboardTest' : 'onboard';
+
+  // 이미 온보딩 진행 중이면 중복 발송 안 함
+  if (!testMode && onboardingInProgress.has(member.id)) {
+    logger.info(`온보딩 DM 스킵 (진행 중): ${member.displayName} (${member.id})`);
+    return false;
+  }
+
   try {
+    if (!testMode) {
+      onboardingInProgress.add(member.id);
+      // 30분 후 자동 해제
+      setTimeout(() => onboardingInProgress.delete(member.id), 30 * 60 * 1000);
+    }
     const dm = await member.createDM();
 
     const embed = new EmbedBuilder()
@@ -110,8 +126,11 @@ async function startOnboarding(member, group, { testMode = false } = {}) {
 
     logger.info(`온보딩 DM 전송: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
   } catch (e) {
+    if (!testMode) onboardingInProgress.delete(member.id);
     logger.warn(`온보딩 DM 전송 실패: ${member.displayName} (${member.id}) - ${e.message}`);
+    return false;
   }
+  return true;
 }
 
 /**
@@ -339,6 +358,8 @@ async function handleOnboardModalSubmit(interaction, client) {
     const result = await registerUser(group.groupName, summonerName, tier, interaction.user.id);
 
     if (result.status === 200) {
+      onboardingInProgress.delete(interaction.user.id);
+
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
         .setTitle('✅ 등록 완료!')
