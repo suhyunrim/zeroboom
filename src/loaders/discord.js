@@ -1379,6 +1379,35 @@ module.exports = async (app) => {
     }
   });
 
+  // 봇이 새 디스코드 서버에 초대되면 자동으로 그룹 등록 + 명령어 등록
+  client.on('guildCreate', async (guild) => {
+    try {
+      const existing = await models.group.findOne({ where: { discordGuildId: guild.id } });
+      if (existing) {
+        logger.info(`봇 초대: 이미 등록된 서버 [${existing.groupName}] (${guild.id})`);
+        return;
+      }
+
+      await models.group.create({
+        groupName: guild.name,
+        discordGuildId: guild.id,
+      });
+      logger.info(`봇 초대: 새 그룹 [${guild.name}] 자동 등록 (${guild.id})`);
+
+      // 슬래시 명령어 등록
+      const commandList = await commandListLoader();
+      const commandJsons = commandList.getSlashCommands().map((cmd) => cmd.toJSON());
+      const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
+      await rest.put(
+        Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, guild.id),
+        { body: commandJsons },
+      );
+      logger.info(`봇 초대: [${guild.name}] 슬래시 명령어 등록 완료`);
+    } catch (e) {
+      logger.error('봇 초대 자동 등록 오류:', e);
+    }
+  });
+
   // 디스코드 서버 탈퇴 감지
   client.on('guildMemberRemove', async (member) => {
     try {
