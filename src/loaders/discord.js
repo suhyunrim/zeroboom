@@ -150,26 +150,6 @@ module.exports = async (app) => {
             return;
           }
 
-          // 미등록 유저 온보딩 안내
-          const registeredUser = await models.user.findOne({
-            where: { groupId: group.id, discordId: interaction.user.id },
-          });
-          if (!registeredUser) {
-            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-            const row = new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`onboard|start|${interaction.guildId}`)
-                .setLabel('소환사 등록하기')
-                .setEmoji('✏️')
-                .setStyle(ButtonStyle.Primary),
-            );
-            await interaction.reply({
-              content: '아직 소환사 등록이 되어있지 않습니다. 아래 버튼을 눌러 등록해주세요!',
-              components: [row],
-              ephemeral: true,
-            });
-            return;
-          }
         }
       }
 

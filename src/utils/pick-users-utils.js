@@ -471,7 +471,12 @@ const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, model
     const { userData, summonerData } = await lookupUserAndSummoner(parsedName, discordId, groupId, models);
 
     if (!summonerData || !userData) {
-      return { playerDataMap: null, fakeOptions: null, error: `유저 정보를 찾을 수 없습니다: ${parsedName}` };
+      return {
+        playerDataMap: null,
+        fakeOptions: null,
+        error: `유저 정보를 찾을 수 없습니다: ${parsedName}`,
+        unregisteredDiscordId: discordId,
+      };
     }
 
     const actualName = summonerData.name;
@@ -606,14 +611,28 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   }
 
   // 1. 유저 정보 수집 및 playerDataMap 생성
-  const { playerDataMap, fakeOptions, error } = await buildPlayerDataMap(
+  const { playerDataMap, fakeOptions, error, unregisteredDiscordId } = await buildPlayerDataMap(
     data.pickedUsers,
     data.pickedMembersData,
     group.id,
     models,
   );
   if (error) {
-    return { content: error, ephemeral: true };
+    // 미등록 유저에게 온보딩 DM 전송
+    if (unregisteredDiscordId) {
+      try {
+        const { startOnboarding } = require('../discord/onboarding');
+        const guild = interaction.guild || interaction.client.guilds.cache.get(interaction.guildId);
+        if (guild) {
+          const member = await guild.members.fetch(unregisteredDiscordId);
+          await startOnboarding(member, group);
+        }
+      } catch (e) {
+        // DM 전송 실패는 무시
+      }
+    }
+    const mention = unregisteredDiscordId ? ` <@${unregisteredDiscordId}>님에게 등록 안내 DM을 보냈습니다.` : '';
+    return { content: `${error}${mention}`, ephemeral: true };
   }
 
   // 2. 기존 매칭 생성 (상위 100개)
