@@ -179,21 +179,38 @@ const analyzeSummary = (matches) => {
     if (m.winTeam === favoredTeam) favoredWins++;
   });
 
+  const avgDiff = matches.length ? totalRatingDiff / matches.length : 0;
   return {
     favoredTeamWinRate: matches.length ? Math.round((favoredWins / matches.length) * 1000) / 10 : 0,
-    avgRatingDiff: matches.length ? Math.round(totalRatingDiff / matches.length * 10) / 10 : 0,
+    avgRatingDiff: Math.round(avgDiff * 10) / 10,
+    avgPerPlayerDiff: Math.round(avgDiff / 5 * 10) / 10,
+    expectedWinRate: Math.round(getExpectedWinRate(avgDiff) * 1000) / 10,
   };
 };
 
 /**
- * 레이팅 차이 구간별 승률
+ * ELO 예상 승률 계산
+ */
+const getExpectedWinRate = (teamRatingDiff) => {
+  return 1 / (1 + Math.pow(10, -teamRatingDiff / 400));
+};
+
+/**
+ * 팀 레이팅 차이 구간별 승률
+ * 팀 합산 차이를 인당 평균으로 나누고 티어 단계로 표현
+ * 인당 25점 = 1단계
  */
 const analyzeRatingBrackets = (matches) => {
+  // 팀 합산 기준 구간 (인당 평균: /5)
+  // 0~25: 인당 0~5 (거의 동일)
+  // 26~50: 인당 5~10 (반 단계 차이)
+  // 51~100: 인당 10~20 (1단계 이내)
+  // 101+: 인당 20+ (1단계 이상)
   const brackets = [
-    { label: '0~10', min: 0, max: 10, count: 0, favoredWins: 0 },
-    { label: '11~30', min: 11, max: 30, count: 0, favoredWins: 0 },
-    { label: '31~50', min: 31, max: 50, count: 0, favoredWins: 0 },
-    { label: '51+', min: 51, max: Infinity, count: 0, favoredWins: 0 },
+    { label: '거의 동일', min: 0, max: 25, count: 0, favoredWins: 0, totalDiff: 0 },
+    { label: '반 단계 차이', min: 26, max: 50, count: 0, favoredWins: 0, totalDiff: 0 },
+    { label: '1단계 이내', min: 51, max: 100, count: 0, favoredWins: 0, totalDiff: 0 },
+    { label: '1단계 이상', min: 101, max: Infinity, count: 0, favoredWins: 0, totalDiff: 0 },
   ];
 
   matches.forEach(m => {
@@ -205,15 +222,21 @@ const analyzeRatingBrackets = (matches) => {
     const bracket = brackets.find(b => diff >= b.min && diff <= b.max);
     if (bracket) {
       bracket.count++;
+      bracket.totalDiff += diff;
       if (m.winTeam === favoredTeam) bracket.favoredWins++;
     }
   });
 
-  return brackets.map(b => ({
-    label: b.label,
-    count: b.count,
-    favoredWinRate: b.count ? Math.round((b.favoredWins / b.count) * 1000) / 10 : 0,
-  }));
+  return brackets.map(b => {
+    const avgDiff = b.count ? b.totalDiff / b.count : 0;
+    const expectedWinRate = Math.round(getExpectedWinRate(avgDiff) * 1000) / 10;
+    return {
+      label: b.label,
+      count: b.count,
+      favoredWinRate: b.count ? Math.round((b.favoredWins / b.count) * 1000) / 10 : 0,
+      expectedWinRate,
+    };
+  });
 };
 
 /**
@@ -318,9 +341,9 @@ const analyzePositions = (matches, summonerMap) => {
   // 매치별 분석
   const scoreData = [];
   const scoreBrackets = [
-    { label: '높음 (300+)', min: 300, max: Infinity, count: 0, favoredWins: 0 },
-    { label: '보통 (200~299)', min: 200, max: 299, count: 0, favoredWins: 0 },
-    { label: '낮음 (200 미만)', min: 0, max: 199, count: 0, favoredWins: 0 },
+    { label: '좋음', min: 300, max: Infinity, count: 0, favoredWins: 0 },
+    { label: '보통', min: 200, max: 299, count: 0, favoredWins: 0 },
+    { label: '나쁨', min: 0, max: 199, count: 0, favoredWins: 0 },
   ];
 
   const positionOverlapCount = {};
@@ -426,10 +449,10 @@ const analyzeSetResults = (matches, sets, summonerMap) => {
 
   // 포지션 점수 차이 vs 2:0 비율
   const posScoreBrackets = [
-    { label: '0~20', min: 0, max: 20, twoZero: 0, twoOne: 0 },
-    { label: '21~50', min: 21, max: 50, twoZero: 0, twoOne: 0 },
-    { label: '51~80', min: 51, max: 80, twoZero: 0, twoOne: 0 },
-    { label: '81+', min: 81, max: Infinity, twoZero: 0, twoOne: 0 },
+    { label: '좋음', min: 0, max: 20, twoZero: 0, twoOne: 0 },
+    { label: '보통', min: 21, max: 50, twoZero: 0, twoOne: 0 },
+    { label: '나쁨', min: 51, max: 80, twoZero: 0, twoOne: 0 },
+    { label: '매우 나쁨', min: 81, max: Infinity, twoZero: 0, twoOne: 0 },
   ];
 
   validSets.forEach(set => {
