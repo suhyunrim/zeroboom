@@ -122,8 +122,8 @@ exports.run = async (groupName, interaction) => {
     match.team2 = team2WithRating.map(formatPlayerDisplay);
 
     // 평균 레이팅 계산
-    match.team1AvgRating = team1WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
-    match.team2AvgRating = team2WithRating.reduce((sum, { rating }) => sum + rating, 0) / 5;
+    match.team1AvgRating = team1WithRating.reduce((sum, { rating }) => sum + rating, 0) / team1WithRating.length;
+    match.team2AvgRating = team2WithRating.reduce((sum, { rating }) => sum + rating, 0) / team2WithRating.length;
 
     // 원본 이름 보존 (버튼 클릭 시 사용)
     match.team1Names = team1WithRating.map(({ name }) => name);
