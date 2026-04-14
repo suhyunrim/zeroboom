@@ -642,7 +642,7 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
     }
     const dmSent = unregisteredDiscordIds && unregisteredDiscordIds.length > 0
       ? '\n등록 안내 DM을 보냈습니다.' : '';
-    return { content: `${error}${dmSent}`, ephemeral: true };
+    return { content: `${error}${dmSent}` };
   }
 
   // 2. 기존 매칭 생성 (상위 100개)
