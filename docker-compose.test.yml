@@ -24,6 +24,7 @@ services:
       COMMAND_PREFIX: ${COMMAND_PREFIX:-}
       FRONTEND_URL: ${FRONTEND_URL_TEST:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      PICK_COUNT: ${PICK_COUNT:-}
     networks:
       - live_network
 
