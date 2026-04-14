@@ -148,7 +148,15 @@ module.exports = (app) => {
       await tokenController.validateUserGroup(tokenId, groupName);
 
       const rankings = await groupController.getRanking(groupName);
-      return res.status(rankings.status).json({ result: rankings.result });
+      const response = { result: rankings.result };
+
+      // 요청자의 랭킹 정보 추가
+      const myPuuid = req.headers.puuid;
+      if (myPuuid && rankings.status === 200) {
+        response.myRanking = await groupController.getMyRanking(groupName, myPuuid, rankings.result);
+      }
+
+      return res.status(rankings.status).json(response);
     } catch (e) {
       logger.error(e);
       return res.status(501).json({ result: e.message });

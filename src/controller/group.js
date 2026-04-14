@@ -158,6 +158,60 @@ module.exports.getRanking = async (groupName) => {
   return { result: result, status: 200 };
 };
 
+module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {
+  // 이미 랭킹에 포함되어 있는지 확인
+  const found = rankingResult.find((r) => r.puuid === puuid);
+  if (found) {
+    return { ...found, reason: null };
+  }
+
+  // 랭킹에 없는 경우: 유저 정보 조회
+  const group = await models.group.findOne({ where: { groupName } });
+  if (!group) return null;
+
+  const user = await models.user.findOne({
+    where: { puuid, groupId: group.id },
+  });
+  if (!user) return null;
+
+  const summoner = await models.summoner.findOne({ where: { puuid } });
+
+  // 외부 기록 합산
+  const externalRecords = await models.externalRecord.findAll({
+    where: {
+      groupId: group.id,
+      puuid,
+      expiresAt: { [Op.gt]: new Date() },
+    },
+  });
+  const extWin = externalRecords.reduce((sum, r) => sum + (r.win || 0), 0);
+  const extLose = externalRecords.reduce((sum, r) => sum + (r.lose || 0), 0);
+  const totalWin = user.win + extWin;
+  const totalLose = user.lose + extLose;
+  const totalGames = totalWin + totalLose;
+
+  // 미달 사유 판별
+  let reason = null;
+  if (user.role === 'outsider') {
+    reason = '블랙리스트';
+  } else if (totalGames < RankingMinumumMatchCount) {
+    reason = `${RankingMinumumMatchCount}판 미만`;
+  } else if (!user.latestMatchDate || moment().diff(moment(user.latestMatchDate), 'days') > LatestMatchDateConditionDays) {
+    reason = `최근 ${LatestMatchDateConditionDays}일 이내 매치 없음`;
+  }
+
+  return {
+    puuid,
+    ranking: null,
+    name: summoner ? summoner.name : 'Unknown',
+    rating: user.defaultRating + user.additionalRating,
+    win: totalWin,
+    lose: totalLose,
+    winRate: totalGames > 0 ? Math.ceil((totalWin / totalGames) * 100) : 0,
+    reason,
+  };
+};
+
 module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
   const group = await models.group.findByPk(groupId);
   if (!group) return { result: 'group is not exist', status: 404 };
