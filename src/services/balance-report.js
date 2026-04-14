@@ -23,6 +23,36 @@ const ratingToTierLevel = (rating) => {
 };
 
 
+const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
+
+/**
+ * mainPosition 기준 팀 포지션 적합도 점수 (0~500)
+ */
+const getTeamPositionScore = (team, summonerMap) => {
+  let score = 0;
+  POSITIONS.forEach(pos => {
+    let maxRate = 0;
+    team.forEach(player => {
+      const s = summonerMap[player[0]];
+      if (s && s.mainPosition === pos && s.mainPositionRate > maxRate) {
+        maxRate = s.mainPositionRate;
+      }
+    });
+    score += maxRate;
+  });
+  return Math.round(score * 10) / 10;
+};
+
+/**
+ * 포지션 균형 라벨 (mainPosition 기준 점수 차이)
+ */
+const getBalanceLabel = (diff) => {
+  if (diff <= 30) return '좋음';
+  if (diff <= 60) return '보통';
+  if (diff <= 90) return '나쁨';
+  return '매우 나쁨';
+};
+
 /**
  * 매치를 3판2선 세트로 그룹핑
  * 같은 멤버 구성끼리 모아서 시간순으로 최대 3경기씩 묶음
@@ -285,24 +315,6 @@ const analyzeTierSpread = (matches) => {
  * - 유저가 실제로 볼 수 있는 정보(메인 포지션)와 일치하는 기준
  */
 const analyzePositions = (matches, summonerMap) => {
-  const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
-
-  // mainPosition 기준 팀 점수 (0~500)
-  const getTeamPositionScore = (team) => {
-    let score = 0;
-    POSITIONS.forEach(pos => {
-      let maxRate = 0;
-      team.forEach(player => {
-        const s = summonerMap[player[0]];
-        if (s && s.mainPosition === pos && s.mainPositionRate > maxRate) {
-          maxRate = s.mainPositionRate;
-        }
-      });
-      score += maxRate;
-    });
-    return Math.round(score * 10) / 10;
-  };
-
   // mainPosition 기준 커버리지
   const getTeamPositionCoverage = (team) => {
     const covered = new Set();
@@ -320,8 +332,8 @@ const analyzePositions = (matches, summonerMap) => {
   let teamCount = 0;
 
   matches.forEach(m => {
-    const score1 = getTeamPositionScore(m.team1);
-    const score2 = getTeamPositionScore(m.team2);
+    const score1 = getTeamPositionScore(m.team1, summonerMap);
+    const score2 = getTeamPositionScore(m.team2, summonerMap);
 
     totalScore += score1 + score2;
     totalScoreDiff += Math.abs(score1 - score2);
@@ -355,12 +367,6 @@ const analyzePositions = (matches, summonerMap) => {
     }));
 
   const avgDiff = matches.length ? totalScoreDiff / matches.length : 0;
-  const getBalanceLabel = (diff) => {
-    if (diff <= 30) return '좋음';
-    if (diff <= 60) return '보통';
-    if (diff <= 90) return '나쁨';
-    return '매우 나쁨';
-  };
 
   return {
     avgPositionScore: teamCount ? Math.round(totalScore / teamCount * 10) / 10 : 0,
@@ -375,24 +381,6 @@ const analyzePositions = (matches, summonerMap) => {
  * 세트 결과 분석 (2:0 / 2:1 비율)
  */
 const analyzeSetResults = (matches, sets, summonerMap) => {
-  const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
-
-  // mainPosition 기준 팀 점수
-  const getTeamPositionScore = (team) => {
-    let score = 0;
-    POSITIONS.forEach(pos => {
-      let maxRate = 0;
-      team.forEach(p => {
-        const s = summonerMap[p[0]];
-        if (s && s.mainPosition === pos && s.mainPositionRate > maxRate) {
-          maxRate = s.mainPositionRate;
-        }
-      });
-      score += maxRate;
-    });
-    return Math.round(score * 10) / 10;
-  };
-
   // 2~3경기 세트만 분석 (1경기 단독은 세트가 아님)
   const validSets = sets.filter(s => s.length >= 2);
 
@@ -441,8 +429,8 @@ const analyzeSetResults = (matches, sets, summonerMap) => {
     }
 
     // 포지션 점수 차이 구간 집계
-    const score1 = getTeamPositionScore(firstMatch.team1);
-    const score2 = getTeamPositionScore(firstMatch.team2);
+    const score1 = getTeamPositionScore(firstMatch.team1, summonerMap);
+    const score2 = getTeamPositionScore(firstMatch.team2, summonerMap);
     const scoreDiff = Math.abs(score1 - score2);
     const bracket = posScoreBrackets.find(b => scoreDiff >= b.min && scoreDiff <= b.max);
     if (bracket) {

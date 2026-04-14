@@ -630,14 +630,14 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
       const { startOnboarding } = require('../discord/onboarding');
       const guild = interaction.guild || interaction.client.guilds.cache.get(interaction.guildId);
       if (guild) {
-        for (const discordId of unregisteredDiscordIds) {
+        await Promise.all(unregisteredDiscordIds.map(async (discordId) => {
           try {
             const member = await guild.members.fetch(discordId);
             await startOnboarding(member, group);
           } catch (e) {
             // DM 전송 실패는 무시
           }
-        }
+        }));
       }
     }
     const dmSent = unregisteredDiscordIds && unregisteredDiscordIds.length > 0

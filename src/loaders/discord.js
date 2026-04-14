@@ -8,6 +8,10 @@ const {
   InteractionResponse,
   ChannelType,
   PermissionFlagsBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
@@ -1410,8 +1414,7 @@ module.exports = async (app) => {
         || guild.channels.cache.find(ch => ch.type === ChannelType.GuildText && ch.permissionsFor(guild.members.me).has('SendMessages'));
 
       if (defaultChannel) {
-        const { EmbedBuilder: EB, ActionRowBuilder: ARB, ButtonBuilder: BB, ButtonStyle: BS } = require('discord.js');
-        const embed = new EB()
+        const embed = new EmbedBuilder()
           .setColor('#0099ff')
           .setTitle('🎮 ZeroBoom 봇이 등록되었습니다!')
           .setDescription(
@@ -1420,12 +1423,12 @@ module.exports = async (app) => {
             '아래 버튼을 눌러 간단한 등록을 진행해주세요!',
           );
 
-        const row = new ARB().addComponents(
-          new BB()
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
             .setCustomId(`onboard|start|${guild.id}`)
             .setLabel('소환사 등록하기')
             .setEmoji('✏️')
-            .setStyle(BS.Primary),
+            .setStyle(ButtonStyle.Primary),
         );
 
         await defaultChannel.send({ embeds: [embed], components: [row] });

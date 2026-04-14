@@ -10,6 +10,25 @@ const RankingMinumumMatchCount = 5;
 const matchController = require('../controller/match');
 const ratingCalculator = new elo(16);
 
+/**
+ * 만료되지 않은 외부 기록을 puuid별로 합산
+ * @param {number} groupId
+ * @param {string} [puuid] - 특정 유저만 조회 시
+ */
+const getExternalStats = async (groupId, puuid) => {
+  const where = { groupId, expiresAt: { [Op.gt]: new Date() } };
+  if (puuid) where.puuid = puuid;
+
+  const records = await models.externalRecord.findAll({ where });
+  const stats = {};
+  for (const record of records) {
+    if (!stats[record.puuid]) stats[record.puuid] = { win: 0, lose: 0 };
+    stats[record.puuid].win += record.win || 0;
+    stats[record.puuid].lose += record.lose || 0;
+  }
+  return stats;
+};
+
 module.exports.get = async (id) => {
   const result = await models.group.findByPk(id);
 
@@ -99,23 +118,7 @@ module.exports.getRanking = async (groupName) => {
     },
   });
 
-  // 만료되지 않은 외부 기록 조회
-  const externalRecords = await models.externalRecord.findAll({
-    where: {
-      groupId: group.id,
-      expiresAt: { [Op.gt]: new Date() },
-    },
-  });
-
-  // puuid별 외부 기록 합산
-  const externalStats = {};
-  for (const record of externalRecords) {
-    if (!externalStats[record.puuid]) {
-      externalStats[record.puuid] = { win: 0, lose: 0 };
-    }
-    externalStats[record.puuid].win += record.win || 0;
-    externalStats[record.puuid].lose += record.lose || 0;
-  }
+  const externalStats = await getExternalStats(group.id);
 
   // 외부 기록을 포함한 win/lose 계산
   const userStats = users.map((user) => {
@@ -174,20 +177,14 @@ module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {
   });
   if (!user) return null;
 
-  const summoner = await models.summoner.findOne({ where: { puuid } });
+  const [summoner, externalStats] = await Promise.all([
+    models.summoner.findOne({ where: { puuid } }),
+    getExternalStats(group.id, puuid),
+  ]);
 
-  // 외부 기록 합산
-  const externalRecords = await models.externalRecord.findAll({
-    where: {
-      groupId: group.id,
-      puuid,
-      expiresAt: { [Op.gt]: new Date() },
-    },
-  });
-  const extWin = externalRecords.reduce((sum, r) => sum + (r.win || 0), 0);
-  const extLose = externalRecords.reduce((sum, r) => sum + (r.lose || 0), 0);
-  const totalWin = user.win + extWin;
-  const totalLose = user.lose + extLose;
+  const ext = externalStats[puuid] || { win: 0, lose: 0 };
+  const totalWin = user.win + ext.win;
+  const totalLose = user.lose + ext.lose;
   const totalGames = totalWin + totalLose;
 
   // 미달 사유 판별
