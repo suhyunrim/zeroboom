@@ -76,7 +76,8 @@ const getAssignmentType = (player, position) => {
  * @returns {Object} { assignments, totalScore, offCount, subCount, mainCount }
  */
 const assignPositionsForTeam = (players) => {
-  if (players.length !== 5) return null;
+  const { pickCount } = require('../config');
+  if (players.length !== pickCount / 2) return null;
 
   const availablePositions = new Set(POSITIONS);
   const assignments = [];
