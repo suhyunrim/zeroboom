@@ -277,74 +277,41 @@ const analyzeTierSpread = (matches) => {
 };
 
 /**
- * 포지션 분석 (rate 기반 적합도 점수)
+ * 포지션 분석 (mainPosition 기준)
  *
  * 팀 포지션 적합도 점수:
- * - 5개 포지션에 대해 각 유저가 해당 포지션을 얼마나 잘하는지 rate로 계산
- * - 각 포지션에서 가장 높은 rate를 가진 유저의 rate를 합산
- * - 최대 500점 (5포지션 x 100%), 높을수록 포지션 분포가 좋음
+ * - 5개 포지션에 대해 mainPosition이 해당 포지션인 유저의 mainPositionRate를 사용
+ * - 각 포지션에서 가장 높은 rate를 합산
+ * - 유저가 실제로 볼 수 있는 정보(메인 포지션)와 일치하는 기준
  */
 const analyzePositions = (matches, summonerMap) => {
   const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 
-  // 유저의 포지션별 rate 반환
-  const getPlayerPositionRates = (puuid) => {
-    const s = summonerMap[puuid];
-    if (!s) return {};
-    const rates = {};
-    if (s.mainPosition && s.mainPositionRate) {
-      rates[s.mainPosition] = s.mainPositionRate;
-    }
-    if (s.subPosition && s.subPositionRate >= 10) {
-      rates[s.subPosition] = s.subPositionRate;
-    }
-    return rates;
-  };
-
-  // 팀 포지션 적합도 점수 (0~500)
-  // 각 포지션별로 팀원 중 가장 높은 rate를 합산
+  // mainPosition 기준 팀 점수 (0~500)
   const getTeamPositionScore = (team) => {
     let score = 0;
     POSITIONS.forEach(pos => {
       let maxRate = 0;
       team.forEach(player => {
-        const rates = getPlayerPositionRates(player[0]);
-        if (rates[pos] && rates[pos] > maxRate) maxRate = rates[pos];
+        const s = summonerMap[player[0]];
+        if (s && s.mainPosition === pos && s.mainPositionRate > maxRate) {
+          maxRate = s.mainPositionRate;
+        }
       });
       score += maxRate;
     });
     return Math.round(score * 10) / 10;
   };
 
-  // 팀 포지션 커버리지 (몇 개 포지션을 커버하는지)
+  // mainPosition 기준 커버리지
   const getTeamPositionCoverage = (team) => {
     const covered = new Set();
     team.forEach(player => {
-      const rates = getPlayerPositionRates(player[0]);
-      Object.keys(rates).forEach(pos => covered.add(pos));
+      const s = summonerMap[player[0]];
+      if (s && s.mainPosition) covered.add(s.mainPosition);
     });
     return covered.size;
   };
-
-  // mainPosition 기준 겹침 수
-  const getTeamMainOverlapCount = (team) => {
-    const posCount = {};
-    team.forEach(player => {
-      const s = summonerMap[player[0]];
-      if (s && s.mainPosition) {
-        posCount[s.mainPosition] = (posCount[s.mainPosition] || 0) + 1;
-      }
-    });
-    return Object.values(posCount).filter(c => c >= 2).length;
-  };
-
-  // 매치별 분석
-  const scoreData = [];
-  const scoreBrackets = [
-    { label: '좋음', min: 300, max: Infinity, count: 0, favoredWins: 0 },
-    { label: '보통', min: 200, max: 299, count: 0, favoredWins: 0 },
-    { label: '나쁨', min: 0, max: 199, count: 0, favoredWins: 0 },
-  ];
 
   const positionOverlapCount = {};
   let totalScore = 0;
@@ -353,24 +320,13 @@ const analyzePositions = (matches, summonerMap) => {
   let teamCount = 0;
 
   matches.forEach(m => {
-    const team1Sum = getTeamRatingSum(m.team1);
-    const team2Sum = getTeamRatingSum(m.team2);
-    const favoredTeam = team1Sum >= team2Sum ? 1 : 2;
-
     const score1 = getTeamPositionScore(m.team1);
     const score2 = getTeamPositionScore(m.team2);
-    const avgScore = (score1 + score2) / 2;
 
     totalScore += score1 + score2;
     totalScoreDiff += Math.abs(score1 - score2);
     totalCoverage += getTeamPositionCoverage(m.team1) + getTeamPositionCoverage(m.team2);
     teamCount += 2;
-
-    const bracket = scoreBrackets.find(b => avgScore >= b.min && avgScore <= b.max);
-    if (bracket) {
-      bracket.count++;
-      if (m.winTeam === favoredTeam) bracket.favoredWins++;
-    }
 
     // 겹침 포지션 집계
     [m.team1, m.team2].forEach(team => {
@@ -400,9 +356,9 @@ const analyzePositions = (matches, summonerMap) => {
 
   const avgDiff = matches.length ? totalScoreDiff / matches.length : 0;
   const getBalanceLabel = (diff) => {
-    if (diff <= 20) return '좋음';
-    if (diff <= 50) return '보통';
-    if (diff <= 80) return '나쁨';
+    if (diff <= 30) return '좋음';
+    if (diff <= 60) return '보통';
+    if (diff <= 90) return '나쁨';
     return '매우 나쁨';
   };
 
@@ -411,11 +367,6 @@ const analyzePositions = (matches, summonerMap) => {
     avgPositionScoreDiff: Math.round(avgDiff * 10) / 10,
     avgPositionBalance: getBalanceLabel(avgDiff),
     avgPositionCoverage: teamCount ? Math.round((totalCoverage / teamCount) * 10) / 10 : 0,
-    scoreBrackets: scoreBrackets.map(b => ({
-      label: b.label,
-      count: b.count,
-      favoredWinRate: b.count ? Math.round((b.favoredWins / b.count) * 1000) / 10 : 0,
-    })),
     mostOverlappedPositions,
   };
 };
@@ -426,22 +377,16 @@ const analyzePositions = (matches, summonerMap) => {
 const analyzeSetResults = (matches, sets, summonerMap) => {
   const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 
-  const getPlayerPositionRates = (puuid) => {
-    const s = summonerMap[puuid];
-    if (!s) return {};
-    const rates = {};
-    if (s.mainPosition && s.mainPositionRate) rates[s.mainPosition] = s.mainPositionRate;
-    if (s.subPosition && s.subPositionRate >= 10) rates[s.subPosition] = s.subPositionRate;
-    return rates;
-  };
-
+  // mainPosition 기준 팀 점수
   const getTeamPositionScore = (team) => {
     let score = 0;
     POSITIONS.forEach(pos => {
       let maxRate = 0;
       team.forEach(p => {
-        const rates = getPlayerPositionRates(p[0]);
-        if (rates[pos] && rates[pos] > maxRate) maxRate = rates[pos];
+        const s = summonerMap[p[0]];
+        if (s && s.mainPosition === pos && s.mainPositionRate > maxRate) {
+          maxRate = s.mainPositionRate;
+        }
       });
       score += maxRate;
     });
@@ -461,10 +406,10 @@ const analyzeSetResults = (matches, sets, summonerMap) => {
 
   // 포지션 점수 차이 vs 2:0 비율
   const posScoreBrackets = [
-    { label: '좋음', min: 0, max: 20, twoZero: 0, twoOne: 0 },
-    { label: '보통', min: 21, max: 50, twoZero: 0, twoOne: 0 },
-    { label: '나쁨', min: 51, max: 80, twoZero: 0, twoOne: 0 },
-    { label: '매우 나쁨', min: 81, max: Infinity, twoZero: 0, twoOne: 0 },
+    { label: '좋음', min: 0, max: 30, twoZero: 0, twoOne: 0 },
+    { label: '보통', min: 31, max: 60, twoZero: 0, twoOne: 0 },
+    { label: '나쁨', min: 61, max: 90, twoZero: 0, twoOne: 0 },
+    { label: '매우 나쁨', min: 91, max: Infinity, twoZero: 0, twoOne: 0 },
   ];
 
   validSets.forEach(set => {
