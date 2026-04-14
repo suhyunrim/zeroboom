@@ -89,9 +89,10 @@ function formatHonorResults(results, session) {
   if (!results || results.length === 0) {
     return '**🏆 명예 투표 종료** - 투표 결과가 없습니다.';
   }
-  const allVoted = session.voters && session.voters.size >= 10;
-  const voteCount = session.voters ? session.voters.size : 0;
   const allPlayers = [...session.team1, ...session.team2];
+  const totalPlayers = allPlayers.length;
+  const allVoted = session.voters && session.voters.size >= totalPlayers;
+  const voteCount = session.voters ? session.voters.size : 0;
 
   // 팀 구분 없이 득표순 내림차순 정렬
   const merged = {};
@@ -106,7 +107,7 @@ function formatHonorResults(results, session) {
   const cat = session.category;
   let text = allVoted
     ? `**🎉✨ 전원 투표 완료! ${cat.emoji} ${cat.label} 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n`
-    : `**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/10)\n`;
+    : `**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/${totalPlayers})\n`;
   for (const entry of sorted) {
     const name = (allPlayers.find((p) => p.puuid === entry.targetPuuid) || {}).name || '알 수 없음';
     text += `**${name}** - ${entry.votes}표\n`;
@@ -779,7 +780,7 @@ module.exports = async (app) => {
         );
 
         const honorMessage = await interaction.channel.send({
-          content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/10)`,
+          content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/${team1Data.length + team2Data.length})`,
           components: [honorButton],
         });
         voteSession.honorMessage = honorMessage;
@@ -971,7 +972,8 @@ module.exports = async (app) => {
             const statusLines = [];
             for (let i = 0; i < voteSession.totalPlans; i++) {
               const count = status.voteCounts[String(i)] || 0;
-              const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, 10 - count));
+              const barMax = status.totalParticipants;
+              const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, barMax - count));
               statusLines.push(`${i + 1}번: ${bar} ${count}표`);
             }
             const statusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n${statusLines.join(
@@ -1113,16 +1115,16 @@ module.exports = async (app) => {
 
           // 투표 현황 갱신
           if (session.honorMessage) {
-            if (session.voters.size >= 10) {
+            const allPlayers = [...session.team1, ...session.team2];
+            if (session.voters.size >= allPlayers.length) {
               // 전원 투표 보너스 지급
-              const allPlayers = [...session.team1, ...session.team2];
               await honorController.grantFullVoteBonus(gameId, session.groupId, allPlayers);
               honorVoteSessions.delete(gameId);
             }
             const results = await honorController.getVoteResults(gameId);
             await session.honorMessage.edit({
               content: formatHonorResults(results, session),
-              components: session.voters.size >= 10 ? [] : undefined,
+              components: session.voters.size >= allPlayers.length ? [] : undefined,
             });
           }
         } else {
