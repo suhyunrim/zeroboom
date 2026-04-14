@@ -28,6 +28,14 @@ module.exports = {
     redirectUri: process.env.DISCORD_REDIRECT_URI,
   },
   frontendUrl: process.env.FRONTEND_URL,
+  pickCount: (() => {
+    const raw = Number(process.env.PICK_COUNT) || 10;
+    if (raw % 2 !== 0) {
+      console.warn(`[config] PICK_COUNT=${raw}는 홀수입니다. ${raw + 1}로 보정합니다.`);
+      return raw + 1;
+    }
+    return raw;
+  })(),
   sentry: {
     dsn: process.env.SENTRY_DSN || '',
   },

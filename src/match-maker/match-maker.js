@@ -2,7 +2,7 @@ const { logger } = require('../loaders/logger');
 const ratingSystem = require('../rating-system/rating-system');
 const Match = require('../entity/match.js').Match;
 
-const PICK_COUNT = Number(process.env.PICK_COUNT) || 10;
+const { pickCount: PICK_COUNT } = require('../config');
 const TEAM_SIZE = PICK_COUNT / 2;
 
 const matchMake = (preOrganizationTeam1, preOrganizationTeam2, userPool, count) => {

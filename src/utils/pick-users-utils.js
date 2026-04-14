@@ -5,8 +5,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, E
 const { normalizePosition } = require('./tierUtils');
 
 // 공통 상수
-const rawPickCount = Number(process.env.PICK_COUNT) || 10;
-const PICK_COUNT = rawPickCount % 2 !== 0 ? rawPickCount + 1 : rawPickCount; // 홀수면 +1
+const { pickCount: PICK_COUNT } = require('../config');
 const MAX_TOGGLE_MEMBERS = 24;
 
 // 포지션 이모지 매핑
