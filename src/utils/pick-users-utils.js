@@ -462,6 +462,7 @@ const buildFakeOptions = async (pickedUsers, pickedMembersData, groupId, models)
 const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, models) => {
   const playerDataMap = {};
   const fakeOptions = [];
+  const unregisteredUsers = [];
 
   for (let i = 0; i < pickedUsers.length; i++) {
     const parsedName = pickedUsers[i];
@@ -471,12 +472,8 @@ const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, model
     const { userData, summonerData } = await lookupUserAndSummoner(parsedName, discordId, groupId, models);
 
     if (!summonerData || !userData) {
-      return {
-        playerDataMap: null,
-        fakeOptions: null,
-        error: `유저 정보를 찾을 수 없습니다: ${parsedName}`,
-        unregisteredDiscordId: discordId,
-      };
+      unregisteredUsers.push({ name: parsedName, discordId });
+      continue;
     }
 
     const actualName = summonerData.name;
@@ -498,6 +495,16 @@ const buildPlayerDataMap = async (pickedUsers, pickedMembersData, groupId, model
       value: actualName,
       discordId,
     });
+  }
+
+  if (unregisteredUsers.length > 0) {
+    const names = unregisteredUsers.map(u => u.discordId ? `<@${u.discordId}>` : u.name).join(', ');
+    return {
+      playerDataMap: null,
+      fakeOptions: null,
+      error: `미등록 유저: ${names}`,
+      unregisteredDiscordIds: unregisteredUsers.filter(u => u.discordId).map(u => u.discordId),
+    };
   }
 
   return { playerDataMap, fakeOptions, error: null };
@@ -611,28 +618,31 @@ const handlePositionMatch = async (interaction, data, models, matchMake) => {
   }
 
   // 1. 유저 정보 수집 및 playerDataMap 생성
-  const { playerDataMap, fakeOptions, error, unregisteredDiscordId } = await buildPlayerDataMap(
+  const { playerDataMap, fakeOptions, error, unregisteredDiscordIds } = await buildPlayerDataMap(
     data.pickedUsers,
     data.pickedMembersData,
     group.id,
     models,
   );
   if (error) {
-    // 미등록 유저에게 온보딩 DM 전송
-    if (unregisteredDiscordId) {
-      try {
-        const { startOnboarding } = require('../discord/onboarding');
-        const guild = interaction.guild || interaction.client.guilds.cache.get(interaction.guildId);
-        if (guild) {
-          const member = await guild.members.fetch(unregisteredDiscordId);
-          await startOnboarding(member, group);
+    // 미등록 유저들에게 온보딩 DM 전송
+    if (unregisteredDiscordIds && unregisteredDiscordIds.length > 0) {
+      const { startOnboarding } = require('../discord/onboarding');
+      const guild = interaction.guild || interaction.client.guilds.cache.get(interaction.guildId);
+      if (guild) {
+        for (const discordId of unregisteredDiscordIds) {
+          try {
+            const member = await guild.members.fetch(discordId);
+            await startOnboarding(member, group);
+          } catch (e) {
+            // DM 전송 실패는 무시
+          }
         }
-      } catch (e) {
-        // DM 전송 실패는 무시
       }
     }
-    const mention = unregisteredDiscordId ? ` <@${unregisteredDiscordId}>님에게 등록 안내 DM을 보냈습니다.` : '';
-    return { content: `${error}${mention}`, ephemeral: true };
+    const dmSent = unregisteredDiscordIds && unregisteredDiscordIds.length > 0
+      ? '\n등록 안내 DM을 보냈습니다.' : '';
+    return { content: `${error}${dmSent}`, ephemeral: true };
   }
 
   // 2. 기존 매칭 생성 (상위 100개)

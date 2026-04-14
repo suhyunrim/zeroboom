@@ -211,7 +211,7 @@ describe('buildPlayerDataMap', () => {
       mockModels,
     );
 
-    expect(error).toBe('유저 정보를 찾을 수 없습니다: 없는유저');
+    expect(error).toContain('미등록 유저');
     expect(playerDataMap).toBeNull();
     expect(fakeOptions).toBeNull();
   });
@@ -227,13 +227,14 @@ describe('buildPlayerDataMap', () => {
       .mockResolvedValueOnce(summoner1)
       .mockResolvedValueOnce(null);
 
-    const { error } = await buildPlayerDataMap(
+    const { error, unregisteredDiscordIds } = await buildPlayerDataMap(
       ['닉1', '없는유저'],
       [{ discordId: 'd1' }, { discordId: 'd2' }],
       1,
       mockModels,
     );
 
-    expect(error).toContain('없는유저');
+    expect(error).toContain('미등록 유저');
+    expect(unregisteredDiscordIds).toContain('d2');
   });
 });
