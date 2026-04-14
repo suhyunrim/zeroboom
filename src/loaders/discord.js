@@ -1562,12 +1562,11 @@ module.exports = async (app) => {
   const commandJsons = commandList.getSlashCommands().map((command) => command.toJSON());
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
 
-  const serverIds = [
-    '635802085601968158', // 협곡에휘핑크림
-    '280311002656931844', // 롤리데이
-    '765934529231716365', // LRZ
-    '1235540411230191626',
-  ];
+  const groups = await models.group.findAll({
+    where: { discordGuildId: { [Op.ne]: null } },
+    attributes: ['discordGuildId'],
+  });
+  const serverIds = groups.map(g => g.discordGuildId);
 
   for (let serverId of serverIds) {
     rest
