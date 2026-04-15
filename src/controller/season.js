@@ -24,8 +24,6 @@ module.exports.resetSeason = async (groupId, actorDiscordId, actorName) => {
       groupId,
       puuid: u.puuid,
       season: currentSeason,
-      win: u.win,
-      lose: u.lose,
       defaultRating: u.defaultRating,
       additionalRating: u.additionalRating,
       discordId: u.discordId,

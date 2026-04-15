@@ -40,9 +40,9 @@ describe('season.resetSeason', () => {
   });
 
   const makeUsers = () => [
-    { puuid: 'p1', win: 10, lose: 5, defaultRating: 1000, additionalRating: 200, discordId: 'd1' },
-    { puuid: 'p2', win: 3, lose: 7, defaultRating: 1000, additionalRating: -100, discordId: 'd2' },
-    { puuid: 'p3', win: 0, lose: 0, defaultRating: 1000, additionalRating: 0, discordId: 'd3' },
+    { puuid: 'p1', defaultRating: 1000, additionalRating: 200, discordId: 'd1' },
+    { puuid: 'p2', defaultRating: 1000, additionalRating: -100, discordId: 'd2' },
+    { puuid: 'p3', defaultRating: 1000, additionalRating: 0, discordId: 'd3' },
   ];
 
   test('스냅샷 저장 후 additionalRating 반감, 시즌 증가', async () => {

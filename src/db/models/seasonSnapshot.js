@@ -19,12 +19,6 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: false,
       },
-      win: {
-        type: DataTypes.INTEGER,
-      },
-      lose: {
-        type: DataTypes.INTEGER,
-      },
       defaultRating: {
         type: DataTypes.INTEGER,
       },

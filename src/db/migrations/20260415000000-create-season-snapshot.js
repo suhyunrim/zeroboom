@@ -18,12 +18,6 @@ module.exports = {
         type: Sequelize.INTEGER,
         allowNull: false,
       },
-      win: {
-        type: Sequelize.INTEGER,
-      },
-      lose: {
-        type: Sequelize.INTEGER,
-      },
       defaultRating: {
         type: Sequelize.INTEGER,
       },
