@@ -626,6 +626,8 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
   const team2 = originalMatch.team2.map(([puuid, name]) => [puuid, name]);
   const matchDate = new Date(date);
 
+  const group = await models.group.findByPk(groupId);
+  const currentSeason = (group?.settings && group.settings.currentSeason) || 1;
   const newMatch = await models.match.create({
     groupId,
     team1,
@@ -633,6 +635,7 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
     winTeam,
     gameCreation: matchDate,
     createdAt: matchDate,
+    seasonId: currentSeason,
   });
 
   await module.exports.applyMatchResult(newMatch.gameId);

@@ -36,6 +36,10 @@ module.exports = (sequelize, DataTypes) => {
       gameCreation: {
         type: DataTypes.DATE,
       },
+      seasonId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {},
   );

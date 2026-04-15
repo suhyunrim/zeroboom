@@ -1,14 +1,15 @@
 const { Router } = require('express');
 
 const route = Router();
+const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
-const { Op } = require('sequelize');
 const { getGuildIconUrl } = require('../../utils/discordUtils');
 const auditLog = require('../../controller/audit-log');
 const groupController = require('../../controller/group');
+const seasonController = require('../../controller/season');
 const tokenController = require('../../controller/token');
 
 module.exports = (app) => {
@@ -36,7 +37,12 @@ module.exports = (app) => {
         groupName: group.groupName,
         discordGuildName: guild ? guild.name : null,
         discordGuildIcon: group.discordGuildId ? getGuildIconUrl(client, group.discordGuildId) : null,
-        members: { total: totalMembers, active: activeMembers, blacklisted: blacklistedMembers, leftGuild: leftGuildMembers },
+        members: {
+          total: totalMembers,
+          active: activeMembers,
+          blacklisted: blacklistedMembers,
+          leftGuild: leftGuildMembers,
+        },
         totalMatches,
         settings: group.settings || {},
         createdAt: group.createdAt,
@@ -59,8 +65,12 @@ module.exports = (app) => {
     await group.update({ groupName });
 
     auditLog.log({
-      groupId: group.id, actorDiscordId: req.user.discordId, actorName: req.user.name,
-      action: 'group.rename', details: { before: oldName, after: groupName }, source: 'web',
+      groupId: group.id,
+      actorDiscordId: req.user.discordId,
+      actorName: req.user.name,
+      action: 'group.rename',
+      details: { before: oldName, after: groupName },
+      source: 'web',
     });
 
     return res.json({ groupName });
@@ -74,11 +84,7 @@ module.exports = (app) => {
     }
 
     try {
-      const result = await groupController.getRankingByPeriod(
-        Number(groupId),
-        new Date(startDate),
-        new Date(endDate),
-      );
+      const result = await groupController.getRankingByPeriod(Number(groupId), new Date(startDate), new Date(endDate));
       return res.status(result.status).json({ result: result.result });
     } catch (e) {
       logger.error(e);
@@ -102,8 +108,12 @@ module.exports = (app) => {
     await group.update({ settings: newSettings });
 
     auditLog.log({
-      groupId: group.id, actorDiscordId: req.user.discordId, actorName: req.user.name,
-      action: 'group.settings.update', details: { before: currentSettings, after: newSettings }, source: 'web',
+      groupId: group.id,
+      actorDiscordId: req.user.discordId,
+      actorName: req.user.name,
+      action: 'group.settings.update',
+      details: { before: currentSettings, after: newSettings },
+      source: 'web',
     });
 
     return res.json(newSettings);
@@ -137,11 +147,44 @@ module.exports = (app) => {
     }
   });
 
+  // 시즌 초기화
+  route.post('/:groupId/season/reset', verifyToken, requireGroupAdmin, async (req, res) => {
+    try {
+      const groupId = Number(req.params.groupId);
+      const result = await seasonController.resetSeason(groupId, req.user.discordId, req.user.name);
+      return res.json(result);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
+  // 시즌 스냅샷 조회
+  route.get('/:groupId/season/snapshots', verifyToken, async (req, res) => {
+    try {
+      const groupId = Number(req.params.groupId);
+      const { season } = req.query;
+      const where = { groupId };
+      if (season) where.season = Number(season);
+
+      const snapshots = await models.season_snapshot.findAll({
+        where,
+        order: [
+          ['season', 'DESC'],
+          ['additionalRating', 'DESC'],
+        ],
+      });
+      return res.json(snapshots);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
   route.get('/ranking', async (req, res) => {
     const { groupName } = req.query;
 
-    if (!groupName)
-      return res.status(501).json({ result: 'invalid group name' });
+    if (!groupName) return res.status(501).json({ result: 'invalid group name' });
 
     try {
       const tokenId = req.headers.riottokenid;
