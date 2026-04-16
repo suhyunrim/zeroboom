@@ -57,20 +57,6 @@ module.exports.getDashboardStats = async (groupId, month) => {
       };
     }
 
-    // puuid -> name 매핑을 위한 캐시
-    const nameCache = {};
-    const getName = async (puuid) => {
-      if (!nameCache[puuid]) {
-        const summoner = await models.summoner.findOne({
-          where: { puuid },
-          attributes: ['name'],
-          raw: true,
-        });
-        nameCache[puuid] = summoner?.name || 'Unknown';
-      }
-      return nameCache[puuid];
-    };
-
     // 유저별 통계 집계
     const userStats = {}; // { puuid: { games, wins, losses, matchHistory, firstRating, lastRating } }
     // 듀오 통계 (같은 팀)
@@ -378,6 +364,32 @@ module.exports.getDashboardStats = async (groupId, month) => {
       });
     }
 
+    // 필요한 puuid를 모아서 이름을 한 번에 조회
+    const puuidsToResolve = new Set();
+    if (mostGamesUser) puuidsToResolve.add(mostGamesUser.puuid);
+    if (bestWinRateUser) puuidsToResolve.add(bestWinRateUser.puuid);
+    if (longestStreakUser) puuidsToResolve.add(longestStreakUser.puuid);
+    if (bestDuo) { puuidsToResolve.add(bestDuo.puuid1); puuidsToResolve.add(bestDuo.puuid2); }
+    if (mostRivalry) { puuidsToResolve.add(mostRivalry.puuid1); puuidsToResolve.add(mostRivalry.puuid2); }
+    if (topNewcomer) puuidsToResolve.add(topNewcomer.puuid);
+    if (topRatingRiser) puuidsToResolve.add(topRatingRiser.puuid);
+    if (nightOwl) puuidsToResolve.add(nightOwl.puuid);
+    if (darkHorse) puuidsToResolve.add(darkHorse.puuid);
+    if (honorKingEntry) puuidsToResolve.add(honorKingEntry[0]);
+
+    const summonerRows = puuidsToResolve.size > 0
+      ? await models.summoner.findAll({
+          where: { puuid: [...puuidsToResolve] },
+          attributes: ['puuid', 'name'],
+          raw: true,
+        })
+      : [];
+    const nameMap = {};
+    for (const s of summonerRows) {
+      nameMap[s.puuid] = s.name;
+    }
+    const getName = (puuid) => nameMap[puuid] || 'Unknown';
+
     // 결과 조합
     const result = {
       month: `${year}-${String(mon + 1).padStart(2, '0')}`,
@@ -386,7 +398,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'most_games',
             puuid: mostGamesUser.puuid,
-            name: await getName(mostGamesUser.puuid),
+            name: getName(mostGamesUser.puuid),
             games: mostGamesUser.games,
             wins: mostGamesUser.wins,
             losses: mostGamesUser.losses,
@@ -398,7 +410,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
             type: 'best_win_rate',
             minGames: MIN_GAMES_FOR_WINRATE,
             puuid: bestWinRateUser.puuid,
-            name: await getName(bestWinRateUser.puuid),
+            name: getName(bestWinRateUser.puuid),
             games: bestWinRateUser.games,
             wins: bestWinRateUser.wins,
             losses: bestWinRateUser.losses,
@@ -410,7 +422,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
           ? {
               type: 'longest_win_streak',
               puuid: longestStreakUser.puuid,
-              name: await getName(longestStreakUser.puuid),
+              name: getName(longestStreakUser.puuid),
               streak: longestStreakUser.streak,
             }
           : null,
@@ -419,9 +431,9 @@ module.exports.getDashboardStats = async (groupId, month) => {
             type: 'best_duo',
             minGames: MIN_GAMES_FOR_DUO,
             puuid1: bestDuo.puuid1,
-            name1: await getName(bestDuo.puuid1),
+            name1: getName(bestDuo.puuid1),
             puuid2: bestDuo.puuid2,
-            name2: await getName(bestDuo.puuid2),
+            name2: getName(bestDuo.puuid2),
             games: bestDuo.games,
             wins: bestDuo.wins,
             losses: bestDuo.losses,
@@ -432,9 +444,9 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'most_rivalry',
             puuid1: mostRivalry.puuid1,
-            name1: await getName(mostRivalry.puuid1),
+            name1: getName(mostRivalry.puuid1),
             puuid2: mostRivalry.puuid2,
-            name2: await getName(mostRivalry.puuid2),
+            name2: getName(mostRivalry.puuid2),
             games: mostRivalry.games,
             player1Wins: mostRivalry.p1Wins,
             player2Wins: mostRivalry.p2Wins,
@@ -444,7 +456,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'top_newcomer',
             puuid: topNewcomer.puuid,
-            name: await getName(topNewcomer.puuid),
+            name: getName(topNewcomer.puuid),
             games: topNewcomer.games,
             firstMatchDate: topNewcomer.firstMatchDate,
           }
@@ -453,7 +465,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'top_rating_riser',
             puuid: topRatingRiser.puuid,
-            name: await getName(topRatingRiser.puuid),
+            name: getName(topRatingRiser.puuid),
             ratingChange: topRatingRiser.ratingChange,
             startRating: topRatingRiser.startRating,
             endRating: topRatingRiser.endRating,
@@ -464,7 +476,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'night_owl',
             puuid: nightOwl.puuid,
-            name: await getName(nightOwl.puuid),
+            name: getName(nightOwl.puuid),
             lateNightGames: nightOwl.lateNightGames,
             games: nightOwl.games,
             lateNightRate: Number(nightOwl.lateNightRate.toFixed(1)),
@@ -474,7 +486,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'dark_horse',
             puuid: darkHorse.puuid,
-            name: await getName(darkHorse.puuid),
+            name: getName(darkHorse.puuid),
             darkHorseWins: darkHorse.darkHorseWins,
             darkHorseGames: darkHorse.darkHorseGames,
             darkHorseWinRate: Number(darkHorse.darkHorseWinRate.toFixed(1)),
@@ -485,7 +497,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
         ? {
             type: 'honor_king',
             puuid: honorKingEntry[0],
-            name: await getName(honorKingEntry[0]),
+            name: getName(honorKingEntry[0]),
             votes: honorKingEntry[1],
             title: getHonorTitle(honorKingTotalVotes),
           }
