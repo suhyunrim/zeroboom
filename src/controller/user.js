@@ -303,28 +303,24 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     winRate: Math.round((stats.myWins / stats.games) * 100),
   }));
 
-  // 3. 자주 함께한 Top N명 중 승률 제일 높은 사람
-  const bestTeammate = (() => {
-    const candidates = topTeammateEntries
-      .slice(0, TOP_N_FOR_BEST_STATS)
-      .map(([puuid, stats]) => ({
-        puuid,
-        ...stats,
-        winRate: (stats.wins / stats.games) * 100,
-      }))
-      .sort((a, b) => b.winRate - a.winRate || b.games - a.games);
-
-    if (candidates.length === 0) return null;
-    const best = candidates[0];
-    return {
-      puuid: best.puuid,
-      name: resolveName(best.puuid),
-      games: best.games,
-      wins: best.wins,
-      losses: best.losses,
-      winRate: Math.round(best.winRate),
-    };
-  })();
+  // 3. 자주 함께한 Top N명 중 승률 높은 순 Top 15
+  const bestTeammates = topTeammateEntries
+    .slice(0, TOP_N_FOR_BEST_STATS)
+    .map(([puuid, stats]) => ({
+      puuid,
+      ...stats,
+      winRate: (stats.wins / stats.games) * 100,
+    }))
+    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT)
+    .map((c) => ({
+      puuid: c.puuid,
+      name: resolveName(c.puuid),
+      games: c.games,
+      wins: c.wins,
+      losses: c.losses,
+      winRate: Math.round(c.winRate),
+    }));
 
   // 4. 최근 N판 승률
   const recentMatches = matchHistory.slice(-RECENT_GAMES_COUNT);
@@ -350,51 +346,41 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     }
   }
 
-  // 6. 자주 상대한 Top N명 중 상대 전적 제일 좋은 사람
-  const bestOpponent = (() => {
-    const candidates = topOpponentEntries
-      .slice(0, TOP_N_FOR_BEST_STATS)
-      .map(([puuid, stats]) => ({
-        puuid,
-        ...stats,
-        winRate: (stats.myWins / stats.games) * 100,
-      }))
-      .sort((a, b) => b.winRate - a.winRate || b.games - a.games);
+  // 6. 자주 상대한 Top N명 중 상대 전적 좋은 순 Top 15
+  const opponentCandidates = topOpponentEntries
+    .slice(0, TOP_N_FOR_BEST_STATS)
+    .map(([puuid, stats]) => ({
+      puuid,
+      ...stats,
+      winRate: (stats.myWins / stats.games) * 100,
+    }));
 
-    if (candidates.length === 0) return null;
-    const best = candidates[0];
-    return {
-      puuid: best.puuid,
-      name: resolveName(best.puuid),
-      games: best.games,
-      myWins: best.myWins,
-      myLosses: best.myLosses,
-      winRate: Math.round(best.winRate),
-    };
-  })();
+  const bestOpponents = opponentCandidates
+    .slice()
+    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT)
+    .map((c) => ({
+      puuid: c.puuid,
+      name: resolveName(c.puuid),
+      games: c.games,
+      myWins: c.myWins,
+      myLosses: c.myLosses,
+      winRate: Math.round(c.winRate),
+    }));
 
-  // 7. 자주 상대한 Top N명 중 상대 전적 제일 안 좋은 사람
-  const worstOpponent = (() => {
-    const candidates = topOpponentEntries
-      .slice(0, TOP_N_FOR_BEST_STATS)
-      .map(([puuid, stats]) => ({
-        puuid,
-        ...stats,
-        winRate: (stats.myWins / stats.games) * 100,
-      }))
-      .sort((a, b) => a.winRate - b.winRate || b.games - a.games);
-
-    if (candidates.length === 0) return null;
-    const worst = candidates[0];
-    return {
-      puuid: worst.puuid,
-      name: resolveName(worst.puuid),
-      games: worst.games,
-      myWins: worst.myWins,
-      myLosses: worst.myLosses,
-      winRate: Math.round(worst.winRate),
-    };
-  })();
+  // 7. 자주 상대한 Top N명 중 상대 전적 안 좋은 순 Top 15
+  const worstOpponents = opponentCandidates
+    .slice()
+    .sort((a, b) => a.winRate - b.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT)
+    .map((c) => ({
+      puuid: c.puuid,
+      name: resolveName(c.puuid),
+      games: c.games,
+      myWins: c.myWins,
+      myLosses: c.myLosses,
+      winRate: Math.round(c.winRate),
+    }));
 
   // 레이팅 히스토리: 최근 100판, 같은 날짜는 마지막 매치 기준으로 그룹핑
   const recentRatingHistory = ratingHistory.slice(-100);
@@ -415,14 +401,14 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   return {
     topTeammates,
     topOpponents,
-    bestTeammate,
+    bestTeammates,
     recentGames,
     recentWins,
     recentWinRate,
     maxWinStreak,
     maxLoseStreak,
-    bestOpponent,
-    worstOpponent,
+    bestOpponents,
+    worstOpponents,
     ratingHistory: dailyRatingHistory,
   };
 };
