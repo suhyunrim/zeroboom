@@ -150,6 +150,7 @@ module.exports.getRating = async (groupId, puuid) => {
 };
 
 // 상세 통계 계산 상수
+const TOP_LIST_COUNT = 15; // 같은 팀/상대 팀 Top N명
 const TOP_N_FOR_BEST_STATS = 10; // 자주 만난 상위 N명 내에서 승률 기준 선정
 const RECENT_GAMES_COUNT = 10; // 최근 N판 승률 계산용
 
@@ -173,20 +174,6 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   if (matches.length === 0) {
     return null;
   }
-
-  // puuid -> name 매핑을 위한 캐시
-  const nameCache = {};
-  const getName = async (puuid) => {
-    if (!nameCache[puuid]) {
-      const summoner = await models.summoner.findOne({
-        where: { puuid },
-        attributes: ['name'],
-        raw: true,
-      });
-      nameCache[puuid] = summoner?.name || 'Unknown';
-    }
-    return nameCache[puuid];
-  };
 
   // 팀원 통계 (같은 팀)
   const teammateStats = {}; // { puuid: { games, wins, losses } }
@@ -272,40 +259,53 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     delete opponentStats[puuid];
   });
 
-  // 1. 같은 팀 많이 된 사람 Top 5
-  const topTeammates = await Promise.all(
-    Object.entries(teammateStats)
-      .sort((a, b) => b[1].games - a[1].games)
-      .slice(0, 5)
-      .map(async ([puuid, stats]) => ({
-        puuid,
-        name: await getName(puuid),
-        games: stats.games,
-        wins: stats.wins,
-        losses: stats.losses,
-        winRate: Math.round((stats.wins / stats.games) * 100),
-      }))
-  );
+  // Top 리스트 및 best/worst 후보 미리 계산
+  const topTeammateEntries = Object.entries(teammateStats)
+    .sort((a, b) => b[1].games - a[1].games)
+    .slice(0, TOP_LIST_COUNT);
+  const topOpponentEntries = Object.entries(opponentStats)
+    .sort((a, b) => b[1].games - a[1].games)
+    .slice(0, TOP_LIST_COUNT);
 
-  // 2. 상대 팀 많이 된 사람 Top 5
-  const topOpponents = await Promise.all(
-    Object.entries(opponentStats)
-      .sort((a, b) => b[1].games - a[1].games)
-      .slice(0, 5)
-      .map(async ([puuid, stats]) => ({
-        puuid,
-        name: await getName(puuid),
-        games: stats.games,
-        myWins: stats.myWins,
-        myLosses: stats.myLosses,
-        winRate: Math.round((stats.myWins / stats.games) * 100),
-      }))
-  );
+  // 필요한 puuid를 모아서 이름을 한 번에 조회
+  const puuidsToResolve = new Set([
+    ...topTeammateEntries.map(([puuid]) => puuid),
+    ...topOpponentEntries.map(([puuid]) => puuid),
+  ]);
+  const summoners = await models.summoner.findAll({
+    where: { puuid: [...puuidsToResolve] },
+    attributes: ['puuid', 'name'],
+    raw: true,
+  });
+  const nameMap = {};
+  for (const s of summoners) {
+    nameMap[s.puuid] = s.name;
+  }
+  const resolveName = (puuid) => nameMap[puuid] || 'Unknown';
+
+  // 1. 같은 팀 많이 된 사람 Top 15
+  const topTeammates = topTeammateEntries.map(([puuid, stats]) => ({
+    puuid,
+    name: resolveName(puuid),
+    games: stats.games,
+    wins: stats.wins,
+    losses: stats.losses,
+    winRate: Math.round((stats.wins / stats.games) * 100),
+  }));
+
+  // 2. 상대 팀 많이 된 사람 Top 15
+  const topOpponents = topOpponentEntries.map(([puuid, stats]) => ({
+    puuid,
+    name: resolveName(puuid),
+    games: stats.games,
+    myWins: stats.myWins,
+    myLosses: stats.myLosses,
+    winRate: Math.round((stats.myWins / stats.games) * 100),
+  }));
 
   // 3. 자주 함께한 Top N명 중 승률 제일 높은 사람
-  const bestTeammate = await (async () => {
-    const candidates = Object.entries(teammateStats)
-      .sort((a, b) => b[1].games - a[1].games)
+  const bestTeammate = (() => {
+    const candidates = topTeammateEntries
       .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
@@ -318,7 +318,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     const best = candidates[0];
     return {
       puuid: best.puuid,
-      name: await getName(best.puuid),
+      name: resolveName(best.puuid),
       games: best.games,
       wins: best.wins,
       losses: best.losses,
@@ -351,9 +351,8 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   }
 
   // 6. 자주 상대한 Top N명 중 상대 전적 제일 좋은 사람
-  const bestOpponent = await (async () => {
-    const candidates = Object.entries(opponentStats)
-      .sort((a, b) => b[1].games - a[1].games)
+  const bestOpponent = (() => {
+    const candidates = topOpponentEntries
       .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
@@ -366,7 +365,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     const best = candidates[0];
     return {
       puuid: best.puuid,
-      name: await getName(best.puuid),
+      name: resolveName(best.puuid),
       games: best.games,
       myWins: best.myWins,
       myLosses: best.myLosses,
@@ -375,9 +374,8 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   })();
 
   // 7. 자주 상대한 Top N명 중 상대 전적 제일 안 좋은 사람
-  const worstOpponent = await (async () => {
-    const candidates = Object.entries(opponentStats)
-      .sort((a, b) => b[1].games - a[1].games)
+  const worstOpponent = (() => {
+    const candidates = topOpponentEntries
       .slice(0, TOP_N_FOR_BEST_STATS)
       .map(([puuid, stats]) => ({
         puuid,
@@ -390,7 +388,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     const worst = candidates[0];
     return {
       puuid: worst.puuid,
-      name: await getName(worst.puuid),
+      name: resolveName(worst.puuid),
       games: worst.games,
       myWins: worst.myWins,
       myLosses: worst.myLosses,

@@ -71,24 +71,35 @@ module.exports.registerMatch = async (tokenId, summonerName) => {
 module.exports.predictWinRate = async (groupName, team1, team2) => {
   const group = await models.group.findOne({ where: { groupName: groupName } });
 
-  const getRating = async (summonerName) => {
-    const summoner = await models.summoner.findOne({
-      where: { name: summonerName },
-    });
-    const user = await models.user.findOne({
-      where: {
-        groupId: group.id,
-        puuid: summoner.puuid,
-      },
-    });
-    return user.defaultRating + user.additionalRating;
-  };
+  const allNames = [...team1, ...team2];
+  const summoners = await models.summoner.findAll({
+    where: { name: allNames },
+    attributes: ['puuid', 'name'],
+    raw: true,
+  });
+  const puuidByName = {};
+  for (const s of summoners) {
+    puuidByName[s.name] = s.puuid;
+  }
+
+  const users = await models.user.findAll({
+    where: {
+      groupId: group.id,
+      puuid: summoners.map((s) => s.puuid),
+    },
+    attributes: ['puuid', 'defaultRating', 'additionalRating'],
+    raw: true,
+  });
+  const ratingByPuuid = {};
+  for (const u of users) {
+    ratingByPuuid[u.puuid] = u.defaultRating + u.additionalRating;
+  }
 
   let team1RatingMap = {};
-  for (const summonerName of team1) team1RatingMap[summonerName] = await getRating(summonerName);
+  for (const name of team1) team1RatingMap[name] = ratingByPuuid[puuidByName[name]];
 
   let team2RatingMap = {};
-  for (const summonerName of team2) team2RatingMap[summonerName] = await getRating(summonerName);
+  for (const name of team2) team2RatingMap[name] = ratingByPuuid[puuidByName[name]];
 
   const team1Rating = Object.values(team1RatingMap).reduce((total, current) => total + current) / 5;
   const team2Rating = Object.values(team2RatingMap).reduce((total, current) => total + current) / 5;
@@ -671,7 +682,23 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     },
   });
 
+  // 매치 참가자 puuid를 모아서 이름을 한 번에 조회
+  const allPuuids = new Set();
+  for (const match of matches) {
+    const participants = match.team1.concat(match.team2);
+    for (const participant of participants) {
+      allPuuids.add(participant[0]);
+    }
+  }
+  const summonerRows = await models.summoner.findAll({
+    where: { puuid: [...allPuuids] },
+    attributes: ['puuid', 'name'],
+    raw: true,
+  });
   const nameCache = {};
+  for (const s of summonerRows) {
+    nameCache[s.puuid] = s.name;
+  }
 
   const matchPlayCountMap = {};
   const fixedMatchPlayCountMap = {};
@@ -679,14 +706,9 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     const participants = match.team1.concat(match.team2);
     for (let participant of participants) {
       const puuid = participant[0];
-      if (nameCache[puuid] == null) {
-        const summoner = await models.summoner.findOne({ where: { puuid } });
-        if (!summoner) continue;
-
-        nameCache[puuid] = summoner.name;
-      }
-
       const name = nameCache[puuid];
+      if (!name) continue;
+
       matchPlayCountMap[name] = (matchPlayCountMap[name] || 0) + 1;
 
       const weekDay = getKSTIsoWeekday(match.createdAt);
@@ -705,6 +727,25 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     },
   });
 
+  // riotMatch 참가자 중 nameCache에 없는 puuid 추가 조회
+  const missingPuuids = new Set();
+  for (const match of riotMatches) {
+    const filtered = match.participants.filter((elem) => puuIds.includes(elem));
+    for (const puuId of filtered) {
+      if (nameCache[puuId] == null) missingPuuids.add(puuId);
+    }
+  }
+  if (missingPuuids.size > 0) {
+    const extraSummoners = await models.summoner.findAll({
+      where: { puuid: [...missingPuuids] },
+      attributes: ['puuid', 'name'],
+      raw: true,
+    });
+    for (const s of extraSummoners) {
+      nameCache[s.puuid] = s.name;
+    }
+  }
+
   const riotMatchSet = {};
   const riotMatchPlayCountMap = {};
   for (let match of riotMatches) {
@@ -712,11 +753,6 @@ module.exports.getMatchHistory = async (groupName, from, to) => {
     if (filtered.length <= 1) continue;
 
     for (let puuId of filtered) {
-      if (nameCache[puuId] == null) {
-        const summoner = await models.summoner.findOne({ where: { puuId } });
-        nameCache[puuId] = summoner.name;
-      }
-
       const name = nameCache[puuId];
       if (riotMatchSet[name] == null) {
         riotMatchSet[name] = [];
