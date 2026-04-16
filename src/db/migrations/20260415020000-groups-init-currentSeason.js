@@ -6,7 +6,7 @@ module.exports = {
 
     await Promise.all(
       groups.map((group) => {
-        const settings = group.settings ? JSON.parse(group.settings) : {};
+        const settings = typeof group.settings === 'string' ? JSON.parse(group.settings) : (group.settings || {});
         settings.currentSeason = 1;
         return queryInterface.sequelize.query('UPDATE `groups` SET settings = ? WHERE id = ?', {
           replacements: [JSON.stringify(settings), group.id],
@@ -22,7 +22,7 @@ module.exports = {
 
     await Promise.all(
       groups.map((group) => {
-        const settings = group.settings ? JSON.parse(group.settings) : {};
+        const settings = typeof group.settings === 'string' ? JSON.parse(group.settings) : (group.settings || {});
         delete settings.currentSeason;
         return queryInterface.sequelize.query('UPDATE `groups` SET settings = ? WHERE id = ?', {
           replacements: [JSON.stringify(settings), group.id],
