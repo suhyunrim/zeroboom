@@ -399,13 +399,10 @@ module.exports = async (app) => {
           teamsForDB[1].push([playerData.puuid, assignment.playerName]);
         }
 
-        const groupForSeason = await models.group.findByPk(groupId);
-        const currentSeason = (groupForSeason?.settings && groupForSeason.settings.currentSeason) || 1;
-        const matchQueryResult = await models.match.create({
-          groupId: groupId,
+        const matchQueryResult = await matchController.createMatchWithSnapshot({
+          groupId,
           team1: teamsForDB[0],
           team2: teamsForDB[1],
-          seasonId: currentSeason,
         });
 
         // 결과 메시지

@@ -17,6 +17,38 @@ const { formatTier } = require('../utils/tierUtils');
 const { getKSTYearStart, getKSTIsoWeekday, getKSTHours, daysAgo } = require('../utils/timeUtils');
 const { STAT_TYPES } = require('../services/achievement/definitions');
 
+/**
+ * 매치 생성 + 레이팅 스냅샷 + seasonId 자동 처리
+ * @param {object} params
+ * @param {number} params.groupId
+ * @param {Array<[string, string]>} params.team1 - [[puuid, name], ...]
+ * @param {Array<[string, string]>} params.team2
+ * @param {object} [params.extra] - winTeam, gameCreation, createdAt 등 추가 필드
+ * @returns {Promise<object>} 생성된 match 레코드
+ */
+module.exports.createMatchWithSnapshot = async ({ groupId, team1, team2, extra = {} }) => {
+  const allPuuids = [...team1, ...team2].map(([puuid]) => puuid);
+  const users = await models.user.findAll({
+    where: { puuid: allPuuids, groupId },
+    attributes: ['puuid', 'defaultRating', 'additionalRating'],
+  });
+  const ratingMap = new Map(
+    users.map((u) => [u.puuid, Math.round(u.defaultRating + u.additionalRating)]),
+  );
+  const withRating = (arr) => arr.map(([puuid, name]) => [puuid, name, ratingMap.get(puuid) ?? 500]);
+
+  const group = await models.group.findByPk(groupId, { attributes: ['settings'] });
+  const currentSeason = (group?.settings && group.settings.currentSeason) || 1;
+
+  return models.match.create({
+    groupId,
+    team1: withRating(team1),
+    team2: withRating(team2),
+    seasonId: currentSeason,
+    ...extra,
+  });
+};
+
 module.exports.registerMatch = async (tokenId, summonerName) => {
   if (!tokenId) return { result: 'invalid token id' };
   if (!summonerName) return { result: 'invalid summoner name' };
@@ -637,16 +669,15 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
   const team2 = originalMatch.team2.map(([puuid, name]) => [puuid, name]);
   const matchDate = new Date(date);
 
-  const group = await models.group.findByPk(groupId);
-  const currentSeason = (group?.settings && group.settings.currentSeason) || 1;
-  const newMatch = await models.match.create({
+  const newMatch = await module.exports.createMatchWithSnapshot({
     groupId,
     team1,
     team2,
-    winTeam,
-    gameCreation: matchDate,
-    createdAt: matchDate,
-    seasonId: currentSeason,
+    extra: {
+      winTeam,
+      gameCreation: matchDate,
+      createdAt: matchDate,
+    },
   });
 
   await module.exports.applyMatchResult(newMatch.gameId);

@@ -254,12 +254,10 @@ exports.reactButton = async (interaction, match) => {
     teams[i].sort((a, b) => b.rating - a.rating);
   }
 
-  const currentSeason = (group.settings && group.settings.currentSeason) || 1;
-  const matchQueryResult = await models.match.create({
+  const matchQueryResult = await matchController.createMatchWithSnapshot({
     groupId: group.id,
     team1: teamsForDB[0],
     team2: teamsForDB[1],
-    seasonId: currentSeason,
   });
 
   auditLog.log({
