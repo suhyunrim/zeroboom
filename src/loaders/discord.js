@@ -134,6 +134,13 @@ module.exports = async (app) => {
   const honorVoteSessions = new Map();
   const matchVoteSessions = new Map(); // 매칭 투표 세션
 
+  // matchVoteMode: 'off' | 'normal' | 'blind'
+  function getMatchVoteMode(group) {
+    const mode = group?.settings?.matchVoteMode;
+    if (mode === 'normal' || mode === 'blind') return mode;
+    return 'off';
+  }
+
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -175,7 +182,8 @@ module.exports = async (app) => {
           }
           // 투표 모드 확인 및 세션 생성
           const group = await models.group.findOne({ where: { groupName } });
-          if (group && group.settings && group.settings.matchVoteMode) {
+          const voteMode = getMatchVoteMode(group);
+          if (voteMode !== 'off') {
             // 참가자 discordId 수집 (ratingCache에서)
             const participantDiscordIds = new Set();
             if (output.ratingCache) {
@@ -184,7 +192,7 @@ module.exports = async (app) => {
               });
             }
             matchVoteSessions.set(`${groupName}/${output.time}`,
-              new MatchVoteSession(participantDiscordIds, output.match.length),
+              new MatchVoteSession(participantDiscordIds, output.match.length, { blind: voteMode === 'blind' }),
             );
           }
         }
@@ -336,7 +344,8 @@ module.exports = async (app) => {
                     });
                   }
                   // 투표 모드 세션 생성
-                  if (group.settings && group.settings.matchVoteMode) {
+                  const conceptVoteMode = getMatchVoteMode(group);
+                  if (conceptVoteMode !== 'off') {
                     const participantDiscordIds = new Set();
                     if (output.ratingCache) {
                       Object.values(output.ratingCache).forEach((info) => {
@@ -344,7 +353,7 @@ module.exports = async (app) => {
                       });
                     }
                     matchVoteSessions.set(`${group.groupName}/${output.time}`,
-                      new MatchVoteSession(participantDiscordIds, output.match.length),
+                      new MatchVoteSession(participantDiscordIds, output.match.length, { blind: conceptVoteMode === 'blind' }),
                     );
                   }
                 }
@@ -584,7 +593,8 @@ module.exports = async (app) => {
             });
           }
           // 투표 모드 세션 생성
-          if (group.settings && group.settings.matchVoteMode) {
+          const pickVoteMode = getMatchVoteMode(group);
+          if (pickVoteMode !== 'off') {
             const participantDiscordIds = new Set();
             if (result.ratingCache) {
               Object.values(result.ratingCache).forEach((info) => {
@@ -592,7 +602,7 @@ module.exports = async (app) => {
               });
             }
             matchVoteSessions.set(`${group.groupName}/${result.time}`,
-              new MatchVoteSession(participantDiscordIds, result.match.length),
+              new MatchVoteSession(participantDiscordIds, result.match.length, { blind: pickVoteMode === 'blind' }),
             );
           }
         }
@@ -972,16 +982,22 @@ module.exports = async (app) => {
             const status = voteResult.status;
 
             // 투표 현황 텍스트
-            const statusLines = [];
-            for (let i = 0; i < voteSession.totalPlans; i++) {
-              const count = status.voteCounts[String(i)] || 0;
-              const barMax = status.totalParticipants;
-              const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, barMax - count));
-              statusLines.push(`${i + 1}번: ${bar} ${count}표`);
+            let statusText;
+            if (voteSession.blind) {
+              const bar = '█'.repeat(status.totalVoted) + '░'.repeat(Math.max(0, status.totalParticipants - status.totalVoted));
+              statusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n🔒 투표 현황: ${bar}\n결과는 확정 후 공개됩니다.`;
+            } else {
+              const statusLines = [];
+              for (let i = 0; i < voteSession.totalPlans; i++) {
+                const count = status.voteCounts[String(i)] || 0;
+                const barMax = status.totalParticipants;
+                const bar = '█'.repeat(count) + '░'.repeat(Math.max(0, barMax - count));
+                statusLines.push(`${i + 1}번: ${bar} ${count}표`);
+              }
+              statusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n${statusLines.join(
+                '\n',
+              )}`;
             }
-            const statusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n${statusLines.join(
-              '\n',
-            )}`;
 
             if (voteResult.confirmed) {
               const leadPlan = voteResult.confirmedPlan;
@@ -1014,8 +1030,16 @@ module.exports = async (app) => {
                   // 원본 메시지 버튼 업데이트
                   await interaction.update({ components: newRows });
 
-                  // 투표 현황 메시지 업데이트 또는 새로 전송
-                  const finalText = `${statusText}\n\n✅ **${Number(leadPlan) +
+                  // 확정 시에는 블라인드 여부 관계없이 플랜별 결과 공개
+                  const finalLines = [];
+                  for (let i = 0; i < voteSession.totalPlans; i++) {
+                    const cnt = status.voteCounts[String(i)] || 0;
+                    const barMax = status.totalParticipants;
+                    const b = '█'.repeat(cnt) + '░'.repeat(Math.max(0, barMax - cnt));
+                    finalLines.push(`${i + 1}번: ${b} ${cnt}표`);
+                  }
+                  const finalStatusText = `**📊 매칭 투표 (${status.totalVoted}/${status.totalParticipants})**\n${finalLines.join('\n')}`;
+                  const finalText = `${finalStatusText}\n\n✅ **${Number(leadPlan) +
                     1}번이 확정되었습니다! 버튼을 다시 눌러 매치를 추가 생성할 수 있습니다.**`;
                   if (voteSession.statusMessage) {
                     await voteSession.statusMessage.edit(finalText);

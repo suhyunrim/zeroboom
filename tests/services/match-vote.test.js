@@ -1,12 +1,12 @@
 const { MatchVoteSession } = require('../../src/services/match-vote');
 
 describe('MatchVoteSession', () => {
-  const makeSession = (participantCount = 10, totalPlans = 3) => {
+  const makeSession = (participantCount = 10, totalPlans = 3, options = {}) => {
     const participants = new Set();
     for (let i = 1; i <= participantCount; i++) {
       participants.add(`user${i}`);
     }
-    return new MatchVoteSession(participants, totalPlans);
+    return new MatchVoteSession(participants, totalPlans, options);
   };
 
   test('참가자가 투표하면 성공', () => {
@@ -97,6 +97,23 @@ describe('MatchVoteSession', () => {
     const r2 = session.addVote('user3', '0');  // 0:2, 1:1, 남은 1 → 2 >= 1+1? Yes → 확정
     expect(r2.confirmed).toBe(true);
     expect(r2.confirmedPlan).toBe('0');
+  });
+
+  test('blind 모드: 옵션이 세션에 저장됨', () => {
+    const session = makeSession(4, 2, { blind: true });
+    expect(session.blind).toBe(true);
+
+    const normalSession = makeSession(4, 2);
+    expect(normalSession.blind).toBe(false);
+  });
+
+  test('blind 모드: 투표/확정 로직은 일반 모드와 동일', () => {
+    const session = makeSession(4, 2, { blind: true });
+    session.addVote('user1', '0');
+    session.addVote('user2', '1');
+    const r = session.addVote('user3', '0'); // 0:2, 1:1, 남은 1 → 2 >= 1+1 → 확정
+    expect(r.confirmed).toBe(true);
+    expect(r.confirmedPlan).toBe('0');
   });
 
   test('getStatus 현황 확인', () => {

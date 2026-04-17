@@ -7,9 +7,10 @@ class MatchVoteSession {
    * @param {Set<string>} participants - 투표 가능한 유저 discordId Set
    * @param {number} totalPlans - 플랜 수
    */
-  constructor(participants, totalPlans) {
+  constructor(participants, totalPlans, { blind = false } = {}) {
     this.participants = participants;
     this.totalPlans = totalPlans;
+    this.blind = blind;
     this.votes = {};       // { discordId: planIndex }
     this.voteCounts = {};  // { planIndex: count }
     this.confirmedPlan = undefined;
