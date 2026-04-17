@@ -23,7 +23,7 @@ const verifyToken = (req, res, next) => {
 
 /**
  * 그룹 관리자 권한 확인 미들웨어
- * DB의 user.role === 'admin' 으로 확인 (Discord 권한은 이벤트/시작 시 동기화)
+ * 슈퍼 어드민은 모든 그룹 통과, 아니면 DB의 user.role === 'admin' 확인
  */
 const requireGroupAdmin = async (req, res, next) => {
   const groupId = Number(req.params.groupId || req.body.groupId);
@@ -34,6 +34,10 @@ const requireGroupAdmin = async (req, res, next) => {
   }
 
   try {
+    // 슈퍼 어드민이면 모든 그룹에 대해 통과
+    const superAdmin = await models.super_admin.findByPk(discordId);
+    if (superAdmin) return next();
+
     const user = await models.user.findOne({
       where: { groupId, discordId },
       attributes: ['role'],

@@ -106,11 +106,16 @@ module.exports = (app) => {
         return acc;
       }, {});
       const client = req.app.discordClient;
+
+      // 슈퍼 어드민 여부 확인 (모든 그룹 관리 권한 부여)
+      const superAdmin = await models.super_admin.findByPk(discordUser.id);
+      const isSuperAdmin = !!superAdmin;
+
       groups = groups.map((g) => {
         const guildId = groupGuildMap[g.groupId];
         return {
           ...g,
-          isAdmin: !!guildPermMap[guildId],
+          isAdmin: isSuperAdmin || !!guildPermMap[guildId],
           iconUrl: getGuildIconUrl(client, guildId),
         };
       });
@@ -122,6 +127,7 @@ module.exports = (app) => {
         username: discordUser.username,
         globalName: discordUser.global_name,
         avatar: discordUser.avatar,
+        isSuperAdmin,
         groups,
       };
 
