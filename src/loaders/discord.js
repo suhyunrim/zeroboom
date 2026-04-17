@@ -85,22 +85,14 @@ const VOTE_CATEGORIES = [
   { emoji: '🔥', label: '라인전 킹', question: '라인전을 가장 잘한 사람은?' },
 ];
 
-function formatHonorResults(results, session, { finished = false } = {}) {
-  const totalPlayers = session.team1.length + session.team2.length;
-  const voteCount = session.voters ? session.voters.size : 0;
-  const cat = session.category;
-  const isFinished = finished || voteCount >= totalPlayers;
-
-  // 익명 모드 + 진행 중이면 투표수만 표시
-  if (session.anonymous && !isFinished) {
-    return `**[MVP 투표]**\n**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n🔒 투표 결과는 마감 후 공개됩니다.\n${voteCount}명 투표했습니다! (${voteCount}/${totalPlayers})`;
-  }
-
+function formatHonorResults(results, session) {
   if (!results || results.length === 0) {
     return '**🏆 명예 투표 종료** - 투표 결과가 없습니다.';
   }
-
   const allPlayers = [...session.team1, ...session.team2];
+  const totalPlayers = allPlayers.length;
+  const allVoted = session.voters && session.voters.size >= totalPlayers;
+  const voteCount = session.voters ? session.voters.size : 0;
 
   // 팀 구분 없이 득표순 내림차순 정렬
   const merged = {};
@@ -112,7 +104,8 @@ function formatHonorResults(results, session, { finished = false } = {}) {
   }
   const sorted = Object.values(merged).sort((a, b) => b.votes - a.votes);
 
-  let text = isFinished
+  const cat = session.category;
+  let text = allVoted
     ? `**🎉✨ 전원 투표 완료! ${cat.emoji} ${cat.label} 투표 결과 ✨🎉**\n전원 투표 보너스로 참가자 모두 명예 +1!\n`
     : `**${cat.emoji} ${cat.label}** - ${cat.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n${voteCount}명 투표했습니다! (${voteCount}/${totalPlayers})\n`;
   for (const entry of sorted) {
@@ -779,7 +772,6 @@ module.exports = async (app) => {
           team2: team2Data.map((p) => ({ puuid: p[0], name: p[1] })),
           voters: new Set(),
           category,
-          anonymous: !!group.settings?.anonymousHonorVote,
         };
         honorVoteSessions.set(matchData.gameId, voteSession);
 
@@ -804,7 +796,7 @@ module.exports = async (app) => {
             try {
               const results = await honorController.getVoteResults(matchData.gameId);
               await honorMessage.edit({
-                content: formatHonorResults(results, session, { finished: true }),
+                content: formatHonorResults(results, session),
                 components: [],
               });
             } catch (e) {
@@ -1127,16 +1119,15 @@ module.exports = async (app) => {
           // 투표 현황 갱신
           if (session.honorMessage) {
             const allPlayers = [...session.team1, ...session.team2];
-            const isFinished = session.voters.size >= allPlayers.length;
-            if (isFinished) {
+            if (session.voters.size >= allPlayers.length) {
               // 전원 투표 보너스 지급
               await honorController.grantFullVoteBonus(gameId, session.groupId, allPlayers);
               honorVoteSessions.delete(gameId);
             }
             const results = await honorController.getVoteResults(gameId);
             await session.honorMessage.edit({
-              content: formatHonorResults(results, session, { finished: isFinished }),
-              components: isFinished ? [] : undefined,
+              content: formatHonorResults(results, session),
+              components: session.voters.size >= allPlayers.length ? [] : undefined,
             });
           }
         } else {
