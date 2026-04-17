@@ -74,15 +74,11 @@ module.exports.getGroupList = async (puuid) => {
     const groups = await models.group.findAll({ where: { id: groupIds } });
 
     for (const group of groups) {
-      const userInfo = userInfos.find((elem) => elem.groupId == group.id);
       result.push({
         groupId: group.id,
         groupName: group.groupName,
         discordGuildId: group.discordGuildId,
-        defaultRating: userInfo.defaultRating,
-        additionalRating: userInfo.additionalRating,
-        win: userInfo.win,
-        lose: userInfo.lose,
+        settings: group.settings || {},
       });
     }
 
