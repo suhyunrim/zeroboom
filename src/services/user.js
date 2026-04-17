@@ -19,6 +19,12 @@ const tierNames = {
 const tierSteps = ['IV', 'III', 'II', 'I'];
 
 const convertAbbreviationTier = (tier) => {
+  // GM4, GM3 등 GRANDMASTER 약어 처리
+  if (tier.toUpperCase().startsWith('GM') && tier.length === 3) {
+    const step = Number(tier.charAt(2));
+    return `GRANDMASTER ${tierSteps[tierSteps.length - step]}`;
+  }
+
   if (tier.length > 2) return tier;
 
   let result = '';
