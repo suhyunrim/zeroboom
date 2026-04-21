@@ -13,6 +13,7 @@ const models = require('../db/models');
 const { registerUser } = require('../services/user');
 const auditLog = require('../controller/audit-log');
 const { getEmojiObject } = require('./emoji-manager');
+const { getCustomExtra } = require('./onboarding-messages');
 
 // 포지션 폴백 이모지 (커스텀 이모지 없을 때)
 const POSITION_FALLBACK_EMOJI = {
@@ -79,16 +80,17 @@ function getPositionDisplayEmoji(position) {
 }
 
 /**
- * 포지션 선택 화면 (뒤로가기용)
+ * 포지션 선택 화면 (첫 진입 + 뒤로가기 공용)
  */
-function buildPositionView(guildId, prefix) {
+function buildPositionView(guildId, prefix, guildName, group) {
   const isTest = prefix === 'onboardTest';
   const embed = new EmbedBuilder()
     .setColor(isTest ? '#ffa500' : '#0099ff')
-    .setTitle('🎮 주 포지션을 선택해주세요')
+    .setTitle(isTest ? '🧪 온보딩 테스트 모드' : `🎮 ${guildName}에 오신 것을 환영합니다!`)
     .setDescription(
       (isTest ? '⚠️ 테스트 모드: DB 저장 없이 플로우만 확인합니다.\n\n' : '') +
-      '자신의 **주 포지션**을 다시 선택해주세요.',
+      '내전 참가를 위해 간단한 등록을 진행합니다.\n먼저 **주 포지션**을 선택해주세요.' +
+      getCustomExtra(group, 'welcome'),
     );
 
   const positionSelect = new StringSelectMenuBuilder()
@@ -105,12 +107,15 @@ function buildPositionView(guildId, prefix) {
 /**
  * 티어 카테고리 선택 화면 (+ 뒤로가기)
  */
-function buildTierCategoryView(guildId, position, prefix) {
+function buildTierCategoryView(guildId, position, prefix, group) {
   const isTest = prefix === 'onboardTest';
   const embed = new EmbedBuilder()
     .setColor(isTest ? '#ffa500' : '#0099ff')
     .setTitle('🎮 티어를 선택해주세요')
-    .setDescription(`포지션: ${getPositionDisplayEmoji(position)} **${position}**\n\n자신의 티어를 선택해주세요.`);
+    .setDescription(
+      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n\n자신의 티어를 선택해주세요.` +
+      getCustomExtra(group, 'tierCategory'),
+    );
 
   const row1 = new ActionRowBuilder().addComponents(
     TIER_ROW_1.map((tier) =>
@@ -146,13 +151,14 @@ function buildTierCategoryView(guildId, position, prefix) {
 /**
  * 티어 단계 선택 화면 (+ 뒤로가기)
  */
-function buildTierStepView(guildId, position, tierCategory, prefix) {
+function buildTierStepView(guildId, position, tierCategory, prefix, group) {
   const isTest = prefix === 'onboardTest';
   const embed = new EmbedBuilder()
     .setColor(isTest ? '#ffa500' : '#0099ff')
     .setTitle(`${getTierDisplayEmoji(tierCategory)} ${tierCategory} - 단계를 선택해주세요`)
     .setDescription(
-      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n티어: ${getTierDisplayEmoji(tierCategory)} **${tierCategory}**`,
+      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n티어: ${getTierDisplayEmoji(tierCategory)} **${tierCategory}**` +
+      getCustomExtra(group, 'tierStep'),
     );
 
   const stepRow = new ActionRowBuilder().addComponents(
@@ -200,26 +206,7 @@ async function startOnboarding(member, group, { testMode = false } = {}) {
       setTimeout(() => onboardingInProgress.delete(member.id), 30 * 60 * 1000);
     }
     const dm = await member.createDM();
-
-    const embed = new EmbedBuilder()
-      .setColor(testMode ? '#ffa500' : '#0099ff')
-      .setTitle(testMode
-        ? '🧪 온보딩 테스트 모드'
-        : `🎮 ${member.guild.name}에 오신 것을 환영합니다!`)
-      .setDescription(
-        (testMode ? '⚠️ 테스트 모드: DB 저장 없이 플로우만 확인합니다.\n\n' : '') +
-        '내전 참가를 위해 간단한 등록을 진행합니다.\n먼저 **주 포지션**을 선택해주세요.',
-      );
-
-    const positionSelect = new StringSelectMenuBuilder()
-      .setCustomId(`${prefix}|pos|${member.guild.id}`)
-      .setPlaceholder('포지션을 선택하세요')
-      .addOptions(buildPositionOptions());
-
-    await dm.send({
-      embeds: [embed],
-      components: [new ActionRowBuilder().addComponents(positionSelect)],
-    });
+    await dm.send(buildPositionView(member.guild.id, prefix, member.guild.name, group));
 
     logger.info(`온보딩 DM 전송: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
   } catch (e) {
@@ -241,7 +228,8 @@ async function handleOnboardSelectMenu(interaction) {
 
   if (step === 'pos') {
     const position = interaction.values[0];
-    await interaction.update(buildTierCategoryView(guildId, position, prefix));
+    const group = await models.group.findOne({ where: { discordGuildId: guildId } });
+    await interaction.update(buildTierCategoryView(guildId, position, prefix, group));
   }
 }
 
@@ -289,35 +277,39 @@ async function handleOnboardButton(interaction) {
     const guildId = split[2];
     const position = split[3];
     const tierCategory = split[4];
+    const group = await models.group.findOne({ where: { discordGuildId: guildId } });
 
     // MASTER/GM/CHALLENGER는 단계 없음 → 바로 닉네임 입력
     if (NON_STEP_TIERS.includes(tierCategory)) {
       const tier = `${tierCategory} I`;
-      await showNameInput(interaction, guildId, position, tier, prefix);
+      await showNameInput(interaction, guildId, position, tier, prefix, group);
       return;
     }
 
-    await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix));
+    await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix, group));
   } else if (step === 'back') {
     // 뒤로가기: 대상 단계에 따라 이전 화면 재구성
     const guildId = split[2];
     const target = split[split.length - 1];
+    const group = await models.group.findOne({ where: { discordGuildId: guildId } });
 
     if (target === 'pos') {
-      await interaction.update(buildPositionView(guildId, prefix));
+      const guildName = interaction.client.guilds.cache.get(guildId)?.name ?? '';
+      await interaction.update(buildPositionView(guildId, prefix, guildName, group));
     } else if (target === 'tier') {
       const position = split[3];
-      await interaction.update(buildTierCategoryView(guildId, position, prefix));
+      await interaction.update(buildTierCategoryView(guildId, position, prefix, group));
     } else if (target === 'tierStep') {
       const position = split[3];
       const tierCategory = split[4];
-      await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix));
+      await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix, group));
     }
   } else if (step === 'tierStep') {
     const guildId = split[2];
     const position = split[3];
     const tier = split[4].replace('_', ' '); // "GOLD_II" → "GOLD II"
-    await showNameInput(interaction, guildId, position, tier, prefix);
+    const group = await models.group.findOne({ where: { discordGuildId: guildId } });
+    await showNameInput(interaction, guildId, position, tier, prefix, group);
   } else if (step === 'name') {
     const guildId = split[2];
     const position = split[3];
@@ -342,7 +334,7 @@ async function handleOnboardButton(interaction) {
 /**
  * 닉네임 입력 UI 표시
  */
-async function showNameInput(interaction, guildId, position, tier, prefix = 'onboard') {
+async function showNameInput(interaction, guildId, position, tier, prefix = 'onboard', group = null) {
   const tierDisplay = tier.replace('_', ' ');
   const tierCategory = tierDisplay.split(' ')[0];
 
@@ -350,9 +342,10 @@ async function showNameInput(interaction, guildId, position, tier, prefix = 'onb
     .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
     .setTitle('🎮 거의 다 됐어요!')
     .setDescription(
-      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
-      `티어: ${getTierDisplayEmoji(tierCategory)} **${tierDisplay}**\n\n` +
-      '아래 버튼을 눌러 롤 닉네임을 입력해주세요.',
+      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
+      + `티어: ${getTierDisplayEmoji(tierCategory)} **${tierDisplay}**\n\n`
+      + '아래 버튼을 눌러 롤 닉네임을 입력해주세요.'
+      + getCustomExtra(group, 'nameInput'),
     );
 
   // tier에서 공백을 _로 치환 (customId에 공백 방지)
@@ -439,10 +432,11 @@ async function handleOnboardModalSubmit(interaction, client) {
         .setColor('#00ff00')
         .setTitle('✅ 등록 완료!')
         .setDescription(
-          `${result.result}\n\n` +
-          `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
-          `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n\n` +
-          '내전에서 만나요! 🎮',
+          `${result.result}\n\n`
+          + `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
+          + `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n\n`
+          + '내전에서 만나요! 🎮'
+          + getCustomExtra(group, 'complete'),
         );
 
       await interaction.editReply({ embeds: [embed] });
