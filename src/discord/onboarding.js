@@ -78,6 +78,103 @@ function getPositionDisplayEmoji(position) {
   return obj ? `<:${obj.name}:${obj.id}>` : POSITION_FALLBACK_EMOJI[position];
 }
 
+/**
+ * 포지션 선택 화면 (뒤로가기용)
+ */
+function buildPositionView(guildId, prefix) {
+  const isTest = prefix === 'onboardTest';
+  const embed = new EmbedBuilder()
+    .setColor(isTest ? '#ffa500' : '#0099ff')
+    .setTitle('🎮 주 포지션을 선택해주세요')
+    .setDescription(
+      (isTest ? '⚠️ 테스트 모드: DB 저장 없이 플로우만 확인합니다.\n\n' : '') +
+      '자신의 **주 포지션**을 다시 선택해주세요.',
+    );
+
+  const positionSelect = new StringSelectMenuBuilder()
+    .setCustomId(`${prefix}|pos|${guildId}`)
+    .setPlaceholder('포지션을 선택하세요')
+    .addOptions(buildPositionOptions());
+
+  return {
+    embeds: [embed],
+    components: [new ActionRowBuilder().addComponents(positionSelect)],
+  };
+}
+
+/**
+ * 티어 카테고리 선택 화면 (+ 뒤로가기)
+ */
+function buildTierCategoryView(guildId, position, prefix) {
+  const isTest = prefix === 'onboardTest';
+  const embed = new EmbedBuilder()
+    .setColor(isTest ? '#ffa500' : '#0099ff')
+    .setTitle('🎮 티어를 선택해주세요')
+    .setDescription(`포지션: ${getPositionDisplayEmoji(position)} **${position}**\n\n자신의 티어를 선택해주세요.`);
+
+  const row1 = new ActionRowBuilder().addComponents(
+    TIER_ROW_1.map((tier) =>
+      new ButtonBuilder()
+        .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
+        .setLabel(tier)
+        .setEmoji(getTierButtonEmoji(tier))
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    TIER_ROW_2.map((tier) =>
+      new ButtonBuilder()
+        .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
+        .setLabel(tier)
+        .setEmoji(getTierButtonEmoji(tier))
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${prefix}|back|${guildId}|pos`)
+      .setLabel('뒤로')
+      .setEmoji('⬅️')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row1, row2, backRow] };
+}
+
+/**
+ * 티어 단계 선택 화면 (+ 뒤로가기)
+ */
+function buildTierStepView(guildId, position, tierCategory, prefix) {
+  const isTest = prefix === 'onboardTest';
+  const embed = new EmbedBuilder()
+    .setColor(isTest ? '#ffa500' : '#0099ff')
+    .setTitle(`${getTierDisplayEmoji(tierCategory)} ${tierCategory} - 단계를 선택해주세요`)
+    .setDescription(
+      `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n티어: ${getTierDisplayEmoji(tierCategory)} **${tierCategory}**`,
+    );
+
+  const stepRow = new ActionRowBuilder().addComponents(
+    TIER_STEPS.map((s) =>
+      new ButtonBuilder()
+        .setCustomId(`${prefix}|tierStep|${guildId}|${position}|${tierCategory}_${s}`)
+        .setLabel(`${tierCategory} ${s}`)
+        .setStyle(ButtonStyle.Primary),
+    ),
+  );
+
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${prefix}|back|${guildId}|${position}|tier`)
+      .setLabel('뒤로')
+      .setEmoji('⬅️')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [stepRow, backRow] };
+}
+
 // 온보딩 진행 중인 유저 추적 (discordId Set)
 const onboardingInProgress = new Set();
 
@@ -144,37 +241,7 @@ async function handleOnboardSelectMenu(interaction) {
 
   if (step === 'pos') {
     const position = interaction.values[0];
-
-    const embed = new EmbedBuilder()
-      .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
-      .setTitle('🎮 티어를 선택해주세요')
-      .setDescription(`포지션: ${getPositionDisplayEmoji(position)} **${position}**\n\n자신의 티어를 선택해주세요.`);
-
-    // 티어 카테고리 버튼 2줄
-    const row1 = new ActionRowBuilder().addComponents(
-      TIER_ROW_1.map((tier) =>
-        new ButtonBuilder()
-          .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
-          .setLabel(tier)
-          .setEmoji(getTierButtonEmoji(tier))
-          .setStyle(ButtonStyle.Secondary),
-      ),
-    );
-
-    const row2 = new ActionRowBuilder().addComponents(
-      TIER_ROW_2.map((tier) =>
-        new ButtonBuilder()
-          .setCustomId(`${prefix}|tier|${guildId}|${position}|${tier}`)
-          .setLabel(tier)
-          .setEmoji(getTierButtonEmoji(tier))
-          .setStyle(ButtonStyle.Secondary),
-      ),
-    );
-
-    await interaction.update({
-      embeds: [embed],
-      components: [row1, row2],
-    });
+    await interaction.update(buildTierCategoryView(guildId, position, prefix));
   }
 }
 
@@ -230,27 +297,22 @@ async function handleOnboardButton(interaction) {
       return;
     }
 
-    // 단계 선택 버튼 (IV, III, II, I)
-    const embed = new EmbedBuilder()
-      .setColor(prefix === 'onboardTest' ? '#ffa500' : '#0099ff')
-      .setTitle(`${getTierDisplayEmoji(tierCategory)} ${tierCategory} - 단계를 선택해주세요`)
-      .setDescription(
-        `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n티어: ${getTierDisplayEmoji(tierCategory)} **${tierCategory}**`,
-      );
+    await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix));
+  } else if (step === 'back') {
+    // 뒤로가기: 대상 단계에 따라 이전 화면 재구성
+    const guildId = split[2];
+    const target = split[split.length - 1];
 
-    const row = new ActionRowBuilder().addComponents(
-      TIER_STEPS.map((s) =>
-        new ButtonBuilder()
-          .setCustomId(`${prefix}|tierStep|${guildId}|${position}|${tierCategory}_${s}`)
-          .setLabel(`${tierCategory} ${s}`)
-          .setStyle(ButtonStyle.Primary),
-      ),
-    );
-
-    await interaction.update({
-      embeds: [embed],
-      components: [row],
-    });
+    if (target === 'pos') {
+      await interaction.update(buildPositionView(guildId, prefix));
+    } else if (target === 'tier') {
+      const position = split[3];
+      await interaction.update(buildTierCategoryView(guildId, position, prefix));
+    } else if (target === 'tierStep') {
+      const position = split[3];
+      const tierCategory = split[4];
+      await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix));
+    }
   } else if (step === 'tierStep') {
     const guildId = split[2];
     const position = split[3];
@@ -309,9 +371,22 @@ async function showNameInput(interaction, guildId, position, tier, prefix = 'onb
       .setDisabled(true),
   );
 
+  // 뒤로가기: MASTER+는 티어 카테고리로, 나머지는 티어 단계로
+  const backCustomId = NON_STEP_TIERS.includes(tierCategory)
+    ? `${prefix}|back|${guildId}|${position}|tier`
+    : `${prefix}|back|${guildId}|${position}|${tierCategory}|tierStep`;
+
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(backCustomId)
+      .setLabel('뒤로')
+      .setEmoji('⬅️')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
   await interaction.update({
     embeds: [embed],
-    components: [row],
+    components: [row, backRow],
   });
 }
 
