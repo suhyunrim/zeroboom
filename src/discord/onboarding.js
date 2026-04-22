@@ -39,11 +39,28 @@ function buildPositionOptions() {
 const TIER_ROW_1 = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM'];
 const TIER_ROW_2 = ['EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
 
-// 단계 없는 티어 (바로 닉네임 입력으로 이동)
-const NON_STEP_TIERS = ['MASTER', 'GRANDMASTER', 'CHALLENGER'];
+// LP 단위로 표시하는 티어 (UI만 LP, 내부 저장은 IV/III/II/I 그대로 → rating 시스템 변경 없음)
+const LP_TIERS = ['MASTER', 'GRANDMASTER', 'CHALLENGER'];
 
-// 티어 단계
+// 티어 단계 (내부 저장값)
 const TIER_STEPS = ['IV', 'III', 'II', 'I'];
+
+// LP 티어 표시 매핑 (IV=0, III=100, II=200, I=300)
+const LP_BY_STEP = {
+  IV: 0, III: 100, II: 200, I: 300,
+};
+const LP_TIER_ABBR = { MASTER: 'M', GRANDMASTER: 'GM', CHALLENGER: 'C' };
+
+/**
+ * "MASTER I" → "MASTER 300LP"로 표시용 변환. 일반 티어는 그대로 반환.
+ */
+function formatTierForDisplay(tier) {
+  const [cat, step] = tier.split(' ');
+  if (LP_TIERS.includes(cat) && LP_BY_STEP[step] !== undefined) {
+    return `${cat} ${LP_BY_STEP[step]}LP`;
+  }
+  return tier;
+}
 
 // 티어 폴백 이모지 (커스텀 이모지 없을 때)
 const TIER_FALLBACK_EMOJI = {
@@ -161,11 +178,12 @@ function buildTierStepView(guildId, position, tierCategory, prefix, group) {
       getCustomExtra(group, 'tierStep'),
     );
 
+  const isLpTier = LP_TIERS.includes(tierCategory);
   const stepRow = new ActionRowBuilder().addComponents(
     TIER_STEPS.map((s) =>
       new ButtonBuilder()
         .setCustomId(`${prefix}|tierStep|${guildId}|${position}|${tierCategory}_${s}`)
-        .setLabel(`${tierCategory} ${s}`)
+        .setLabel(isLpTier ? `${LP_TIER_ABBR[tierCategory]} ${LP_BY_STEP[s]}LP` : `${tierCategory} ${s}`)
         .setStyle(ButtonStyle.Primary),
     ),
   );
@@ -278,14 +296,6 @@ async function handleOnboardButton(interaction) {
     const position = split[3];
     const tierCategory = split[4];
     const group = await models.group.findOne({ where: { discordGuildId: guildId } });
-
-    // MASTER/GM/CHALLENGER는 단계 없음 → 바로 닉네임 입력
-    if (NON_STEP_TIERS.includes(tierCategory)) {
-      const tier = `${tierCategory} I`;
-      await showNameInput(interaction, guildId, position, tier, prefix, group);
-      return;
-    }
-
     await interaction.update(buildTierStepView(guildId, position, tierCategory, prefix, group));
   } else if (step === 'back') {
     // 뒤로가기: 대상 단계에 따라 이전 화면 재구성
@@ -343,7 +353,7 @@ async function showNameInput(interaction, guildId, position, tier, prefix = 'onb
     .setTitle('🎮 거의 다 됐어요!')
     .setDescription(
       `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
-      + `티어: ${getTierDisplayEmoji(tierCategory)} **${tierDisplay}**\n\n`
+      + `티어: ${getTierDisplayEmoji(tierCategory)} **${formatTierForDisplay(tierDisplay)}**\n\n`
       + '아래 버튼을 눌러 롤 닉네임을 입력해주세요.'
       + getCustomExtra(group, 'nameInput'),
     );
@@ -364,14 +374,9 @@ async function showNameInput(interaction, guildId, position, tier, prefix = 'onb
       .setDisabled(true),
   );
 
-  // 뒤로가기: MASTER+는 티어 카테고리로, 나머지는 티어 단계로
-  const backCustomId = NON_STEP_TIERS.includes(tierCategory)
-    ? `${prefix}|back|${guildId}|${position}|tier`
-    : `${prefix}|back|${guildId}|${position}|${tierCategory}|tierStep`;
-
   const backRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(backCustomId)
+      .setCustomId(`${prefix}|back|${guildId}|${position}|${tierCategory}|tierStep`)
       .setLabel('뒤로')
       .setEmoji('⬅️')
       .setStyle(ButtonStyle.Secondary),
@@ -415,7 +420,7 @@ async function handleOnboardModalSubmit(interaction, client) {
           '**아래 정보로 등록됩니다 (테스트 모드 - DB 저장 안 됨)**\n\n' +
           `소환사: **${summonerName}**\n` +
           `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n` +
-          `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n` +
+          `티어: ${getTierDisplayEmoji(tierCategory)} **${formatTierForDisplay(tier)}**\n` +
           `그룹: **${group.groupName}**`,
         );
       await interaction.editReply({ embeds: [embed] });
@@ -434,7 +439,7 @@ async function handleOnboardModalSubmit(interaction, client) {
         .setDescription(
           `${result.result}\n\n`
           + `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
-          + `티어: ${getTierDisplayEmoji(tierCategory)} **${tier}**\n\n`
+          + `티어: ${getTierDisplayEmoji(tierCategory)} **${formatTierForDisplay(tier)}**\n\n`
           + '내전에서 만나요! 🎮'
           + getCustomExtra(group, 'complete'),
         );
