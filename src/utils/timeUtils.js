@@ -68,6 +68,46 @@ function addDays(date, days) {
   return new Date(new Date(date).getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * KST 기준 YYYYMMDD 숫자 키 (같은 날 판별용)
+ */
+function getKSTDateKey(date) {
+  const d = new Date(new Date(date).getTime() + KST_OFFSET_MS);
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+}
+
+/**
+ * 주말 시간대 판별 (금 18시 ~ 월 06시, KST)
+ */
+function isWeekendTime(date) {
+  const day = getKSTIsoWeekday(date); // 1=월, ..., 7=일
+  const hour = getKSTHours(date);
+  if (day === 6 || day === 7) return true; // 토, 일 전체
+  if (day === 5 && hour >= 18) return true; // 금 18시 이후
+  if (day === 1 && hour < 6) return true; // 월 06시 이전
+  return false;
+}
+
+/**
+ * 평일 시간대 판별 (주말 시간대의 여집합, 월 06시~금 18시)
+ */
+function isWeekdayTime(date) {
+  return !isWeekendTime(date);
+}
+
+/**
+ * YYYYMMDD 숫자 키 간의 일수 차이 (key1 - key2). 실제 달력 기준.
+ */
+function kstDayKeyDiff(key1, key2) {
+  const parse = (k) => {
+    const y = Math.floor(k / 10000);
+    const m = Math.floor((k % 10000) / 100) - 1;
+    const d = k % 100;
+    return Date.UTC(y, m, d);
+  };
+  return Math.round((parse(key1) - parse(key2)) / (24 * 60 * 60 * 1000));
+}
+
 module.exports = {
   KST_OFFSET_MS,
   getKSTYear,
@@ -78,4 +118,8 @@ module.exports = {
   getKSTYearStart,
   daysAgo,
   addDays,
+  getKSTDateKey,
+  isWeekendTime,
+  isWeekdayTime,
+  kstDayKeyDiff,
 };

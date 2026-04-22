@@ -295,6 +295,206 @@ const lateNight = Object.entries(lateNightGoals).map(([tier, goal]) => ({
   goal,
 }));
 
+/**
+ * 티어-수치 맵을 받아 업적 정의 배열로 변환
+ */
+const makeTieredAchievements = ({ idPrefix, nameFn, descFn, emoji, category, trigger, goals }) =>
+  Object.entries(goals).map(([tier, goal]) => ({
+    id: `${idPrefix}_${tier}`,
+    name: nameFn(goal),
+    description: descFn(goal),
+    emoji,
+    tier,
+    category,
+    trigger,
+    goal,
+  }));
+
+// 솔로신가요? (금 18시~월 06시 시간대 매치)
+const soloCheck = makeTieredAchievements({
+  idPrefix: 'SOLO_CHECK',
+  nameFn: (g) => `솔로신가요? ${g}판`,
+  descFn: (g) => `주말 시간대(금 18시~월 06시)에 ${g}판을 플레이하세요`,
+  emoji: '🍺',
+  category: 'weekend_games',
+  trigger: 'match_result',
+  goals: { BRONZE: 5, SILVER: 10, GOLD: 20, PLATINUM: 50, EMERALD: 100, DIAMOND: 200, MASTER: 300, GRANDMASTER: 500, CHALLENGER: 1000 },
+});
+
+const weekday = makeTieredAchievements({
+  idPrefix: 'WEEKDAY_WORKER',
+  nameFn: (g) => `평일 근로자 ${g}판`,
+  descFn: (g) => `평일 시간대(월 06시~금 18시)에 ${g}판을 플레이하세요`,
+  emoji: '💼',
+  category: 'weekday_games',
+  trigger: 'match_result',
+  goals: { BRONZE: 5, SILVER: 10, GOLD: 20, PLATINUM: 50, EMERALD: 100, DIAMOND: 200, MASTER: 300, GRANDMASTER: 500, CHALLENGER: 1000 },
+});
+
+const gamesPerDay = makeTieredAchievements({
+  idPrefix: 'GAMES_PER_DAY',
+  nameFn: (g) => `하루 ${g}판`,
+  descFn: (g) => `하루에 ${g}판 이상 참여하세요`,
+  emoji: '🎯',
+  category: 'games_per_day',
+  trigger: 'match_result',
+  goals: { BRONZE: 3, SILVER: 5, GOLD: 7, PLATINUM: 10, EMERALD: 12, DIAMOND: 15, MASTER: 20, GRANDMASTER: 25, CHALLENGER: 30 },
+});
+
+const welcomer = makeTieredAchievements({
+  idPrefix: 'WELCOMER',
+  nameFn: (g) => `환영위원회 ${g}승`,
+  descFn: (g) => `등록 3주 이내 뉴비와 같은 팀으로 ${g}승을 거두세요`,
+  emoji: '🤝',
+  category: 'welcomer',
+  trigger: 'match_result',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 50, MASTER: 100, GRANDMASTER: 200, CHALLENGER: 500 },
+});
+
+const consecutiveDays = makeTieredAchievements({
+  idPrefix: 'CONSECUTIVE_DAYS',
+  nameFn: (g) => `${g}일 연속 출석`,
+  descFn: (g) => `${g}일 연속으로 매치에 참여하세요`,
+  emoji: '📅',
+  category: 'consecutive_days',
+  trigger: 'match_result',
+  goals: { BRONZE: 2, SILVER: 3, GOLD: 5, PLATINUM: 7, EMERALD: 10, DIAMOND: 14, MASTER: 21, GRANDMASTER: 30, CHALLENGER: 60 },
+});
+
+const honorReceived = makeTieredAchievements({
+  idPrefix: 'HONOR_RECEIVED',
+  nameFn: (g) => `명예왕 ${g}표`,
+  descFn: (g) => `명예 투표를 누적 ${g}회 받으세요`,
+  emoji: '🎖️',
+  category: 'honor_received',
+  trigger: 'honor_voted',
+  goals: { BRONZE: 5, SILVER: 10, GOLD: 20, PLATINUM: 50, EMERALD: 100, DIAMOND: 200, MASTER: 500, GRANDMASTER: 1000, CHALLENGER: 2000 },
+});
+
+const honorVoted = makeTieredAchievements({
+  idPrefix: 'HONOR_VOTED',
+  nameFn: (g) => `투표러 ${g}표`,
+  descFn: (g) => `명예 투표를 누적 ${g}회 참여하세요`,
+  emoji: '🗳️',
+  category: 'honor_voted_count',
+  trigger: 'honor_voted',
+  goals: { BRONZE: 3, SILVER: 10, GOLD: 20, PLATINUM: 50, EMERALD: 100, DIAMOND: 200, MASTER: 300, GRANDMASTER: 500, CHALLENGER: 1000 },
+});
+
+const matchMvp = makeTieredAchievements({
+  idPrefix: 'MATCH_MVP',
+  nameFn: (g) => `매치 MVP ${g}회`,
+  descFn: (g) => `단일 매치에서 팀 내 3표 이상 받아 매치 MVP를 ${g}회 달성하세요`,
+  emoji: '⭐',
+  category: 'match_mvp',
+  trigger: 'honor_voted',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 50, MASTER: 100, GRANDMASTER: 200, CHALLENGER: 500 },
+});
+
+const matchMvpStreak = makeTieredAchievements({
+  idPrefix: 'MATCH_MVP_STREAK',
+  nameFn: (g) => `팬 서비스 ${g}연속 MVP`,
+  descFn: (g) => `참여 매치 ${g}연속 매치 MVP를 달성하세요`,
+  emoji: '🌟',
+  category: 'match_mvp_streak',
+  trigger: 'honor_voted',
+  goals: { BRONZE: 2, SILVER: 3, GOLD: 4, PLATINUM: 5, EMERALD: 7, DIAMOND: 10, MASTER: 15, GRANDMASTER: 20, CHALLENGER: 30 },
+});
+
+const reverseWin = makeTieredAchievements({
+  idPrefix: 'REVERSE_WIN',
+  nameFn: (g) => `역전승 ${g}회`,
+  descFn: () => `3판2선 세트에서 2-1로 역전승을 거두세요`,
+  emoji: '🔄',
+  category: 'reverse_win',
+  trigger: 'match_result',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 30, MASTER: 50, GRANDMASTER: 100, CHALLENGER: 200 },
+});
+
+const reverseLose = makeTieredAchievements({
+  idPrefix: 'REVERSE_LOSE',
+  nameFn: (g) => `역전패 ${g}회`,
+  descFn: () => `3판2선 세트에서 1-2로 역전패를 당하세요`,
+  emoji: '🔃',
+  category: 'reverse_lose',
+  trigger: 'match_result',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 30, MASTER: 50, GRANDMASTER: 100, CHALLENGER: 200 },
+});
+
+const sweepWin = makeTieredAchievements({
+  idPrefix: 'SWEEP_WIN',
+  nameFn: (g) => `완승 스윕 ${g}회`,
+  descFn: () => `3판2선 세트에서 2-0 완승을 거두세요`,
+  emoji: '🧹',
+  category: 'sweep_win',
+  trigger: 'match_result',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 30, MASTER: 50, GRANDMASTER: 100, CHALLENGER: 150 },
+});
+
+const sweepLose = makeTieredAchievements({
+  idPrefix: 'SWEEP_LOSE',
+  nameFn: (g) => `시련 ${g}회`,
+  descFn: () => `3판2선 세트에서 0-2 완패를 당하세요`,
+  emoji: '💧',
+  category: 'sweep_lose',
+  trigger: 'match_result',
+  goals: { BRONZE: 3, SILVER: 5, GOLD: 10, PLATINUM: 20, EMERALD: 30, DIAMOND: 50, MASTER: 70, GRANDMASTER: 100, CHALLENGER: 150 },
+});
+
+const nightOwl = makeTieredAchievements({
+  idPrefix: 'NIGHT_OWL',
+  nameFn: (g) => `밤새기 ${g}회`,
+  descFn: () => `보이스 채널에 12시간 이상 연속 체류하세요`,
+  emoji: '🦉',
+  category: 'night_owl',
+  trigger: 'voice_leave',
+  goals: { BRONZE: 1, SILVER: 2, GOLD: 3, PLATINUM: 5, EMERALD: 7, DIAMOND: 10, MASTER: 15, GRANDMASTER: 20, CHALLENGER: 30 },
+});
+
+const channelCreator = makeTieredAchievements({
+  idPrefix: 'CHANNEL_CREATOR',
+  nameFn: (g) => `채널 개척자 ${g}회`,
+  descFn: (g) => `임시 보이스 채널을 ${g}회 생성하세요`,
+  emoji: '🔊',
+  category: 'channel_creator',
+  trigger: 'temp_voice_created',
+  goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 50, MASTER: 100, GRANDMASTER: 200, CHALLENGER: 500 },
+});
+
+// 개근 도장 (연속 7일, DIAMOND 단일)
+const attendanceStamp = [
+  {
+    id: 'ATTENDANCE_STAMP',
+    name: '개근 도장',
+    description: '한 주 안에 7일 모두 매치에 참여하세요',
+    emoji: '📜',
+    tier: 'DIAMOND',
+    category: 'consecutive_days',
+    trigger: 'match_result',
+    goal: 7,
+  },
+];
+
+// 기념일 (유저 등록일 기준 경과)
+const anniversaryMilestones = [
+  { id: 'ANNIVERSARY_1W', name: '첫 주', tier: 'BRONZE', days: 7, emoji: '🎂' },
+  { id: 'ANNIVERSARY_1M', name: '한 달', tier: 'SILVER', days: 30, emoji: '🎂' },
+  { id: 'ANNIVERSARY_3M', name: '3개월', tier: 'GOLD', days: 90, emoji: '🎂' },
+  { id: 'ANNIVERSARY_6M', name: '반년', tier: 'PLATINUM', days: 180, emoji: '🎂' },
+  { id: 'ANNIVERSARY_1Y', name: '1주년', tier: 'EMERALD', days: 365, emoji: '🎉' },
+  { id: 'ANNIVERSARY_2Y', name: '2주년', tier: 'DIAMOND', days: 730, emoji: '🎉' },
+];
+const anniversary = anniversaryMilestones.map((m) => ({
+  id: m.id,
+  name: `${m.name} 기념일`,
+  description: `등록 후 ${m.name}이 지났습니다`,
+  emoji: m.emoji,
+  tier: m.tier,
+  category: 'anniversary',
+  trigger: 'match_result',
+  goal: m.days,
+}));
+
 const definitions = [
   ...firstWin,
   ...games,
@@ -305,6 +505,23 @@ const definitions = [
   ...challengeMedals,
   ...underdog,
   ...lateNight,
+  ...soloCheck,
+  ...weekday,
+  ...gamesPerDay,
+  ...welcomer,
+  ...anniversary,
+  ...consecutiveDays,
+  ...attendanceStamp,
+  ...honorReceived,
+  ...honorVoted,
+  ...matchMvp,
+  ...matchMvpStreak,
+  ...reverseWin,
+  ...reverseLose,
+  ...sweepWin,
+  ...sweepLose,
+  ...nightOwl,
+  ...channelCreator,
 ];
 
 const STAT_TYPES = {
@@ -313,6 +530,23 @@ const STAT_TYPES = {
   BEST_WIN_STREAK: 'best_win_streak',
   BEST_LOSE_STREAK: 'best_lose_streak',
   BEST_RATING: 'best_rating',
+  WEEKEND_GAMES: 'weekend_games',
+  WEEKDAY_GAMES: 'weekday_games',
+  MAX_GAMES_PER_DAY: 'max_games_per_day',
+  GAMES_IN_TODAY: 'games_in_today',
+  TODAY_KEY: 'today_key',
+  WELCOMER_WINS: 'welcomer_wins',
+  CURRENT_CONSECUTIVE_DAYS: 'current_consecutive_days',
+  BEST_CONSECUTIVE_DAYS: 'best_consecutive_days',
+  MATCH_MVP_COUNT: 'match_mvp_count',
+  CURRENT_MATCH_MVP_STREAK: 'current_match_mvp_streak',
+  BEST_MATCH_MVP_STREAK: 'best_match_mvp_streak',
+  REVERSE_WINS: 'reverse_wins',
+  REVERSE_LOSES: 'reverse_loses',
+  SWEEP_WINS: 'sweep_wins',
+  SWEEP_LOSES: 'sweep_loses',
+  NIGHT_OWL_SESSIONS: 'night_owl_sessions',
+  TEMP_VOICE_CREATED: 'temp_voice_created',
 };
 
 module.exports = { definitions, TIERS, STAT_TYPES, getTierName };

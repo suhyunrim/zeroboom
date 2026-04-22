@@ -98,8 +98,8 @@ const groupMatchesIntoSets = (matches) => {
 };
 
 const getCompositionKey = (match) => {
-  const t1 = match.team1.map(p => p[0]).sort();
-  const t2 = match.team2.map(p => p[0]).sort();
+  const t1 = (match.team1 || []).map(p => p[0]).sort();
+  const t2 = (match.team2 || []).map(p => p[0]).sort();
   return [...t1, ...t2].join(',');
 };
 
@@ -502,4 +502,4 @@ const analyzeMonthlyTrend = (matches) => {
     }));
 };
 
-module.exports = { generateReport };
+module.exports = { generateReport, getCompositionKey };
