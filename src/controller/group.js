@@ -209,6 +209,28 @@ module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {
   };
 };
 
+module.exports.getMyRankingByPeriod = async (groupId, puuid, rankingResult) => {
+  const idx = rankingResult.findIndex((r) => r.puuid === puuid);
+  if (idx !== -1) {
+    return { ...rankingResult[idx], ranking: idx + 1, reason: null };
+  }
+
+  // 기간 내 매치 참여 없음
+  const summoner = await models.summoner.findOne({ where: { puuid } });
+  return {
+    puuid,
+    ranking: null,
+    name: summoner ? summoner.name : 'Unknown',
+    win: 0,
+    lose: 0,
+    games: 0,
+    winRate: 0,
+    rating: null,
+    ratingChange: 0,
+    reason: '해당 기간 내 매치 없음',
+  };
+};
+
 module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
   const group = await models.group.findByPk(groupId);
   if (!group) return { result: 'group is not exist', status: 404 };
