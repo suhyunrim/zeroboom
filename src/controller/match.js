@@ -14,8 +14,12 @@ const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 const { formatTier } = require('../utils/tierUtils');
-const { getKSTYearStart, getKSTIsoWeekday, getKSTHours, daysAgo } = require('../utils/timeUtils');
+const {
+  getKSTYearStart, getKSTIsoWeekday, getKSTHours, daysAgo,
+  isWeekendTime, isWeekdayTime, getKSTDateKey, kstDayKeyDiff,
+} = require('../utils/timeUtils');
 const { STAT_TYPES } = require('../services/achievement/definitions');
+const statsRepo = require('../services/achievement/stats');
 
 /**
  * 매치 생성 + 레이팅 스냅샷 + seasonId 자동 처리
@@ -510,7 +514,11 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
   const team1WinRate = ratingCalculator.expectedScore(team1AvgRating, team2AvgRating);
   const isTeam1Underdog = matchData.winTeam === 1 && team1WinRate <= 0.45;
   const isTeam2Underdog = matchData.winTeam === 2 && 1 - team1WinRate <= 0.45;
-  const isLateNight = getKSTHours(matchData.gameCreation || matchData.createdAt) < 5;
+  const matchDateForTime = matchData.gameCreation || matchData.createdAt;
+  const isLateNight = getKSTHours(matchDateForTime) < 5;
+  const isWeekend = isWeekendTime(matchDateForTime);
+  const isWeekday = isWeekdayTime(matchDateForTime);
+  const matchDayKey = getKSTDateKey(matchDateForTime);
 
   // 각 유저 업데이트
   const now = new Date();
@@ -545,22 +553,12 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     }
   }
 
-  // 업적 통계 업데이트 (언더독/야식/연승연패)
+  // 업적 통계 업데이트 (언더독/야식/연승연패/시간대/출석/환영/하루 N판)
   {
-    const incrementStat = (puuid, statType) =>
-      models.sequelize.query(
-        `INSERT INTO user_achievement_stats (puuid, groupId, statType, value, createdAt, updatedAt)
-         VALUES (:puuid, :groupId, :statType, 1, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE value = value + 1, updatedAt = NOW()`,
-        { replacements: { puuid, groupId: matchData.groupId, statType } },
-      );
-    const updateBestStat = (puuid, statType, value) =>
-      models.sequelize.query(
-        `INSERT INTO user_achievement_stats (puuid, groupId, statType, value, createdAt, updatedAt)
-         VALUES (:puuid, :groupId, :statType, :value, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE value = GREATEST(value, :value), updatedAt = NOW()`,
-        { replacements: { puuid, groupId: matchData.groupId, statType, value } },
-      );
+    const gid = matchData.groupId;
+    const incrementStat = (puuid, statType) => statsRepo.incrementStat(puuid, gid, statType);
+    const setStat = (puuid, statType, value) => statsRepo.setStat(puuid, gid, statType, value);
+    const updateBestStat = (puuid, statType, value) => statsRepo.updateBestStat(puuid, gid, statType, value);
 
     // 현재 연승/연패 계산 (최근 매치만 조회)
     const recentMatches = await models.match.findAll({
@@ -572,6 +570,10 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
       limit: 30,
     });
 
+    // 뉴비 기준일: 매치 시각 기준 3주 전 (환영위원회 판정에 사용)
+    const NEWBIE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
+    const newbieCutoff = new Date(new Date(matchDateForTime).getTime() - NEWBIE_WINDOW_MS);
+
     const statsUpdates = [];
     for (const [puuid] of [...team1Data, ...team2Data]) {
       if (!userMap[puuid]) continue;
@@ -581,6 +583,67 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
       const isUnderdog = inTeam1 ? isTeam1Underdog : isTeam2Underdog;
       if (isUnderdog) statsUpdates.push(incrementStat(puuid, STAT_TYPES.UNDERDOG_WINS));
       if (isLateNight) statsUpdates.push(incrementStat(puuid, STAT_TYPES.LATE_NIGHT_GAMES));
+
+      // 솔로신가요? / 평일 근로자
+      if (isWeekend) statsUpdates.push(incrementStat(puuid, STAT_TYPES.WEEKEND_GAMES));
+      if (isWeekday) statsUpdates.push(incrementStat(puuid, STAT_TYPES.WEEKDAY_GAMES));
+
+      // 환영위원회: 승리 + 같은 팀에 뉴비 있음 (본인 포함이면 불가 → 본인 제외 팀메이트 뉴비 여부)
+      const isWin = (inTeam1 && matchData.winTeam === 1) || (!inTeam1 && matchData.winTeam === 2);
+      if (isWin) {
+        const myTeam = inTeam1 ? team1Data : team2Data;
+        const teamHasNewbieExceptMe = myTeam.some(([p]) => {
+          if (p === puuid) return false;
+          const u = userMap[p];
+          return u && u.createdAt && new Date(u.createdAt) >= newbieCutoff;
+        });
+        if (teamHasNewbieExceptMe) statsUpdates.push(incrementStat(puuid, STAT_TYPES.WELCOMER_WINS));
+      }
+
+      // 하루 N판 + 연속 출석: today_key 기반 계산
+      statsUpdates.push((async () => {
+        const existingDay = await models.user_achievement_stats.findOne({
+          where: { puuid, groupId: matchData.groupId, statType: STAT_TYPES.TODAY_KEY },
+          raw: true,
+        });
+        const prevKey = existingDay ? Number(existingDay.value) : null;
+        const isSameDay = prevKey === matchDayKey;
+
+        // 하루 N판: games_in_today
+        let gamesToday;
+        if (isSameDay) {
+          await incrementStat(puuid, STAT_TYPES.GAMES_IN_TODAY);
+          const row = await models.user_achievement_stats.findOne({
+            where: { puuid, groupId: matchData.groupId, statType: STAT_TYPES.GAMES_IN_TODAY },
+            raw: true,
+          });
+          gamesToday = row ? Number(row.value) : 1;
+        } else {
+          await setStat(puuid, STAT_TYPES.GAMES_IN_TODAY, 1);
+          gamesToday = 1;
+        }
+
+        // 연속 출석: 전날이면 +1, 더 떨어지면 리셋, 같은 날이면 유지(0이면 1로)
+        const currentRow = await models.user_achievement_stats.findOne({
+          where: { puuid, groupId: matchData.groupId, statType: STAT_TYPES.CURRENT_CONSECUTIVE_DAYS },
+          raw: true,
+        });
+        let current = currentRow ? Number(currentRow.value) : 0;
+        if (prevKey === null) {
+          current = 1;
+        } else if (isSameDay) {
+          if (current === 0) current = 1;
+        } else {
+          const diff = kstDayKeyDiff(matchDayKey, prevKey);
+          current = diff === 1 ? current + 1 : 1;
+        }
+        await setStat(puuid, STAT_TYPES.CURRENT_CONSECUTIVE_DAYS, current);
+        await updateBestStat(puuid, STAT_TYPES.BEST_CONSECUTIVE_DAYS, current);
+
+        // today_key 갱신 + 하루 최다 판수 max 갱신
+        await setStat(puuid, STAT_TYPES.TODAY_KEY, matchDayKey);
+        await updateBestStat(puuid, STAT_TYPES.MAX_GAMES_PER_DAY, gamesToday);
+      })());
 
       // 현재 연승/연패 계산
       let winStreak = 0;
@@ -612,6 +675,9 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
       }
     }
     await Promise.all(statsUpdates);
+
+    // 3판2선 세트 판별 (역전승/역전패/스윕 승/패)
+    await processSetAchievements(matchData, userMap, team1Data, team2Data);
   }
 
   // 업적 체크 (새 결과 적용 시에만)
@@ -988,3 +1054,56 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
     },
   };
 };
+
+/**
+ * 3판2선 세트 업적 처리 (역전승/역전패/스윕 승/패)
+ * 현재 매치 기준 같은 composition의 최근 24시간 내 매치를 보고 세트 판별
+ */
+async function processSetAchievements(matchData, userMap, team1Data, team2Data) {
+  try {
+    const { getCompositionKey } = require('../services/balance-report');
+    const currentKey = getCompositionKey(matchData);
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+    const matchTime = new Date(matchData.createdAt).getTime();
+
+    const recentMatches = await models.match.findAll({
+      where: {
+        groupId: matchData.groupId,
+        winTeam: { [Op.ne]: null },
+        gameId: { [Op.lt]: matchData.gameId },
+      },
+      order: [['gameId', 'DESC']],
+      limit: 10,
+    });
+    const sameSet = recentMatches.filter(
+      (m) => getCompositionKey(m) === currentKey
+        && matchTime - new Date(m.createdAt).getTime() <= twentyFourHours,
+    );
+
+    const winTeamStat = sameSet.length === 1 ? STAT_TYPES.SWEEP_WINS : STAT_TYPES.REVERSE_WINS;
+    const loseTeamStat = sameSet.length === 1 ? STAT_TYPES.SWEEP_LOSES : STAT_TYPES.REVERSE_LOSES;
+    const winTeamData = matchData.winTeam === 1 ? team1Data : team2Data;
+    const loseTeamData = matchData.winTeam === 1 ? team2Data : team1Data;
+
+    let shouldProcess = false;
+    if (sameSet.length === 1) {
+      // 2경기 세트: 같은 팀 2연승이면 스윕
+      shouldProcess = sameSet[0].winTeam === matchData.winTeam;
+    } else if (sameSet.length >= 2 && sameSet[0].winTeam !== sameSet[1].winTeam) {
+      // 3경기 세트이고 첫 두 경기가 1-1이면 현재 매치가 2-1 역전 결정전
+      shouldProcess = true;
+    }
+    if (!shouldProcess) return;
+
+    const updates = [];
+    for (const [puuid] of winTeamData) {
+      if (userMap[puuid]) updates.push(statsRepo.incrementStat(puuid, matchData.groupId, winTeamStat));
+    }
+    for (const [puuid] of loseTeamData) {
+      if (userMap[puuid]) updates.push(statsRepo.incrementStat(puuid, matchData.groupId, loseTeamStat));
+    }
+    await Promise.all(updates);
+  } catch (e) {
+    logger.error('세트 업적 처리 오류:', e);
+  }
+}

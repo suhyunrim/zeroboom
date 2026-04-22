@@ -1,5 +1,8 @@
 const { Op } = require('sequelize');
 const models = require('../db/models');
+const { logger } = require('../loaders/logger');
+const { STAT_TYPES } = require('../services/achievement/definitions');
+const statsRepo = require('../services/achievement/stats');
 
 // 명예 칭호 (내림차순, minVotes = 실제 투표 수 * 5)
 const HONOR_TITLES = [
@@ -81,8 +84,72 @@ module.exports.castVote = async (gameId, groupId, voterPuuid, targetPuuid, teamN
     teamNumber,
   });
 
+  // 매치 MVP 판정 (팀 내 3표 처음 도달 시 1회만 처리)
+  try {
+    const targetVoteCount = await models.honor_vote.count({ where: { gameId, targetPuuid } });
+    if (targetVoteCount === 3) {
+      await updateMatchMvp(gameId, groupId, targetPuuid);
+    }
+  } catch (e) {
+    logger.error('매치 MVP 처리 오류:', e);
+  }
+
+  // 업적 체크 (target + voter 모두)
+  try {
+    const { processAchievements } = require('../services/achievement/engine');
+    const [targetUser, voterUser] = await Promise.all([
+      models.user.findOne({ where: { puuid: targetPuuid, groupId } }),
+      models.user.findOne({ where: { puuid: voterPuuid, groupId } }),
+    ]);
+    const userMap = {};
+    if (targetUser) userMap[targetPuuid] = targetUser;
+    if (voterUser) userMap[voterPuuid] = voterUser;
+    if (Object.keys(userMap).length > 0) {
+      await processAchievements('honor_voted', { groupId, userMap });
+    }
+  } catch (e) {
+    logger.error('명예 투표 업적 처리 오류:', e);
+  }
+
   return { result: '투표가 완료되었습니다.', status: 200 };
 };
+
+/**
+ * 매치 MVP 갱신 (3표 도달 시 1회 호출)
+ * - match_mvp_count 증가
+ * - 직전 참여 매치 MVP 여부로 streak 계산 후 best 갱신
+ */
+async function updateMatchMvp(gameId, groupId, targetPuuid) {
+  await statsRepo.incrementStat(targetPuuid, groupId, STAT_TYPES.MATCH_MVP_COUNT);
+
+  const recentMatches = await models.match.findAll({
+    where: { groupId, winTeam: { [Op.ne]: null }, gameId: { [Op.lt]: gameId } },
+    order: [['gameId', 'DESC']],
+    limit: 30,
+  });
+  const prevMatch = recentMatches.find(
+    (m) => (m.team1 || []).some((p) => p[0] === targetPuuid) || (m.team2 || []).some((p) => p[0] === targetPuuid),
+  );
+
+  let newStreak = 1;
+  if (prevMatch) {
+    const prevVoteCount = await models.honor_vote.count({
+      where: { gameId: prevMatch.gameId, targetPuuid },
+    });
+    if (prevVoteCount >= 3) {
+      const currentRow = await models.user_achievement_stats.findOne({
+        where: { puuid: targetPuuid, groupId, statType: STAT_TYPES.CURRENT_MATCH_MVP_STREAK },
+        raw: true,
+      });
+      newStreak = (currentRow ? Number(currentRow.value) : 0) + 1;
+    }
+  }
+
+  await Promise.all([
+    statsRepo.setStat(targetPuuid, groupId, STAT_TYPES.CURRENT_MATCH_MVP_STREAK, newStreak),
+    statsRepo.updateBestStat(targetPuuid, groupId, STAT_TYPES.BEST_MATCH_MVP_STREAK, newStreak),
+  ]);
+}
 
 module.exports.getVoteResults = async (gameId) => {
   const votes = await models.honor_vote.findAll({

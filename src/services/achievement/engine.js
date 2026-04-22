@@ -66,41 +66,92 @@ async function getMedalCounts(puuids, groupId) {
 }
 
 /**
+ * 명예 투표 받음/참여 카운트 배치 조회
+ */
+async function getHonorCounts(puuids, groupId) {
+  const { fn, col } = models.sequelize;
+  const [received, voted] = await Promise.all([
+    models.honor_vote.findAll({
+      where: { groupId, targetPuuid: puuids },
+      attributes: ['targetPuuid', [fn('COUNT', col('id')), 'cnt']],
+      group: ['targetPuuid'],
+      raw: true,
+    }),
+    models.honor_vote.findAll({
+      where: { groupId, voterPuuid: puuids },
+      attributes: ['voterPuuid', [fn('COUNT', col('id')), 'cnt']],
+      group: ['voterPuuid'],
+      raw: true,
+    }),
+  ]);
+  const receivedMap = {};
+  received.forEach((r) => {
+    receivedMap[r.targetPuuid] = Number(r.cnt);
+  });
+  const votedMap = {};
+  voted.forEach((v) => {
+    votedMap[v.voterPuuid] = Number(v.cnt);
+  });
+  return { receivedMap, votedMap };
+}
+
+// 단순 `extra[key] >= goal` 로 판정되는 카테고리들. 카테고리 → extra 키 매핑.
+const SIMPLE_STAT_CATEGORIES = {
+  underdog: 'underdogWins',
+  late_night: 'lateNightGames',
+  weekend_games: 'weekendGames',
+  weekday_games: 'weekdayGames',
+  games_per_day: 'maxGamesPerDay',
+  welcomer: 'welcomerWins',
+  consecutive_days: 'bestConsecutiveDays',
+  honor_received: 'honorReceived',
+  honor_voted_count: 'honorVotedCount',
+  match_mvp: 'matchMvpCount',
+  match_mvp_streak: 'bestMatchMvpStreak',
+  reverse_win: 'reverseWins',
+  reverse_lose: 'reverseLoses',
+  sweep_win: 'sweepWins',
+  sweep_lose: 'sweepLoses',
+  night_owl: 'nightOwlSessions',
+  channel_creator: 'tempVoiceCreated',
+};
+
+const CHALLENGE_MEDAL_KEY = {
+  CHALLENGE_TRIPLE_GOLD: 'gold',
+  CHALLENGE_GOLD_MEDAL: 'gold',
+  CHALLENGE_SILVER_MEDAL: 'silver',
+  CHALLENGE_BRONZE_MEDAL: 'bronze',
+};
+
+/**
  * 업적 체크 로직
  */
 function checkAchievement(def, user, extra) {
   const { category, goal } = def;
-  if (category === 'match') {
-    return user.win >= goal;
-  }
-  if (category === 'games') {
-    return user.win + user.lose + (extra.externalGames || 0) >= goal;
-  }
+
+  const simpleKey = SIMPLE_STAT_CATEGORIES[category];
+  if (simpleKey) return (extra[simpleKey] || 0) >= goal;
+
+  if (category === 'match') return user.win >= goal;
+  if (category === 'games') return user.win + user.lose + (extra.externalGames || 0) >= goal;
   if (category === 'streak') {
     if (def.id.startsWith('WIN_STREAK')) return (extra.bestWinStreak || 0) >= goal;
     if (def.id.startsWith('LOSE_STREAK')) return (extra.bestLoseStreak || 0) >= goal;
   }
   if (category === 'tier') {
     const bestRating = extra.bestRating || user.defaultRating + user.additionalRating;
-    const bestTier = getTierName(bestRating);
-    return TIERS.indexOf(bestTier) >= TIERS.indexOf(goal);
+    return TIERS.indexOf(getTierName(bestRating)) >= TIERS.indexOf(goal);
   }
-  if (category === 'voice') {
-    const durationSeconds = extra.voiceDuration || 0;
-    return durationSeconds >= goal * 3600;
-  }
-  if (category === 'underdog') {
-    return (extra.underdogWins || 0) >= goal;
-  }
-  if (category === 'late_night') {
-    return (extra.lateNightGames || 0) >= goal;
-  }
+  if (category === 'voice') return (extra.voiceDuration || 0) >= goal * 3600;
   if (category === 'challenge') {
+    const medalKey = CHALLENGE_MEDAL_KEY[def.id];
     const medals = extra.medalCounts || { gold: 0, silver: 0, bronze: 0 };
-    if (def.id === 'CHALLENGE_TRIPLE_GOLD') return medals.gold >= goal;
-    if (def.id === 'CHALLENGE_GOLD_MEDAL') return medals.gold >= goal;
-    if (def.id === 'CHALLENGE_SILVER_MEDAL') return medals.silver >= goal;
-    if (def.id === 'CHALLENGE_BRONZE_MEDAL') return medals.bronze >= goal;
+    return medalKey ? medals[medalKey] >= goal : false;
+  }
+  if (category === 'anniversary') {
+    if (!user.createdAt) return false;
+    const elapsedDays = Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (24 * 60 * 60 * 1000));
+    return elapsedDays >= goal;
   }
   return false;
 }
@@ -133,10 +184,27 @@ async function processAchievements(trigger, context) {
     const needsChallenge = defs.some((d) => d.category === 'challenge');
     const needsStats = defs.some(
       (d) =>
-        d.category === 'streak' || d.category === 'underdog' || d.category === 'late_night' || d.category === 'tier',
+        d.category === 'streak'
+        || d.category === 'underdog'
+        || d.category === 'late_night'
+        || d.category === 'tier'
+        || d.category === 'weekend_games'
+        || d.category === 'weekday_games'
+        || d.category === 'games_per_day'
+        || d.category === 'welcomer'
+        || d.category === 'consecutive_days'
+        || d.category === 'match_mvp'
+        || d.category === 'match_mvp_streak'
+        || d.category === 'reverse_win'
+        || d.category === 'reverse_lose'
+        || d.category === 'sweep_win'
+        || d.category === 'sweep_lose'
+        || d.category === 'night_owl'
+        || d.category === 'channel_creator',
     );
+    const needsHonor = defs.some((d) => d.category === 'honor_received' || d.category === 'honor_voted_count');
 
-    const [externalRecords, voiceDurationMap, medalCountsMap, statsRows] = await Promise.all([
+    const [externalRecords, voiceDurationMap, medalCountsMap, statsRows, honorCounts] = await Promise.all([
       needsGames
         ? models.externalRecord.findAll({
             where: { groupId, puuid: puuids },
@@ -157,11 +225,25 @@ async function processAchievements(trigger, context) {
                 STAT_TYPES.BEST_WIN_STREAK,
                 STAT_TYPES.BEST_LOSE_STREAK,
                 STAT_TYPES.BEST_RATING,
+                STAT_TYPES.WEEKEND_GAMES,
+                STAT_TYPES.WEEKDAY_GAMES,
+                STAT_TYPES.MAX_GAMES_PER_DAY,
+                STAT_TYPES.WELCOMER_WINS,
+                STAT_TYPES.BEST_CONSECUTIVE_DAYS,
+                STAT_TYPES.MATCH_MVP_COUNT,
+                STAT_TYPES.BEST_MATCH_MVP_STREAK,
+                STAT_TYPES.REVERSE_WINS,
+                STAT_TYPES.REVERSE_LOSES,
+                STAT_TYPES.SWEEP_WINS,
+                STAT_TYPES.SWEEP_LOSES,
+                STAT_TYPES.NIGHT_OWL_SESSIONS,
+                STAT_TYPES.TEMP_VOICE_CREATED,
               ],
             },
             raw: true,
           })
         : [],
+      needsHonor ? getHonorCounts(puuids, groupId) : { receivedMap: {}, votedMap: {} },
     ]);
 
     const externalGamesMap = {};
@@ -192,6 +274,21 @@ async function processAchievements(trigger, context) {
         bestWinStreak: userStats[STAT_TYPES.BEST_WIN_STREAK] || 0,
         bestLoseStreak: userStats[STAT_TYPES.BEST_LOSE_STREAK] || 0,
         bestRating: userStats[STAT_TYPES.BEST_RATING] || 0,
+        weekendGames: userStats[STAT_TYPES.WEEKEND_GAMES] || 0,
+        weekdayGames: userStats[STAT_TYPES.WEEKDAY_GAMES] || 0,
+        maxGamesPerDay: userStats[STAT_TYPES.MAX_GAMES_PER_DAY] || 0,
+        welcomerWins: userStats[STAT_TYPES.WELCOMER_WINS] || 0,
+        bestConsecutiveDays: userStats[STAT_TYPES.BEST_CONSECUTIVE_DAYS] || 0,
+        matchMvpCount: userStats[STAT_TYPES.MATCH_MVP_COUNT] || 0,
+        bestMatchMvpStreak: userStats[STAT_TYPES.BEST_MATCH_MVP_STREAK] || 0,
+        honorReceived: honorCounts.receivedMap[user.puuid] || 0,
+        honorVotedCount: honorCounts.votedMap[user.puuid] || 0,
+        reverseWins: userStats[STAT_TYPES.REVERSE_WINS] || 0,
+        reverseLoses: userStats[STAT_TYPES.REVERSE_LOSES] || 0,
+        sweepWins: userStats[STAT_TYPES.SWEEP_WINS] || 0,
+        sweepLoses: userStats[STAT_TYPES.SWEEP_LOSES] || 0,
+        nightOwlSessions: userStats[STAT_TYPES.NIGHT_OWL_SESSIONS] || 0,
+        tempVoiceCreated: userStats[STAT_TYPES.TEMP_VOICE_CREATED] || 0,
       };
 
       for (const def of unchecked) {

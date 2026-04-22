@@ -1282,6 +1282,14 @@ module.exports = async (app) => {
               if (group) {
                 const user = await models.user.findOne({ where: { groupId: group.id, discordId: memberId } });
                 if (user) {
+                  // 밤새기: 단일 세션 12시간 이상이면 stat 증가
+                  const sessionMs = now.getTime() - new Date(activity.lastJoinedAt).getTime();
+                  if (sessionMs >= 12 * 60 * 60 * 1000) {
+                    const { STAT_TYPES } = require('../services/achievement/definitions');
+                    const statsRepo = require('../services/achievement/stats');
+                    await statsRepo.incrementStat(user.puuid, group.id, STAT_TYPES.NIGHT_OWL_SESSIONS);
+                  }
+
                   const { processAchievements } = require('../services/achievement/engine');
                   await processAchievements('voice_leave', {
                     groupId: group.id,
@@ -1356,6 +1364,25 @@ module.exports = async (app) => {
             ownerDiscordId: member.id,
             generatorId: generator.id,
           });
+
+          // 채널 개척자 업적: stat 증가 + 체크
+          try {
+            const ownerUser = await models.user.findOne({
+              where: { groupId: generator.groupId, discordId: member.id },
+            });
+            if (ownerUser) {
+              const { STAT_TYPES } = require('../services/achievement/definitions');
+              const statsRepo = require('../services/achievement/stats');
+              const { processAchievements } = require('../services/achievement/engine');
+              await statsRepo.incrementStat(ownerUser.puuid, generator.groupId, STAT_TYPES.TEMP_VOICE_CREATED);
+              await processAchievements('temp_voice_created', {
+                groupId: generator.groupId,
+                userMap: { [ownerUser.puuid]: ownerUser },
+              });
+            }
+          } catch (e) {
+            logger.error('채널 개척자 업적 처리 오류:', e);
+          }
 
           await newState.setChannel(tempChannel);
           logger.info(`임시 음성 채널 생성: ${channelName} (${tempChannel.id}) by ${member.displayName}`);
