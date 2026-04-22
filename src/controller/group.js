@@ -329,7 +329,8 @@ module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
     summonerMap[s.puuid] = s.name;
   }
 
-  // 결과 정리 및 레이팅 변동 기준 정렬
+  // 결과 정리 및 기간 말 레이팅 기준 정렬 (프론트 표 기본 정렬과 일치)
+  const ratingOrNeg = (r) => (r != null ? r : -Infinity);
   const result = Object.values(userStats)
     .map((stat) => ({
       puuid: stat.puuid,
@@ -343,7 +344,7 @@ module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
       rating: stat.lastRating,
       ratingChange: Math.round(stat.ratingChange),
     }))
-    .sort((a, b) => b.ratingChange - a.ratingChange);
+    .sort((a, b) => ratingOrNeg(b.rating) - ratingOrNeg(a.rating));
 
   return { result, status: 200 };
 };
