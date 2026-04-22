@@ -85,7 +85,15 @@ module.exports = (app) => {
 
     try {
       const result = await groupController.getRankingByPeriod(Number(groupId), new Date(startDate), new Date(endDate));
-      return res.status(result.status).json({ result: result.result });
+      const response = { result: result.result };
+
+      // 요청자의 기간 랭킹 정보 추가 (puuid 헤더로 식별)
+      const myPuuid = req.headers.puuid;
+      if (myPuuid && result.status === 200) {
+        response.myRanking = await groupController.getMyRankingByPeriod(Number(groupId), myPuuid, result.result);
+      }
+
+      return res.status(result.status).json(response);
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: e.message });
