@@ -1,5 +1,5 @@
 const models = require('../db/models');
-const { Op } = require('sequelize');
+const { Op, QueryTypes } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const { getMatchIdsFromPuuid, getMatchData, getRankDataByPuuid } = require('../services/riot-api');
 
@@ -385,59 +385,49 @@ module.exports.getLeaderboard = async (challengeId) => {
       if (subPuuid !== mainPuuid) mainToSub[mainPuuid] = subPuuid;
     }
 
-    // 챌린지 기간 내 매치 ID + 참가자 puuid 목록 조회 (participants 전체 로드 방지)
-    const details = await models.challenge_match_detail.findAll({
-      where: {
-        queueId,
-        gameCreation: {
-          [Op.gte]: challenge.startAt,
-          [Op.lte]: challenge.endAt,
+    // challenge_matches를 주도 테이블로 JOIN해서 그룹 멤버가 낀 매치의 승패만 한 번에 조회
+    // (participants JSON 파싱 및 별도 매치 재조회 회피)
+    const rows = await models.sequelize.query(
+      `SELECT cm.matchId, cm.puuid, cm.win, cmd.gameCreation
+         FROM challenge_matches cm
+         INNER JOIN challenge_match_details cmd ON cm.matchId = cmd.matchId
+        WHERE cm.puuid IN (:allPuuids)
+          AND cmd.queueId = :queueId
+          AND cmd.gameCreation BETWEEN :startAt AND :endAt`,
+      {
+        replacements: {
+          allPuuids,
+          queueId,
+          startAt: challenge.startAt,
+          endAt: challenge.endAt,
         },
+        type: QueryTypes.SELECT,
       },
-      attributes: [
-        'matchId',
-        'gameCreation',
-        [models.sequelize.literal("JSON_EXTRACT(participants, '$[*].puuid')"), 'participantPuuids'],
-      ],
-      order: [['gameCreation', 'ASC']],
-    });
+    );
 
-    // 그룹 멤버(본캐+부캐)와 함께한 매치만 필터
-    const allPuuidSet = new Set(allPuuids);
-    const filteredDetails = details.filter((d) => {
-      const puuidList = d.getDataValue('participantPuuids') || [];
-      const groupCount = puuidList.filter((p) => allPuuidSet.has(p)).length;
-      return groupCount >= 2;
-    });
-    const matchIds = filteredDetails.map((d) => d.matchId);
-
-    // matchId → gameCreation 매핑 (streak 정렬용)
-    const gameCreationMap = {};
-    filteredDetails.forEach((d) => {
-      gameCreationMap[d.matchId] = d.gameCreation;
-    });
-
-    // 해당 매치들에서 참가자별 승패 조회 (본캐+부캐 전체)
-    const matches =
-      matchIds.length > 0
-        ? await models.challenge_match.findAll({
-            where: {
-              matchId: matchIds,
-              puuid: allPuuids,
-            },
-          })
-        : [];
+    // matchId별로 그룹핑 → 본캐+부캐 합쳐 distinct puuid ≥ 2인 매치만 유지
+    const rowsByMatch = {};
+    for (const r of rows) {
+      if (!rowsByMatch[r.matchId]) rowsByMatch[r.matchId] = [];
+      rowsByMatch[r.matchId].push(r);
+    }
 
     // 본캐 puuid 기준으로 그룹핑 (부캐 전적은 본캐에 합산)
     const matchesByMain = {};
-    for (const m of matches) {
-      const mainPuuid = puuidToMain[m.puuid] || m.puuid;
-      if (!matchesByMain[mainPuuid]) matchesByMain[mainPuuid] = [];
-      matchesByMain[mainPuuid].push({
-        matchId: m.matchId,
-        win: m.win,
-        gameCreation: gameCreationMap[m.matchId],
-      });
+    for (const matchId of Object.keys(rowsByMatch)) {
+      const matchRows = rowsByMatch[matchId];
+      const distinctPuuids = new Set(matchRows.map((r) => r.puuid));
+      if (distinctPuuids.size < 2) continue;
+
+      for (const r of matchRows) {
+        const mainPuuid = puuidToMain[r.puuid] || r.puuid;
+        if (!matchesByMain[mainPuuid]) matchesByMain[mainPuuid] = [];
+        matchesByMain[mainPuuid].push({
+          matchId: r.matchId,
+          win: !!r.win,
+          gameCreation: r.gameCreation,
+        });
+      }
     }
     for (const puuid of Object.keys(matchesByMain)) {
       matchesByMain[puuid].sort((a, b) => new Date(a.gameCreation) - new Date(b.gameCreation));
