@@ -34,15 +34,15 @@ async function getActiveMembers(groupId) {
   });
 }
 
-async function getSummonerNameMap(puuids) {
+async function getSummonerInfoMap(puuids) {
   if (!puuids.length) return {};
   const summoners = await models.summoner.findAll({
     where: { puuid: puuids },
-    attributes: ['puuid', 'name'],
+    attributes: ['puuid', 'name', 'profileIconId'],
     raw: true,
   });
   return summoners.reduce((acc, s) => {
-    acc[s.puuid] = s.name;
+    acc[s.puuid] = { name: s.name, profileIconId: s.profileIconId };
     return acc;
   }, {});
 }
@@ -58,14 +58,16 @@ function pct(n, total) {
   return total ? Math.round((n / total) * 1000) / 10 : 0;
 }
 
-function mkUnlockerInfo(record, nameMap, extra = null) {
+function mkUnlockerInfo(record, infoMap, extra = null) {
   if (!record) return null;
-  const info = {
+  const info = infoMap[record.puuid];
+  const base = {
     puuid: record.puuid,
-    name: nameMap[record.puuid] || UNKNOWN_NAME,
+    name: info?.name || UNKNOWN_NAME,
+    profileIconId: info?.profileIconId ?? null,
     unlockedAt: record.unlockedAt,
   };
-  return extra ? { ...extra, ...info } : info;
+  return extra ? { ...extra, ...base } : base;
 }
 
 async function getDashboard(groupId) {
@@ -104,10 +106,11 @@ async function getDashboard(groupId) {
   const countByAchievement = {};
   perAchievement.forEach((r) => { countByAchievement[r.achievementId] = Number(r.cnt); });
 
-  const nameMap = await getSummonerNameMap(perUser.map((r) => r.puuid));
+  const infoMap = await getSummonerInfoMap(perUser.map((r) => r.puuid));
   const topUsers = perUser.map((r) => ({
     puuid: r.puuid,
-    name: nameMap[r.puuid] || UNKNOWN_NAME,
+    name: infoMap[r.puuid]?.name || UNKNOWN_NAME,
+    profileIconId: infoMap[r.puuid]?.profileIconId ?? null,
     unlockCount: Number(r.cnt),
   }));
 
@@ -164,7 +167,7 @@ async function getCategoryAchievements(groupId, category) {
     })
     : [];
 
-  const nameMap = await getSummonerNameMap([...new Set(unlocks.map((u) => u.puuid))]);
+  const infoMap = await getSummonerInfoMap([...new Set(unlocks.map((u) => u.puuid))]);
 
   const byAchievement = {};
   unlocks.forEach((u) => {
@@ -178,10 +181,10 @@ async function getCategoryAchievements(groupId, category) {
     const recentUnlockers = records
       .slice(-RECENT_UNLOCKERS_LIMIT)
       .reverse()
-      .map((r) => mkUnlockerInfo(r, nameMap));
+      .map((r) => mkUnlockerInfo(r, infoMap));
     const topUnlockers = records
       .slice(0, TOP_UNLOCKERS_LIMIT)
-      .map((r, i) => mkUnlockerInfo(r, nameMap, { rank: i + 1 }));
+      .map((r, i) => mkUnlockerInfo(r, infoMap, { rank: i + 1 }));
 
     return {
       id: def.id,
@@ -195,8 +198,8 @@ async function getCategoryAchievements(groupId, category) {
       unlockRate: pct(unlockedCount, totalActiveUsers),
       recentUnlockers,
       topUnlockers,
-      firstUnlocker: mkUnlockerInfo(records[0], nameMap),
-      latestUnlocker: mkUnlockerInfo(records[records.length - 1], nameMap),
+      firstUnlocker: mkUnlockerInfo(records[0], infoMap),
+      latestUnlocker: mkUnlockerInfo(records[records.length - 1], infoMap),
     };
   });
 
@@ -217,7 +220,7 @@ async function getUserRanking(groupId) {
   }
 
   const { fn, col } = models.sequelize;
-  const [aggRows, nameMap] = await Promise.all([
+  const [aggRows, infoMap] = await Promise.all([
     models.user_achievement.findAll({
       where: { groupId, puuid: activePuuids },
       attributes: [
@@ -228,7 +231,7 @@ async function getUserRanking(groupId) {
       group: ['puuid'],
       raw: true,
     }),
-    getSummonerNameMap(activePuuids),
+    getSummonerInfoMap(activePuuids),
   ]);
 
   const statsByPuuid = {};
@@ -241,9 +244,11 @@ async function getUserRanking(groupId) {
 
   const merged = activeMembers.map((m) => {
     const stat = statsByPuuid[m.puuid];
+    const info = infoMap[m.puuid];
     return {
       puuid: m.puuid,
-      name: nameMap[m.puuid] || UNKNOWN_NAME,
+      name: info?.name || UNKNOWN_NAME,
+      profileIconId: info?.profileIconId ?? null,
       unlockCount: stat ? stat.cnt : 0,
       firstUnlockAt: stat ? stat.firstUnlockAt : null,
       createdAt: new Date(m.createdAt),
@@ -264,6 +269,7 @@ async function getUserRanking(groupId) {
     rank: idx + 1,
     puuid: m.puuid,
     name: m.name,
+    profileIconId: m.profileIconId,
     unlockCount: m.unlockCount,
   }));
 
@@ -308,15 +314,16 @@ async function getAchievementRanking(groupId, achievementId) {
   }
 
   const referencedPuuids = new Set([...unlockedPuuidSet, ...progressRows.map((r) => r.puuid)]);
-  const nameMap = await getSummonerNameMap([...referencedPuuids]);
+  const infoMap = await getSummonerInfoMap([...referencedPuuids]);
 
-  const unlockers = unlocks.map((u, idx) => mkUnlockerInfo(u, nameMap, { rank: idx + 1 }));
+  const unlockers = unlocks.map((u, idx) => mkUnlockerInfo(u, infoMap, { rank: idx + 1 }));
 
   const topProgress = progressRows
     .filter((s) => Number(s.value) > 0)
     .map((s) => ({
       puuid: s.puuid,
-      name: nameMap[s.puuid] || UNKNOWN_NAME,
+      name: infoMap[s.puuid]?.name || UNKNOWN_NAME,
+      profileIconId: infoMap[s.puuid]?.profileIconId ?? null,
       currentValue: Number(s.value),
       goal: def.goal,
       progressRate: pct(Number(s.value), def.goal),
@@ -335,8 +342,8 @@ async function getAchievementRanking(groupId, achievementId) {
       goal: def.goal || null,
       unlockedCount,
       unlockRate: pct(unlockedCount, totalActiveUsers),
-      firstUnlocker: mkUnlockerInfo(unlocks[0], nameMap),
-      latestUnlocker: mkUnlockerInfo(unlocks[unlocks.length - 1], nameMap),
+      firstUnlocker: mkUnlockerInfo(unlocks[0], infoMap),
+      latestUnlocker: mkUnlockerInfo(unlocks[unlocks.length - 1], infoMap),
       topUnlockers: unlockers.slice(0, TOP_UNLOCKERS_LIMIT),
     },
     unlockers,
