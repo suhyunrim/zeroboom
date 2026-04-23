@@ -5,16 +5,6 @@
 
 // --- 모킹 설정 ---
 
-jest.mock('sequelize', () => ({
-  Op: {
-    in: Symbol('in'),
-    gte: Symbol('gte'),
-    lte: Symbol('lte'),
-    or: Symbol('or'),
-    ne: Symbol('ne'),
-  },
-}));
-
 const mockModels = {
   group: { findByPk: jest.fn() },
   challenge: {
@@ -49,8 +39,20 @@ const mockModels = {
     col: jest.fn(() => 'COL'),
     escape: jest.fn((v) => `'${v}'`),
     literal: jest.fn((v) => v),
+    query: jest.fn(),
   },
 };
+
+jest.mock('sequelize', () => ({
+  Op: {
+    in: Symbol('in'),
+    gte: Symbol('gte'),
+    lte: Symbol('lte'),
+    or: Symbol('or'),
+    ne: Symbol('ne'),
+  },
+  QueryTypes: { SELECT: 'SELECT' },
+}));
 
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -203,51 +205,65 @@ describe('getLeaderboard', () => {
       id: 1, groupId: 1, gameType: 'soloRank',
       startAt: new Date('2026-04-01'), endAt: new Date('2026-04-30'),
     });
-    // 첫 번째 user.findAll: 그룹 유저 조회
+    // 첫 번째 user.findAll: 그룹 유저 조회 (4명 — c의 파트너로 d 포함)
     mockModels.user.findAll.mockResolvedValueOnce([
-      { puuid: 'a' }, { puuid: 'b' }, { puuid: 'c' },
+      { puuid: 'a' }, { puuid: 'b' }, { puuid: 'c' }, { puuid: 'd' },
     ]);
 
     // 두 번째 user.findAll: 부캐 조회 → 없음
     mockModels.user.findAll.mockResolvedValueOnce([]);
 
-    // detail에서 matchId 목록 반환 (getDataValue로 participantPuuids 접근)
-    const makeDetail = (matchId, gameCreation, puuids) => ({
-      matchId,
-      gameCreation,
-      getDataValue: (key) => key === 'participantPuuids' ? puuids : undefined,
-    });
-    const detailRows = [
-      ...Array(10).fill(null).map((_, i) => makeDetail(`m_a${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
-      ...Array(10).fill(null).map((_, i) => makeDetail(`m_b${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
-      ...Array(3).fill(null).map((_, i) => makeDetail(`m_c${i}`, new Date(`2026-04-${i + 1}`), ['a', 'b', 'c'])),
+    // sequelize.query: challenge_matches JOIN challenge_match_details 결과
+    // 각 matchId마다 distinct puuid ≥ 2여야 필터 통과
+    // 목표: a 5W 5L, b 7W 3L, c 3W 0L
+    // 구성:
+    //   - (a,b) 같은팀 승 5게임: m_sw0..4 — a W, b W
+    //   - (a,b) 같은팀 패 3게임: m_sl0..2 — a L, b L
+    //   - (a,b) 다른팀(b 승): m_bw0..1 — a L, b W
+    //   - (c,d) 같은팀 승 3게임: m_cd0..2 — c W, d W (d는 미검증)
+    const day = (n) => new Date(`2026-04-${String(n).padStart(2, '0')}`);
+    const joinedRows = [
+      ...Array(5).fill(null).flatMap((_, i) => [
+        { matchId: `m_sw${i}`, puuid: 'a', win: 1, gameCreation: day(i + 1) },
+        { matchId: `m_sw${i}`, puuid: 'b', win: 1, gameCreation: day(i + 1) },
+      ]),
+      ...Array(3).fill(null).flatMap((_, i) => [
+        { matchId: `m_sl${i}`, puuid: 'a', win: 0, gameCreation: day(i + 6) },
+        { matchId: `m_sl${i}`, puuid: 'b', win: 0, gameCreation: day(i + 6) },
+      ]),
+      ...Array(2).fill(null).flatMap((_, i) => [
+        { matchId: `m_bw${i}`, puuid: 'a', win: 0, gameCreation: day(i + 9) },
+        { matchId: `m_bw${i}`, puuid: 'b', win: 1, gameCreation: day(i + 9) },
+      ]),
+      ...Array(3).fill(null).flatMap((_, i) => [
+        { matchId: `m_cd${i}`, puuid: 'c', win: 1, gameCreation: day(i + 11) },
+        { matchId: `m_cd${i}`, puuid: 'd', win: 1, gameCreation: day(i + 11) },
+      ]),
     ];
-    mockModels.challenge_match_detail.findAll.mockResolvedValue(detailRows);
-
-    // a: 5승5패, b: 7승3패, c: 3승0패
-    mockModels.challenge_match.findAll.mockResolvedValue([
-      ...Array(5).fill(null).map((_, i) => ({ matchId: `m_a${i}`, puuid: 'a', win: true })),
-      ...Array(5).fill(null).map((_, i) => ({ matchId: `m_a${i + 5}`, puuid: 'a', win: false })),
-      ...Array(7).fill(null).map((_, i) => ({ matchId: `m_b${i}`, puuid: 'b', win: true })),
-      ...Array(3).fill(null).map((_, i) => ({ matchId: `m_b${i + 7}`, puuid: 'b', win: false })),
-      ...Array(3).fill(null).map((_, i) => ({ matchId: `m_c${i}`, puuid: 'c', win: true })),
-    ]);
+    mockModels.sequelize.query.mockResolvedValue(joinedRows);
 
     mockModels.summoner.findAll.mockResolvedValue([
       { puuid: 'a', name: 'PlayerA' },
       { puuid: 'b', name: 'PlayerB' },
       { puuid: 'c', name: 'PlayerC' },
+      { puuid: 'd', name: 'PlayerD' },
     ]);
 
     const result = await challengeController.getLeaderboard(1);
     expect(result.status).toBe(200);
     const board = result.result;
+    const byPuuid = Object.fromEntries(board.map((e) => [e.puuid, e]));
+
+    // a: 5W 5L, b: 7W 3L, c: 3W 0L
+    expect(byPuuid.a).toMatchObject({ wins: 5, losses: 5, points: 10 });
+    expect(byPuuid.b).toMatchObject({ wins: 7, losses: 3, points: 10 });
+    expect(byPuuid.c).toMatchObject({ wins: 3, losses: 0, points: 3 });
+
     // a,b 모두 10 points, b가 wins 더 많음 → b 1등
-    expect(board[0].puuid).toBe('b');
-    expect(board[0].rank).toBe(1);
-    expect(board[1].puuid).toBe('a');
-    expect(board[2].puuid).toBe('c');
-    expect(board[2].points).toBe(3);
+    expect(byPuuid.b.rank).toBe(1);
+    expect(byPuuid.a.rank).toBe(2);
+    // c는 points가 낮아 b,a 다음
+    expect(byPuuid.c.rank).toBeGreaterThan(2);
   });
 });
 
