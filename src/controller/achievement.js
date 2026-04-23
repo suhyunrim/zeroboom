@@ -3,6 +3,7 @@ const models = require('../db/models');
 const { definitions, STAT_TYPES } = require('../services/achievement/definitions');
 
 const RECENT_UNLOCKERS_LIMIT = 3;
+const TOP_UNLOCKERS_LIMIT = 3;
 const TOP_USERS_LIMIT = 10;
 const TOP_PROGRESS_LIMIT = 10;
 const UNKNOWN_NAME = '알 수 없음';
@@ -158,7 +159,7 @@ async function getCategoryAchievements(groupId, category) {
     ? await models.user_achievement.findAll({
       where: { groupId, puuid: activePuuids, achievementId: achievementIds },
       attributes: ['puuid', 'achievementId', 'unlockedAt'],
-      order: [['unlockedAt', 'ASC']],
+      order: [['unlockedAt', 'ASC'], ['id', 'ASC']],
       raw: true,
     })
     : [];
@@ -178,6 +179,9 @@ async function getCategoryAchievements(groupId, category) {
       .slice(-RECENT_UNLOCKERS_LIMIT)
       .reverse()
       .map((r) => mkUnlockerInfo(r, nameMap));
+    const topUnlockers = records
+      .slice(0, TOP_UNLOCKERS_LIMIT)
+      .map((r, i) => mkUnlockerInfo(r, nameMap, { rank: i + 1 }));
 
     return {
       id: def.id,
@@ -190,12 +194,84 @@ async function getCategoryAchievements(groupId, category) {
       unlockedCount,
       unlockRate: pct(unlockedCount, totalActiveUsers),
       recentUnlockers,
+      topUnlockers,
       firstUnlocker: mkUnlockerInfo(records[0], nameMap),
       latestUnlocker: mkUnlockerInfo(records[records.length - 1], nameMap),
     };
   });
 
   return { category, totalActiveUsers, achievements };
+}
+
+async function getUserRanking(groupId) {
+  const activeMembers = await models.user.findAll({
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    attributes: ['puuid', 'createdAt'],
+    raw: true,
+  });
+  const activePuuids = activeMembers.map((u) => u.puuid);
+  const totalActiveUsers = activeMembers.length;
+
+  if (totalActiveUsers === 0) {
+    return { totalActiveUsers: 0, totalRanked: 0, rankings: [] };
+  }
+
+  const { fn, col } = models.sequelize;
+  const [aggRows, nameMap] = await Promise.all([
+    models.user_achievement.findAll({
+      where: { groupId, puuid: activePuuids },
+      attributes: [
+        'puuid',
+        [fn('COUNT', col('id')), 'cnt'],
+        [fn('MIN', col('unlockedAt')), 'firstUnlockAt'],
+      ],
+      group: ['puuid'],
+      raw: true,
+    }),
+    getSummonerNameMap(activePuuids),
+  ]);
+
+  const statsByPuuid = {};
+  aggRows.forEach((r) => {
+    statsByPuuid[r.puuid] = {
+      cnt: Number(r.cnt),
+      firstUnlockAt: new Date(r.firstUnlockAt),
+    };
+  });
+
+  const merged = activeMembers.map((m) => {
+    const stat = statsByPuuid[m.puuid];
+    return {
+      puuid: m.puuid,
+      name: nameMap[m.puuid] || UNKNOWN_NAME,
+      unlockCount: stat ? stat.cnt : 0,
+      firstUnlockAt: stat ? stat.firstUnlockAt : null,
+      createdAt: new Date(m.createdAt),
+    };
+  });
+
+  merged.sort((a, b) => {
+    if (a.unlockCount !== b.unlockCount) return b.unlockCount - a.unlockCount;
+    if (a.firstUnlockAt && b.firstUnlockAt) {
+      const diff = a.firstUnlockAt - b.firstUnlockAt;
+      if (diff !== 0) return diff;
+    } else if (a.firstUnlockAt) return -1;
+    else if (b.firstUnlockAt) return 1;
+    return a.createdAt - b.createdAt;
+  });
+
+  const rankings = merged.map((m, idx) => ({
+    rank: idx + 1,
+    puuid: m.puuid,
+    name: m.name,
+    unlockCount: m.unlockCount,
+  }));
+
+  return {
+    totalActiveUsers,
+    totalRanked: aggRows.length,
+    rankings,
+  };
 }
 
 async function getAchievementRanking(groupId, achievementId) {
@@ -210,7 +286,7 @@ async function getAchievementRanking(groupId, achievementId) {
     ? await models.user_achievement.findAll({
       where: { groupId, achievementId, puuid: activePuuids },
       attributes: ['puuid', 'unlockedAt'],
-      order: [['unlockedAt', 'ASC']],
+      order: [['unlockedAt', 'ASC'], ['id', 'ASC']],
       raw: true,
     })
     : [];
@@ -261,6 +337,7 @@ async function getAchievementRanking(groupId, achievementId) {
       unlockRate: pct(unlockedCount, totalActiveUsers),
       firstUnlocker: mkUnlockerInfo(unlocks[0], nameMap),
       latestUnlocker: mkUnlockerInfo(unlocks[unlocks.length - 1], nameMap),
+      topUnlockers: unlockers.slice(0, TOP_UNLOCKERS_LIMIT),
     },
     unlockers,
     topProgress,
@@ -271,6 +348,7 @@ async function getAchievementRanking(groupId, achievementId) {
 module.exports = {
   getDashboard,
   getCategoryAchievements,
+  getUserRanking,
   getAchievementRanking,
   getActiveMembers,
   resolveStatType,

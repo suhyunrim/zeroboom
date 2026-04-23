@@ -32,6 +32,11 @@ module.exports = (app) => {
     { notFoundMessage: '해당 카테고리를 찾을 수 없습니다.' },
   ));
 
+  // 업적 해금 수 기준 유저 랭킹 (동점 시 먼저 해금 시작한 유저 우선)
+  route.get('/:groupId/user-ranking', wrapRoute((req) =>
+    achievementController.getUserRanking(Number(req.params.groupId)),
+  ));
+
   route.get('/:groupId/ranking/:achievementId', wrapRoute(
     (req) => achievementController.getAchievementRanking(Number(req.params.groupId), req.params.achievementId),
     { notFoundMessage: '업적을 찾을 수 없습니다.' },
