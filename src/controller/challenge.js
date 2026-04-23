@@ -702,7 +702,7 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
     for (let i = 0; i < allPuuids.length; i++) {
       const puuid = allPuuids[i];
       try {
-        const synced = await fetchAndStoreMatches(puuid, queueId, challenge.startAt, challenge.endAt);
+        const synced = await fetchAndStoreMatches(puuid, queueId, challenge.startAt, challenge.endAt, allPuuids);
         totalSynced += synced;
       } catch (e) {
         logger.error(`[챌린지] 동기화 실패 (puuid=${puuid}): ${e.message}`);
@@ -755,9 +755,11 @@ async function runSyncInBackground(challengeId, challenge, puuids) {
 /**
  * Riot API에서 매치를 가져와 challenge_match + challenge_match_detail에 저장
  * 증분 갱신: 해당 유저의 마지막 저장 매치 이후부터만 조회
+ * groupAllPuuids가 주어지면 매치에 참여한 그룹원(본+부) 전원의 challenge_match 행을
+ * 한 번에 생성 — "반쪽 sync" gap 방지.
  * @returns {number} 새로 저장된 매치 수
  */
-async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
+async function fetchAndStoreMatches(puuid, queueId, startAt, endAt, groupAllPuuids = null) {
   const challengeStartTime = Math.floor(new Date(startAt).getTime() / 1000);
   const endTime = Math.floor(new Date(endAt).getTime() / 1000);
 
@@ -781,6 +783,7 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
   let beginIndex = 0;
   let totalSynced = 0;
   const batchSize = 20;
+  const groupPuuidSet = groupAllPuuids ? new Set(groupAllPuuids) : null;
 
   while (true) {
     let matchIds;
@@ -817,11 +820,16 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt) {
           },
         });
 
-        // challenge_match: 유저별 승패 기록
-        await models.challenge_match.findOrCreate({
-          where: { matchId, puuid },
-          defaults: { win: participant.win },
-        });
+        // challenge_match: 매치에 참여한 그룹원 전원의 승패를 한 번에 기록
+        // (groupAllPuuids 미전달 시 기존처럼 본인 행만 기록)
+        for (const p of matchData.info.participants) {
+          const shouldInsert = groupPuuidSet ? groupPuuidSet.has(p.puuid) : p.puuid === puuid;
+          if (!shouldInsert) continue;
+          await models.challenge_match.findOrCreate({
+            where: { matchId, puuid: p.puuid },
+            defaults: { win: p.win },
+          });
+        }
 
         totalSynced++;
       } catch (e) {
@@ -892,6 +900,7 @@ module.exports.syncAllActiveChallenges = async () => {
           queueId,
           startAt: challenge.startAt,
           endAt: challenge.endAt,
+          groupAllPuuids: allPuuids,
         });
       }
     }
@@ -903,7 +912,13 @@ module.exports.syncAllActiveChallenges = async () => {
 
     for (const task of syncTasks) {
       try {
-        const synced = await fetchAndStoreMatches(task.puuid, task.queueId, task.startAt, task.endAt);
+        const synced = await fetchAndStoreMatches(
+          task.puuid,
+          task.queueId,
+          task.startAt,
+          task.endAt,
+          task.groupAllPuuids,
+        );
         successCount++;
         if (synced > 0) {
           logger.info(`[챌린지 배치] puuid=${task.puuid} ${synced}건 동기화`);
