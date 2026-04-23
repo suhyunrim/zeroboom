@@ -1,12 +1,48 @@
 const { Router } = require('express');
 const models = require('../../db/models');
 const { definitions } = require('../../services/achievement/definitions');
+const achievementController = require('../../controller/achievement');
+const { logger } = require('../../loaders/logger');
 
 const route = Router();
+
+const wrapRoute = (handler, { notFoundMessage } = {}) => async (req, res) => {
+  try {
+    const data = await handler(req);
+    if (data === null && notFoundMessage) {
+      return res.status(404).json({ result: notFoundMessage });
+    }
+    return res.status(200).json({ result: data });
+  } catch (e) {
+    logger.error(e);
+    return res.status(500).json({ result: e.message });
+  }
+};
 
 module.exports = (app) => {
   app.use('/achievement', route);
 
+  // 그룹 업적 대시보드 요약 (카드 목록은 /category/:category 로 분리)
+  route.get('/:groupId/dashboard', wrapRoute((req) =>
+    achievementController.getDashboard(Number(req.params.groupId)),
+  ));
+
+  route.get('/:groupId/category/:category', wrapRoute(
+    (req) => achievementController.getCategoryAchievements(Number(req.params.groupId), req.params.category),
+    { notFoundMessage: '해당 카테고리를 찾을 수 없습니다.' },
+  ));
+
+  // 업적 해금 수 기준 유저 랭킹 (동점 시 먼저 해금 시작한 유저 우선)
+  route.get('/:groupId/user-ranking', wrapRoute((req) =>
+    achievementController.getUserRanking(Number(req.params.groupId)),
+  ));
+
+  route.get('/:groupId/ranking/:achievementId', wrapRoute(
+    (req) => achievementController.getAchievementRanking(Number(req.params.groupId), req.params.achievementId),
+    { notFoundMessage: '업적을 찾을 수 없습니다.' },
+  ));
+
+  // 개인 업적 조회 (기존)
   route.get('/:groupId/:puuid', async (req, res) => {
     const { groupId, puuid } = req.params;
 

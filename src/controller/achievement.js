@@ -1,0 +1,362 @@
+const { Op } = require('sequelize');
+const models = require('../db/models');
+const { definitions, STAT_TYPES } = require('../services/achievement/definitions');
+
+const RECENT_UNLOCKERS_LIMIT = 3;
+const TOP_UNLOCKERS_LIMIT = 3;
+const TOP_USERS_LIMIT = 10;
+const TOP_PROGRESS_LIMIT = 10;
+const UNKNOWN_NAME = '알 수 없음';
+
+const CATEGORY_TO_STAT = {
+  underdog: STAT_TYPES.UNDERDOG_WINS,
+  late_night: STAT_TYPES.LATE_NIGHT_GAMES,
+  weekend_games: STAT_TYPES.WEEKEND_GAMES,
+  weekday_games: STAT_TYPES.WEEKDAY_GAMES,
+  games_per_day: STAT_TYPES.MAX_GAMES_PER_DAY,
+  welcomer: STAT_TYPES.WELCOMER_WINS,
+  consecutive_days: STAT_TYPES.BEST_CONSECUTIVE_DAYS,
+  match_mvp: STAT_TYPES.MATCH_MVP_COUNT,
+  match_mvp_streak: STAT_TYPES.BEST_MATCH_MVP_STREAK,
+  reverse_win: STAT_TYPES.REVERSE_WINS,
+  reverse_lose: STAT_TYPES.REVERSE_LOSES,
+  sweep_win: STAT_TYPES.SWEEP_WINS,
+  sweep_lose: STAT_TYPES.SWEEP_LOSES,
+  night_owl: STAT_TYPES.NIGHT_OWL_SESSIONS,
+  channel_creator: STAT_TYPES.TEMP_VOICE_CREATED,
+};
+
+async function getActiveMembers(groupId) {
+  return models.user.findAll({
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    attributes: ['puuid', 'discordId'],
+    raw: true,
+  });
+}
+
+async function getSummonerInfoMap(puuids) {
+  if (!puuids.length) return {};
+  const summoners = await models.summoner.findAll({
+    where: { puuid: puuids },
+    attributes: ['puuid', 'name', 'profileIconId'],
+    raw: true,
+  });
+  return summoners.reduce((acc, s) => {
+    acc[s.puuid] = { name: s.name, profileIconId: s.profileIconId };
+    return acc;
+  }, {});
+}
+
+function resolveStatType(def) {
+  if (def.category === 'streak') {
+    return def.id.startsWith('WIN_STREAK') ? STAT_TYPES.BEST_WIN_STREAK : STAT_TYPES.BEST_LOSE_STREAK;
+  }
+  return CATEGORY_TO_STAT[def.category] || null;
+}
+
+function pct(n, total) {
+  return total ? Math.round((n / total) * 1000) / 10 : 0;
+}
+
+function mkUnlockerInfo(record, infoMap, extra = null) {
+  if (!record) return null;
+  const info = infoMap[record.puuid];
+  const base = {
+    puuid: record.puuid,
+    name: info?.name || UNKNOWN_NAME,
+    profileIconId: info?.profileIconId ?? null,
+    unlockedAt: record.unlockedAt,
+  };
+  return extra ? { ...extra, ...base } : base;
+}
+
+async function getDashboard(groupId) {
+  const activeMembers = await getActiveMembers(groupId);
+  const activePuuids = activeMembers.map((u) => u.puuid);
+  const totalActiveUsers = activeMembers.length;
+
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  const { fn, col, literal } = models.sequelize;
+
+  const [perAchievement, perUser, totalUnlocksRow, newUnlocksRow] = activePuuids.length
+    ? await Promise.all([
+      models.user_achievement.findAll({
+        where: { groupId, puuid: activePuuids },
+        attributes: ['achievementId', [fn('COUNT', col('id')), 'cnt']],
+        group: ['achievementId'],
+        raw: true,
+      }),
+      models.user_achievement.findAll({
+        where: { groupId, puuid: activePuuids },
+        attributes: ['puuid', [fn('COUNT', col('id')), 'cnt']],
+        group: ['puuid'],
+        order: [[literal('cnt'), 'DESC']],
+        limit: TOP_USERS_LIMIT,
+        raw: true,
+      }),
+      models.user_achievement.count({ where: { groupId, puuid: activePuuids } }),
+      models.user_achievement.count({
+        where: { groupId, puuid: activePuuids, unlockedAt: { [Op.gte]: weekAgo } },
+      }),
+    ])
+    : [[], [], 0, 0];
+
+  const countByAchievement = {};
+  perAchievement.forEach((r) => { countByAchievement[r.achievementId] = Number(r.cnt); });
+
+  const infoMap = await getSummonerInfoMap(perUser.map((r) => r.puuid));
+  const topUsers = perUser.map((r) => ({
+    puuid: r.puuid,
+    name: infoMap[r.puuid]?.name || UNKNOWN_NAME,
+    profileIconId: infoMap[r.puuid]?.profileIconId ?? null,
+    unlockCount: Number(r.cnt),
+  }));
+
+  const categoryMap = {};
+  definitions.forEach((def) => {
+    if (!categoryMap[def.category]) {
+      categoryMap[def.category] = { totalAchievements: 0, unlockedAchievements: 0, totalUnlocks: 0 };
+    }
+    categoryMap[def.category].totalAchievements++;
+    const cnt = countByAchievement[def.id] || 0;
+    if (cnt > 0) categoryMap[def.category].unlockedAchievements++;
+    categoryMap[def.category].totalUnlocks += cnt;
+  });
+
+  const categoryStats = Object.entries(categoryMap)
+    .map(([category, stats]) => ({
+      category,
+      totalAchievements: stats.totalAchievements,
+      unlockedAchievements: stats.unlockedAchievements,
+      unlockRate: pct(stats.unlockedAchievements, stats.totalAchievements),
+      totalUnlocks: stats.totalUnlocks,
+      avgUnlockRate: pct(stats.totalUnlocks, stats.totalAchievements * totalActiveUsers),
+    }))
+    .sort((a, b) => b.unlockRate - a.unlockRate);
+
+  const unlockedAchievementCount = categoryStats.reduce((s, c) => s + c.unlockedAchievements, 0);
+  const summary = {
+    totalAchievements: definitions.length,
+    unlockedAchievements: unlockedAchievementCount,
+    unlockRate: pct(unlockedAchievementCount, definitions.length),
+    totalUnlocks: totalUnlocksRow,
+    newUnlocksThisWeek: newUnlocksRow,
+    totalActiveUsers,
+  };
+
+  return { summary, topUsers, categoryStats };
+}
+
+async function getCategoryAchievements(groupId, category) {
+  const defsInCategory = definitions.filter((d) => d.category === category);
+  if (defsInCategory.length === 0) return null;
+
+  const activeMembers = await getActiveMembers(groupId);
+  const activePuuids = activeMembers.map((u) => u.puuid);
+  const totalActiveUsers = activeMembers.length;
+  const achievementIds = defsInCategory.map((d) => d.id);
+
+  const unlocks = activePuuids.length
+    ? await models.user_achievement.findAll({
+      where: { groupId, puuid: activePuuids, achievementId: achievementIds },
+      attributes: ['puuid', 'achievementId', 'unlockedAt'],
+      order: [['unlockedAt', 'ASC'], ['id', 'ASC']],
+      raw: true,
+    })
+    : [];
+
+  const infoMap = await getSummonerInfoMap([...new Set(unlocks.map((u) => u.puuid))]);
+
+  const byAchievement = {};
+  unlocks.forEach((u) => {
+    if (!byAchievement[u.achievementId]) byAchievement[u.achievementId] = [];
+    byAchievement[u.achievementId].push(u);
+  });
+
+  const achievements = defsInCategory.map((def) => {
+    const records = byAchievement[def.id] || [];
+    const unlockedCount = records.length;
+    const recentUnlockers = records
+      .slice(-RECENT_UNLOCKERS_LIMIT)
+      .reverse()
+      .map((r) => mkUnlockerInfo(r, infoMap));
+    const topUnlockers = records
+      .slice(0, TOP_UNLOCKERS_LIMIT)
+      .map((r, i) => mkUnlockerInfo(r, infoMap, { rank: i + 1 }));
+
+    return {
+      id: def.id,
+      name: def.name,
+      description: def.description,
+      emoji: def.emoji,
+      tier: def.tier,
+      category: def.category,
+      goal: def.goal || null,
+      unlockedCount,
+      unlockRate: pct(unlockedCount, totalActiveUsers),
+      recentUnlockers,
+      topUnlockers,
+      firstUnlocker: mkUnlockerInfo(records[0], infoMap),
+      latestUnlocker: mkUnlockerInfo(records[records.length - 1], infoMap),
+    };
+  });
+
+  return { category, totalActiveUsers, achievements };
+}
+
+async function getUserRanking(groupId) {
+  const activeMembers = await models.user.findAll({
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    attributes: ['puuid', 'createdAt'],
+    raw: true,
+  });
+  const activePuuids = activeMembers.map((u) => u.puuid);
+  const totalActiveUsers = activeMembers.length;
+
+  if (totalActiveUsers === 0) {
+    return { totalActiveUsers: 0, totalRanked: 0, rankings: [] };
+  }
+
+  const { fn, col } = models.sequelize;
+  const [aggRows, infoMap] = await Promise.all([
+    models.user_achievement.findAll({
+      where: { groupId, puuid: activePuuids },
+      attributes: [
+        'puuid',
+        [fn('COUNT', col('id')), 'cnt'],
+        [fn('MIN', col('unlockedAt')), 'firstUnlockAt'],
+      ],
+      group: ['puuid'],
+      raw: true,
+    }),
+    getSummonerInfoMap(activePuuids),
+  ]);
+
+  const statsByPuuid = {};
+  aggRows.forEach((r) => {
+    statsByPuuid[r.puuid] = {
+      cnt: Number(r.cnt),
+      firstUnlockAt: new Date(r.firstUnlockAt),
+    };
+  });
+
+  const merged = activeMembers.map((m) => {
+    const stat = statsByPuuid[m.puuid];
+    const info = infoMap[m.puuid];
+    return {
+      puuid: m.puuid,
+      name: info?.name || UNKNOWN_NAME,
+      profileIconId: info?.profileIconId ?? null,
+      unlockCount: stat ? stat.cnt : 0,
+      firstUnlockAt: stat ? stat.firstUnlockAt : null,
+      createdAt: new Date(m.createdAt),
+    };
+  });
+
+  merged.sort((a, b) => {
+    if (a.unlockCount !== b.unlockCount) return b.unlockCount - a.unlockCount;
+    if (a.firstUnlockAt && b.firstUnlockAt) {
+      const diff = a.firstUnlockAt - b.firstUnlockAt;
+      if (diff !== 0) return diff;
+    } else if (a.firstUnlockAt) return -1;
+    else if (b.firstUnlockAt) return 1;
+    return a.createdAt - b.createdAt;
+  });
+
+  const rankings = merged.map((m, idx) => ({
+    rank: idx + 1,
+    puuid: m.puuid,
+    name: m.name,
+    profileIconId: m.profileIconId,
+    unlockCount: m.unlockCount,
+  }));
+
+  return {
+    totalActiveUsers,
+    totalRanked: aggRows.length,
+    rankings,
+  };
+}
+
+async function getAchievementRanking(groupId, achievementId) {
+  const def = definitions.find((d) => d.id === achievementId);
+  if (!def) return null;
+
+  const activeMembers = await getActiveMembers(groupId);
+  const activePuuids = activeMembers.map((u) => u.puuid);
+  const totalActiveUsers = activeMembers.length;
+
+  const unlocks = activePuuids.length
+    ? await models.user_achievement.findAll({
+      where: { groupId, achievementId, puuid: activePuuids },
+      attributes: ['puuid', 'unlockedAt'],
+      order: [['unlockedAt', 'ASC'], ['id', 'ASC']],
+      raw: true,
+    })
+    : [];
+
+  const unlockedPuuidSet = new Set(unlocks.map((u) => u.puuid));
+  const unlockedCount = unlocks.length;
+
+  let progressRows = [];
+  const statType = resolveStatType(def);
+  if (statType && def.goal) {
+    const pendingPuuids = activePuuids.filter((p) => !unlockedPuuidSet.has(p));
+    if (pendingPuuids.length) {
+      progressRows = await models.user_achievement_stats.findAll({
+        where: { groupId, puuid: pendingPuuids, statType },
+        attributes: ['puuid', 'value'],
+        raw: true,
+      });
+    }
+  }
+
+  const referencedPuuids = new Set([...unlockedPuuidSet, ...progressRows.map((r) => r.puuid)]);
+  const infoMap = await getSummonerInfoMap([...referencedPuuids]);
+
+  const unlockers = unlocks.map((u, idx) => mkUnlockerInfo(u, infoMap, { rank: idx + 1 }));
+
+  const topProgress = progressRows
+    .filter((s) => Number(s.value) > 0)
+    .map((s) => ({
+      puuid: s.puuid,
+      name: infoMap[s.puuid]?.name || UNKNOWN_NAME,
+      profileIconId: infoMap[s.puuid]?.profileIconId ?? null,
+      currentValue: Number(s.value),
+      goal: def.goal,
+      progressRate: pct(Number(s.value), def.goal),
+    }))
+    .sort((a, b) => b.currentValue - a.currentValue)
+    .slice(0, TOP_PROGRESS_LIMIT);
+
+  return {
+    achievement: {
+      id: def.id,
+      name: def.name,
+      description: def.description,
+      emoji: def.emoji,
+      tier: def.tier,
+      category: def.category,
+      goal: def.goal || null,
+      unlockedCount,
+      unlockRate: pct(unlockedCount, totalActiveUsers),
+      firstUnlocker: mkUnlockerInfo(unlocks[0], infoMap),
+      latestUnlocker: mkUnlockerInfo(unlocks[unlocks.length - 1], infoMap),
+      topUnlockers: unlockers.slice(0, TOP_UNLOCKERS_LIMIT),
+    },
+    unlockers,
+    topProgress,
+    hasProgress: !!statType,
+  };
+}
+
+module.exports = {
+  getDashboard,
+  getCategoryAchievements,
+  getUserRanking,
+  getAchievementRanking,
+  getActiveMembers,
+  resolveStatType,
+};
