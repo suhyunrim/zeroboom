@@ -5,10 +5,26 @@ const { definitions, STAT_TYPES } = require('../services/achievement/definitions
 const RECENT_UNLOCKERS_LIMIT = 3;
 const TOP_USERS_LIMIT = 10;
 const TOP_PROGRESS_LIMIT = 10;
+const UNKNOWN_NAME = '알 수 없음';
 
-/**
- * 그룹의 활성 멤버 조회 (블랙리스트=outsider 제외, 본캐만)
- */
+const CATEGORY_TO_STAT = {
+  underdog: STAT_TYPES.UNDERDOG_WINS,
+  late_night: STAT_TYPES.LATE_NIGHT_GAMES,
+  weekend_games: STAT_TYPES.WEEKEND_GAMES,
+  weekday_games: STAT_TYPES.WEEKDAY_GAMES,
+  games_per_day: STAT_TYPES.MAX_GAMES_PER_DAY,
+  welcomer: STAT_TYPES.WELCOMER_WINS,
+  consecutive_days: STAT_TYPES.BEST_CONSECUTIVE_DAYS,
+  match_mvp: STAT_TYPES.MATCH_MVP_COUNT,
+  match_mvp_streak: STAT_TYPES.BEST_MATCH_MVP_STREAK,
+  reverse_win: STAT_TYPES.REVERSE_WINS,
+  reverse_lose: STAT_TYPES.REVERSE_LOSES,
+  sweep_win: STAT_TYPES.SWEEP_WINS,
+  sweep_lose: STAT_TYPES.SWEEP_LOSES,
+  night_owl: STAT_TYPES.NIGHT_OWL_SESSIONS,
+  channel_creator: STAT_TYPES.TEMP_VOICE_CREATED,
+};
+
 async function getActiveMembers(groupId) {
   return models.user.findAll({
     where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
@@ -30,52 +46,27 @@ async function getSummonerNameMap(puuids) {
   }, {});
 }
 
-/**
- * 업적 카테고리/ID → user_achievement_stats의 statType 매핑
- * 매핑 없는 카테고리(tier/games/voice/honor/challenge/anniversary/match)는
- * stat 기반 진행도 대신 별도 계산 or 미지원
- */
 function resolveStatType(def) {
   if (def.category === 'streak') {
     return def.id.startsWith('WIN_STREAK') ? STAT_TYPES.BEST_WIN_STREAK : STAT_TYPES.BEST_LOSE_STREAK;
   }
-  const map = {
-    underdog: STAT_TYPES.UNDERDOG_WINS,
-    late_night: STAT_TYPES.LATE_NIGHT_GAMES,
-    weekend_games: STAT_TYPES.WEEKEND_GAMES,
-    weekday_games: STAT_TYPES.WEEKDAY_GAMES,
-    games_per_day: STAT_TYPES.MAX_GAMES_PER_DAY,
-    welcomer: STAT_TYPES.WELCOMER_WINS,
-    consecutive_days: STAT_TYPES.BEST_CONSECUTIVE_DAYS,
-    match_mvp: STAT_TYPES.MATCH_MVP_COUNT,
-    match_mvp_streak: STAT_TYPES.BEST_MATCH_MVP_STREAK,
-    reverse_win: STAT_TYPES.REVERSE_WINS,
-    reverse_lose: STAT_TYPES.REVERSE_LOSES,
-    sweep_win: STAT_TYPES.SWEEP_WINS,
-    sweep_lose: STAT_TYPES.SWEEP_LOSES,
-    night_owl: STAT_TYPES.NIGHT_OWL_SESSIONS,
-    channel_creator: STAT_TYPES.TEMP_VOICE_CREATED,
-  };
-  return map[def.category] || null;
+  return CATEGORY_TO_STAT[def.category] || null;
 }
 
 function pct(n, total) {
   return total ? Math.round((n / total) * 1000) / 10 : 0;
 }
 
-function mkUnlockerInfo(record, nameMap) {
+function mkUnlockerInfo(record, nameMap, extra = null) {
   if (!record) return null;
-  return {
+  const info = {
     puuid: record.puuid,
-    name: nameMap[record.puuid] || '알 수 없음',
+    name: nameMap[record.puuid] || UNKNOWN_NAME,
     unlockedAt: record.unlockedAt,
   };
+  return extra ? { ...extra, ...info } : info;
 }
 
-/**
- * 그룹 업적 대시보드 요약 (summary + topUsers + categoryStats)
- * 카드 목록은 /category/:category 로 분리 요청
- */
 async function getDashboard(groupId) {
   const activeMembers = await getActiveMembers(groupId);
   const activePuuids = activeMembers.map((u) => u.puuid);
@@ -86,7 +77,6 @@ async function getDashboard(groupId) {
 
   const { fn, col, literal } = models.sequelize;
 
-  // DB 단에서 바로 집계 (개별 row를 다 가져오지 않음)
   const [perAchievement, perUser, totalUnlocksRow, newUnlocksRow] = activePuuids.length
     ? await Promise.all([
       models.user_achievement.findAll({
@@ -113,16 +103,13 @@ async function getDashboard(groupId) {
   const countByAchievement = {};
   perAchievement.forEach((r) => { countByAchievement[r.achievementId] = Number(r.cnt); });
 
-  // TOP 유저 이름 조회
-  const topUserPuuids = perUser.map((r) => r.puuid);
-  const nameMap = await getSummonerNameMap(topUserPuuids);
+  const nameMap = await getSummonerNameMap(perUser.map((r) => r.puuid));
   const topUsers = perUser.map((r) => ({
     puuid: r.puuid,
-    name: nameMap[r.puuid] || '알 수 없음',
+    name: nameMap[r.puuid] || UNKNOWN_NAME,
     unlockCount: Number(r.cnt),
   }));
 
-  // 카테고리별 집계
   const categoryMap = {};
   definitions.forEach((def) => {
     if (!categoryMap[def.category]) {
@@ -141,13 +128,11 @@ async function getDashboard(groupId) {
       unlockedAchievements: stats.unlockedAchievements,
       unlockRate: pct(stats.unlockedAchievements, stats.totalAchievements),
       totalUnlocks: stats.totalUnlocks,
-      avgUnlockRate: totalActiveUsers && stats.totalAchievements
-        ? Math.round((stats.totalUnlocks / (stats.totalAchievements * totalActiveUsers)) * 1000) / 10
-        : 0,
+      avgUnlockRate: pct(stats.totalUnlocks, stats.totalAchievements * totalActiveUsers),
     }))
     .sort((a, b) => b.unlockRate - a.unlockRate);
 
-  const unlockedAchievementCount = definitions.filter((d) => (countByAchievement[d.id] || 0) > 0).length;
+  const unlockedAchievementCount = categoryStats.reduce((s, c) => s + c.unlockedAchievements, 0);
   const summary = {
     totalAchievements: definitions.length,
     unlockedAchievements: unlockedAchievementCount,
@@ -160,10 +145,6 @@ async function getDashboard(groupId) {
   return { summary, topUsers, categoryStats };
 }
 
-/**
- * 특정 카테고리의 업적 카드 목록
- * - 카테고리의 각 업적에 대해 unlockedCount, firstUnlocker, latestUnlocker, recentUnlockers 제공
- */
 async function getCategoryAchievements(groupId, category) {
   const defsInCategory = definitions.filter((d) => d.category === category);
   if (defsInCategory.length === 0) return null;
@@ -173,17 +154,16 @@ async function getCategoryAchievements(groupId, category) {
   const totalActiveUsers = activeMembers.length;
   const achievementIds = defsInCategory.map((d) => d.id);
 
-  const [unlocks, nameMap] = await Promise.all([
-    activePuuids.length
-      ? models.user_achievement.findAll({
-        where: { groupId, puuid: activePuuids, achievementId: achievementIds },
-        attributes: ['puuid', 'achievementId', 'unlockedAt'],
-        order: [['unlockedAt', 'ASC']],
-        raw: true,
-      })
-      : Promise.resolve([]),
-    getSummonerNameMap(activePuuids),
-  ]);
+  const unlocks = activePuuids.length
+    ? await models.user_achievement.findAll({
+      where: { groupId, puuid: activePuuids, achievementId: achievementIds },
+      attributes: ['puuid', 'achievementId', 'unlockedAt'],
+      order: [['unlockedAt', 'ASC']],
+      raw: true,
+    })
+    : [];
+
+  const nameMap = await getSummonerNameMap([...new Set(unlocks.map((u) => u.puuid))]);
 
   const byAchievement = {};
   unlocks.forEach((u) => {
@@ -218,9 +198,6 @@ async function getCategoryAchievements(groupId, category) {
   return { category, totalActiveUsers, achievements };
 }
 
-/**
- * 특정 업적 랭킹 데이터
- */
 async function getAchievementRanking(groupId, achievementId) {
   const def = definitions.find((d) => d.id === achievementId);
   if (!def) return null;
@@ -229,52 +206,47 @@ async function getAchievementRanking(groupId, achievementId) {
   const activePuuids = activeMembers.map((u) => u.puuid);
   const totalActiveUsers = activeMembers.length;
 
-  const [unlocks, nameMap] = await Promise.all([
-    activePuuids.length
-      ? models.user_achievement.findAll({
-        where: { groupId, achievementId, puuid: activePuuids },
-        attributes: ['puuid', 'unlockedAt'],
-        order: [['unlockedAt', 'ASC']],
-        raw: true,
-      })
-      : Promise.resolve([]),
-    getSummonerNameMap(activePuuids),
-  ]);
-
-  const unlockers = unlocks.map((u, idx) => ({
-    rank: idx + 1,
-    puuid: u.puuid,
-    name: nameMap[u.puuid] || '알 수 없음',
-    unlockedAt: u.unlockedAt,
-  }));
+  const unlocks = activePuuids.length
+    ? await models.user_achievement.findAll({
+      where: { groupId, achievementId, puuid: activePuuids },
+      attributes: ['puuid', 'unlockedAt'],
+      order: [['unlockedAt', 'ASC']],
+      raw: true,
+    })
+    : [];
 
   const unlockedPuuidSet = new Set(unlocks.map((u) => u.puuid));
   const unlockedCount = unlocks.length;
 
-  // 미달성자 진행도 (stat 기반 카테고리만)
-  let topProgress = [];
+  let progressRows = [];
   const statType = resolveStatType(def);
   if (statType && def.goal) {
     const pendingPuuids = activePuuids.filter((p) => !unlockedPuuidSet.has(p));
     if (pendingPuuids.length) {
-      const stats = await models.user_achievement_stats.findAll({
+      progressRows = await models.user_achievement_stats.findAll({
         where: { groupId, puuid: pendingPuuids, statType },
         attributes: ['puuid', 'value'],
         raw: true,
       });
-      topProgress = stats
-        .filter((s) => Number(s.value) > 0)
-        .map((s) => ({
-          puuid: s.puuid,
-          name: nameMap[s.puuid] || '알 수 없음',
-          currentValue: Number(s.value),
-          goal: def.goal,
-          progressRate: pct(Number(s.value), def.goal),
-        }))
-        .sort((a, b) => b.currentValue - a.currentValue)
-        .slice(0, TOP_PROGRESS_LIMIT);
     }
   }
+
+  const referencedPuuids = new Set([...unlockedPuuidSet, ...progressRows.map((r) => r.puuid)]);
+  const nameMap = await getSummonerNameMap([...referencedPuuids]);
+
+  const unlockers = unlocks.map((u, idx) => mkUnlockerInfo(u, nameMap, { rank: idx + 1 }));
+
+  const topProgress = progressRows
+    .filter((s) => Number(s.value) > 0)
+    .map((s) => ({
+      puuid: s.puuid,
+      name: nameMap[s.puuid] || UNKNOWN_NAME,
+      currentValue: Number(s.value),
+      goal: def.goal,
+      progressRate: pct(Number(s.value), def.goal),
+    }))
+    .sort((a, b) => b.currentValue - a.currentValue)
+    .slice(0, TOP_PROGRESS_LIMIT);
 
   return {
     achievement: {
