@@ -105,26 +105,30 @@ async function backfillGroup(group, users) {
       return u && u.createdAt && new Date(u.createdAt).getTime() >= newbieCutoff;
     };
 
-    // 세트 갱신
+    // 세트 갱신: 진행 중 시리즈에 현재 매치를 이어붙이고, 스윕(2-0) 또는 3경기째에 시리즈 종료 처리
     const compKey = getCompositionKey(match);
     const existing = compositionSet[compKey] || [];
     const lastTime = existing.length
       ? new Date(existing[existing.length - 1].gameCreation || existing[existing.length - 1].createdAt).getTime()
       : 0;
-    const keep = existing.length > 0
-      && matchTime - lastTime <= SET_WINDOW_MS
-      && existing.length < 3;
-    const currentSet = keep ? [...existing, match] : [match];
-    compositionSet[compKey] = currentSet;
+    const continueSet = existing.length > 0 && matchTime - lastTime <= SET_WINDOW_MS;
+    const currentSet = continueSet ? [...existing, match] : [match];
 
     let setWinStat = null;
     let setLoseStat = null;
     if (currentSet.length === 2 && currentSet[0].winTeam === match.winTeam) {
       setWinStat = STAT_TYPES.SWEEP_WINS;
       setLoseStat = STAT_TYPES.SWEEP_LOSES;
-    } else if (currentSet.length === 3 && currentSet[0].winTeam !== currentSet[1].winTeam) {
-      setWinStat = STAT_TYPES.REVERSE_WINS;
-      setLoseStat = STAT_TYPES.REVERSE_LOSES;
+      compositionSet[compKey] = []; // 스윕으로 시리즈 종료
+    } else if (currentSet.length === 3) {
+      // 1-1에서 온 3경기 → 시리즈 종료. 1경기 패자가 승자면 역전
+      if (currentSet[0].winTeam !== match.winTeam) {
+        setWinStat = STAT_TYPES.REVERSE_WINS;
+        setLoseStat = STAT_TYPES.REVERSE_LOSES;
+      }
+      compositionSet[compKey] = [];
+    } else {
+      compositionSet[compKey] = currentSet;
     }
 
     const winTeamData = match.winTeam === 1 ? match.team1 : match.team2;
