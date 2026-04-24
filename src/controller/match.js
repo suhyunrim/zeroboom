@@ -839,20 +839,37 @@ async function processSetAchievements(matchData, userMap, team1Data, team2Data) 
         && matchTime - new Date(m.createdAt).getTime() <= twentyFourHours,
     );
 
-    const winTeamStat = sameSet.length === 1 ? STAT_TYPES.SWEEP_WINS : STAT_TYPES.REVERSE_WINS;
-    const loseTeamStat = sameSet.length === 1 ? STAT_TYPES.SWEEP_LOSES : STAT_TYPES.REVERSE_LOSES;
+    // 같은 composition 매치를 시간순으로 걸어가며 현재 매치가 속한 시리즈를 재구성
+    // 시리즈는 2-0 스윕 또는 3경기째에 종료됨
+    const chronological = [...sameSet].reverse().concat([matchData]);
+    const lastIdx = chronological.length - 1;
+    let seriesStart = 0;
+    let winTeamStat = null;
+    let loseTeamStat = null;
+
+    for (let i = 0; i < chronological.length; i += 1) {
+      const len = i - seriesStart + 1;
+      if (len === 2 && chronological[seriesStart].winTeam === chronological[i].winTeam) {
+        // 2경기 연승 → 스윕으로 시리즈 종료
+        if (i === lastIdx) {
+          winTeamStat = STAT_TYPES.SWEEP_WINS;
+          loseTeamStat = STAT_TYPES.SWEEP_LOSES;
+        }
+        seriesStart = i + 1;
+      } else if (len === 3) {
+        // 1-1에서 온 3경기 → 시리즈 종료. 1경기 패자가 승자면 역전승
+        if (chronological[seriesStart].winTeam !== chronological[i].winTeam && i === lastIdx) {
+          winTeamStat = STAT_TYPES.REVERSE_WINS;
+          loseTeamStat = STAT_TYPES.REVERSE_LOSES;
+        }
+        seriesStart = i + 1;
+      }
+    }
+
+    if (!winTeamStat) return;
+
     const winTeamData = matchData.winTeam === 1 ? team1Data : team2Data;
     const loseTeamData = matchData.winTeam === 1 ? team2Data : team1Data;
-
-    let shouldProcess = false;
-    if (sameSet.length === 1) {
-      // 2경기 세트: 같은 팀 2연승이면 스윕
-      shouldProcess = sameSet[0].winTeam === matchData.winTeam;
-    } else if (sameSet.length >= 2 && sameSet[0].winTeam !== sameSet[1].winTeam) {
-      // 3경기 세트이고 첫 두 경기가 1-1이면 현재 매치가 2-1 역전 결정전
-      shouldProcess = true;
-    }
-    if (!shouldProcess) return;
 
     const updates = [];
     for (const [puuid] of winTeamData) {
