@@ -11,6 +11,8 @@ const UNKNOWN_NAME = '알 수 없음';
 const CATEGORY_TO_STAT = {
   underdog: STAT_TYPES.UNDERDOG_WINS,
   late_night: STAT_TYPES.LATE_NIGHT_GAMES,
+  win_streak: STAT_TYPES.BEST_WIN_STREAK,
+  lose_streak: STAT_TYPES.BEST_LOSE_STREAK,
   weekend_games: STAT_TYPES.WEEKEND_GAMES,
   weekday_games: STAT_TYPES.WEEKDAY_GAMES,
   games_per_day: STAT_TYPES.MAX_GAMES_PER_DAY,
@@ -48,9 +50,6 @@ async function getSummonerInfoMap(puuids) {
 }
 
 function resolveStatType(def) {
-  if (def.category === 'streak') {
-    return def.id.startsWith('WIN_STREAK') ? STAT_TYPES.BEST_WIN_STREAK : STAT_TYPES.BEST_LOSE_STREAK;
-  }
   return CATEGORY_TO_STAT[def.category] || null;
 }
 
