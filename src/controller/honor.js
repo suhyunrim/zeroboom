@@ -186,7 +186,9 @@ module.exports.getHonorRanking = async (groupId, options = {}) => {
   const given = {};
   votes.forEach((vote) => {
     received[vote.targetPuuid] = (received[vote.targetPuuid] || 0) + 1;
-    given[vote.voterPuuid] = (given[vote.voterPuuid] || 0) + 1;
+    if (!isBonusVoter(vote.voterPuuid)) {
+      given[vote.voterPuuid] = (given[vote.voterPuuid] || 0) + 1;
+    }
   });
 
   // 받은 투표가 1표 이상인 유저만 랭킹에 포함
@@ -229,6 +231,10 @@ module.exports.getHonorStats = async (groupId, puuid, options = {}) => {
   };
 };
 
+// (gameId, voterPuuid) 유니크 인덱스 때문에 보너스 voterPuuid는 타겟별로 달라야 한다.
+const bonusVoterPuuid = (puuid) => `SYSTEM_BONUS:${puuid}`;
+const isBonusVoter = (voterPuuid) => voterPuuid.startsWith('SYSTEM_BONUS');
+
 /**
  * 전원 투표 보너스: 참가자 전원에게 +1표 (자기 자신에게 투표)
  */
@@ -236,7 +242,7 @@ module.exports.grantFullVoteBonus = async (gameId, groupId, allPlayers) => {
   const bonusRecords = allPlayers.map((p) => ({
     gameId,
     groupId,
-    voterPuuid: 'SYSTEM_BONUS',
+    voterPuuid: bonusVoterPuuid(p.puuid),
     targetPuuid: p.puuid,
     teamNumber: 0,
   }));
