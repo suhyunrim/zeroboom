@@ -117,7 +117,10 @@ module.exports.castVote = async (gameId, groupId, voterPuuid, targetPuuid, teamN
 /**
  * 매치 MVP 갱신 (3표 도달 시 1회 호출)
  * - match_mvp_count 증가
- * - 직전 참여 매치 MVP 여부로 streak 계산 후 best 갱신
+ * - streak 계산: MVP 없는 매치는 건너뛰고, 가장 최근 MVP 매치에서 본인 여부로 판정
+ *   - 직전 MVP 매치의 MVP가 본인 → streak 유지/증가
+ *   - 직전 MVP 매치의 MVP가 타인 → streak 리셋 (1부터)
+ *   - 참여한 매치 모두 MVP 없음(투표 부족) → 첫 MVP로 간주 (streak=1)
  */
 async function updateMatchMvp(gameId, groupId, targetPuuid) {
   await statsRepo.incrementStat(targetPuuid, groupId, STAT_TYPES.MATCH_MVP_COUNT);
@@ -127,22 +130,41 @@ async function updateMatchMvp(gameId, groupId, targetPuuid) {
     order: [['gameId', 'DESC']],
     limit: 30,
   });
-  const prevMatch = recentMatches.find(
+  const participated = recentMatches.filter(
     (m) => (m.team1 || []).some((p) => p[0] === targetPuuid) || (m.team2 || []).some((p) => p[0] === targetPuuid),
   );
 
-  let newStreak = 1;
-  if (prevMatch) {
-    const prevVoteCount = await models.honor_vote.count({
-      where: { gameId: prevMatch.gameId, targetPuuid },
+  let prevMvpMine = false;
+  if (participated.length > 0) {
+    const { fn, col } = models.sequelize;
+    const voteRows = await models.honor_vote.findAll({
+      where: { gameId: participated.map((m) => m.gameId) },
+      attributes: ['gameId', 'targetPuuid', [fn('COUNT', col('id')), 'cnt']],
+      group: ['gameId', 'targetPuuid'],
+      raw: true,
     });
-    if (prevVoteCount >= 3) {
-      const currentRow = await models.user_achievement_stats.findOne({
-        where: { puuid: targetPuuid, groupId, statType: STAT_TYPES.CURRENT_MATCH_MVP_STREAK },
-        raw: true,
-      });
-      newStreak = (currentRow ? Number(currentRow.value) : 0) + 1;
+    const mvpsByGame = {};
+    voteRows.forEach((v) => {
+      if (Number(v.cnt) >= 3) {
+        if (!mvpsByGame[v.gameId]) mvpsByGame[v.gameId] = [];
+        mvpsByGame[v.gameId].push(v.targetPuuid);
+      }
+    });
+    for (const m of participated) {
+      const mvps = mvpsByGame[m.gameId];
+      if (!mvps) continue; // MVP 없는 매치는 건너뜀
+      prevMvpMine = mvps.includes(targetPuuid);
+      break;
     }
+  }
+
+  let newStreak = 1;
+  if (prevMvpMine) {
+    const currentRow = await models.user_achievement_stats.findOne({
+      where: { puuid: targetPuuid, groupId, statType: STAT_TYPES.CURRENT_MATCH_MVP_STREAK },
+      raw: true,
+    });
+    newStreak = (currentRow ? Number(currentRow.value) : 0) + 1;
   }
 
   await Promise.all([
