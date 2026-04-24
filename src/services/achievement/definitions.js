@@ -66,7 +66,7 @@ const winStreaks = Object.entries(streakGoals).map(([tier, goal]) => ({
   description: `${goal}연승을 달성하세요`,
   emoji: '🔥',
   tier,
-  category: 'streak',
+  category: 'win_streak',
   trigger: 'match_result',
   goal,
 }));
@@ -76,7 +76,7 @@ const loseStreaks = Object.entries(streakGoals).map(([tier, goal]) => ({
   description: `${goal}연패를 달성하세요`,
   emoji: '💀',
   tier,
-  category: 'streak',
+  category: 'lose_streak',
   trigger: 'match_result',
   goal,
 }));

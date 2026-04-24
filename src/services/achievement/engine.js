@@ -99,6 +99,8 @@ async function getHonorCounts(puuids, groupId) {
 const SIMPLE_STAT_CATEGORIES = {
   underdog: 'underdogWins',
   late_night: 'lateNightGames',
+  win_streak: 'bestWinStreak',
+  lose_streak: 'bestLoseStreak',
   weekend_games: 'weekendGames',
   weekday_games: 'weekdayGames',
   games_per_day: 'maxGamesPerDay',
@@ -134,10 +136,6 @@ function checkAchievement(def, user, extra) {
 
   if (category === 'match') return user.win >= goal;
   if (category === 'games') return user.win + user.lose + (extra.externalGames || 0) >= goal;
-  if (category === 'streak') {
-    if (def.id.startsWith('WIN_STREAK')) return (extra.bestWinStreak || 0) >= goal;
-    if (def.id.startsWith('LOSE_STREAK')) return (extra.bestLoseStreak || 0) >= goal;
-  }
   if (category === 'tier') {
     const bestRating = extra.bestRating || user.defaultRating + user.additionalRating;
     return TIERS.indexOf(getTierName(bestRating)) >= TIERS.indexOf(goal);
@@ -184,7 +182,8 @@ async function processAchievements(trigger, context) {
     const needsChallenge = defs.some((d) => d.category === 'challenge');
     const needsStats = defs.some(
       (d) =>
-        d.category === 'streak'
+        d.category === 'win_streak'
+        || d.category === 'lose_streak'
         || d.category === 'underdog'
         || d.category === 'late_night'
         || d.category === 'tier'
