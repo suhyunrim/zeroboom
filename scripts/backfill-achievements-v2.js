@@ -78,9 +78,11 @@ async function backfillGroup(group, users) {
     raw: true,
   });
   const voteCounts = {};
+  const gameHasAnyMvp = {};
   honorVotes.forEach((v) => {
     const key = `${v.gameId}|${v.targetPuuid}`;
     voteCounts[key] = (voteCounts[key] || 0) + 1;
+    if (voteCounts[key] >= 3) gameHasAnyMvp[v.gameId] = true;
   });
   const isMatchMvp = (gameId, puuid) => (voteCounts[`${gameId}|${puuid}`] || 0) >= 3;
 
@@ -173,13 +175,14 @@ async function backfillGroup(group, users) {
       }
 
       // 매치 MVP
+      // streak: MVP 있는 매치만 집계 (아무도 3표 못 받은 매치는 건너뜀)
       if (isMatchMvp(match.gameId, puuid)) {
         s[STAT_TYPES.MATCH_MVP_COUNT] += 1;
         s[STAT_TYPES.CURRENT_MATCH_MVP_STREAK] += 1;
         if (s[STAT_TYPES.CURRENT_MATCH_MVP_STREAK] > s[STAT_TYPES.BEST_MATCH_MVP_STREAK]) {
           s[STAT_TYPES.BEST_MATCH_MVP_STREAK] = s[STAT_TYPES.CURRENT_MATCH_MVP_STREAK];
         }
-      } else {
+      } else if (gameHasAnyMvp[match.gameId]) {
         s[STAT_TYPES.CURRENT_MATCH_MVP_STREAK] = 0;
       }
 
