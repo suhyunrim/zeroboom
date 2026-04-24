@@ -14,6 +14,15 @@ const GAME_TYPE_QUEUE_MAP = {
 };
 
 /**
+ * challenge_match_detail 에 저장하기 전 각 참가자 객체에서 저장소 비용 큰 필드를 제거.
+ * `challenges` 는 Riot 세부 메트릭(매치당 4KB, 전체의 약 50%)이고 내전 봇 컨텐츠에
+ * 쓰일 일이 사실상 없음. 제거해도 KDA/아이템/룬/포지션 등 나머지 144개 필드는 보존됨.
+ */
+function stripLargeFields(participants) {
+  return participants.map(({ challenges, ...rest }) => rest);
+}
+
+/**
  * 참가자 puuid 목록에서 부캐 puuid까지 포함한 매핑을 반환
  * @returns {{ allPuuids: string[], puuidToMain: Record<string, string> }}
  *   allPuuids: 본캐+부캐 전체 puuid 배열
@@ -816,7 +825,7 @@ async function fetchAndStoreMatches(puuid, queueId, startAt, endAt, groupAllPuui
           defaults: {
             queueId: matchData.info.queueId,
             gameCreation: new Date(matchData.info.gameCreation),
-            participants: matchData.info.participants,
+            participants: stripLargeFields(matchData.info.participants),
           },
         });
 
