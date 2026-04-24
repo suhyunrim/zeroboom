@@ -1,13 +1,11 @@
 const models = require('../db/models');
 const moment = require('moment');
 const { Op } = require('sequelize');
-const table = require('table');
 
 const summonerController = require('../controller/summoner');
 const honorController = require('../controller/honor');
 
 const elo = require('arpad');
-const { getSummonerByName_V1, getCustomGames, getMatchData } = require('../services/riot-api');
 const { logger } = require('../loaders/logger');
 
 const ratingCalculator = new elo(16);
@@ -15,8 +13,7 @@ const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 const { formatTier } = require('../utils/tierUtils');
 const {
-  getKSTYearStart, getKSTIsoWeekday, getKSTHours, daysAgo,
-  isWeekendTime, isWeekdayTime, getKSTDateKey, kstDayKeyDiff,
+  getKSTHours, isWeekendTime, isWeekdayTime, getKSTDateKey, kstDayKeyDiff,
 } = require('../utils/timeUtils');
 const { STAT_TYPES } = require('../services/achievement/definitions');
 const statsRepo = require('../services/achievement/stats');
@@ -51,57 +48,6 @@ module.exports.createMatchWithSnapshot = async ({ groupId, team1, team2, extra =
     seasonId: currentSeason,
     ...extra,
   });
-};
-
-module.exports.registerMatch = async (tokenId, summonerName) => {
-  if (!tokenId) return { result: 'invalid token id' };
-  if (!summonerName) return { result: 'invalid summoner name' };
-
-  try {
-    const summoner = await getSummonerByName_V1(tokenId, summonerName);
-    if (!summoner) return { result: 'invalid summoner' };
-
-    const accountId = summoner.accountId;
-    const latestGameCreation = await models.latest_game_creation.findOne({
-      where: { accountId },
-      raw: true,
-    });
-    const until = latestGameCreation ? latestGameCreation.gameCreation : getKSTYearStart();
-    const matches = await getCustomGames(tokenId, accountId, until);
-    const matchIds = matches.map((elem) => elem.gameId);
-    const matchIdsInDB = (
-      await models.match.findAll({
-        where: { gameId: matchIds },
-        raw: true,
-      })
-    ).map((elem) => Number(elem.gameId));
-
-    let newLatestGameCreation = 0;
-    for (const simpleMatchData of matches) {
-      newLatestGameCreation =
-        simpleMatchData.gameCreation >= newLatestGameCreation ? simpleMatchData.gameCreation : newLatestGameCreation;
-
-      const gameId = simpleMatchData.gameId;
-      if (matchIdsInDB.find((elem) => elem === gameId)) continue;
-
-      const matchData = await getMatchData(tokenId, gameId);
-      if (!matchData || matchData.team1.length + matchData.team2.length !== 10) continue;
-
-      await models.match.create(matchData);
-    }
-
-    if (newLatestGameCreation !== 0) {
-      await models.latest_game_creation.upsert({
-        accountId,
-        gameCreation: newLatestGameCreation + 1000, // 시간 보정을 위해 1초 추가함 (by ZeroBoom)
-      });
-    }
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
-  }
-
-  return { result: 'succeed', status: 200 };
 };
 
 module.exports.predictWinRate = async (groupName, team1, team2) => {
@@ -749,193 +695,6 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
   await module.exports.applyMatchResult(newMatch.gameId);
 
   return { status: 200, result: { gameId: newMatch.gameId } };
-};
-
-module.exports.getMatchHistory = async (groupName, from, to) => {
-  if (!groupName) return { status: 900, result: 'invalid group name' };
-
-  const group = await models.group.findOne({ where: { groupName: groupName } });
-  if (!group) return { status: 901, result: 'group is not exist' };
-
-  const users = await models.user.findAll({
-    where: {
-      groupId: group.id,
-      latestMatchDate: {
-        [Op.gte]: daysAgo(60),
-      },
-    },
-  });
-
-  const puuIds = users.map((elem) => elem.puuid);
-
-  const matches = await models.match.findAll({
-    where: {
-      groupId: group.id,
-      winTeam: { [Op.ne]: null },
-      createdAt: {
-        [Op.gte]: from,
-        [Op.lte]: to,
-      },
-    },
-  });
-
-  // 매치 참가자 puuid를 모아서 이름을 한 번에 조회
-  const allPuuids = new Set();
-  for (const match of matches) {
-    const participants = match.team1.concat(match.team2);
-    for (const participant of participants) {
-      allPuuids.add(participant[0]);
-    }
-  }
-  const summonerRows = await models.summoner.findAll({
-    where: { puuid: [...allPuuids] },
-    attributes: ['puuid', 'name'],
-    raw: true,
-  });
-  const nameCache = {};
-  for (const s of summonerRows) {
-    nameCache[s.puuid] = s.name;
-  }
-
-  const matchPlayCountMap = {};
-  const fixedMatchPlayCountMap = {};
-  for (let match of matches) {
-    const participants = match.team1.concat(match.team2);
-    for (let participant of participants) {
-      const puuid = participant[0];
-      const name = nameCache[puuid];
-      if (!name) continue;
-
-      matchPlayCountMap[name] = (matchPlayCountMap[name] || 0) + 1;
-
-      const weekDay = getKSTIsoWeekday(match.createdAt);
-      if (weekDay == 3 || weekDay == 7) {
-        fixedMatchPlayCountMap[name] = (fixedMatchPlayCountMap[name] || 0) + 1;
-      }
-    }
-  }
-
-  const riotMatches = await models.riot_match.findAll({
-    where: {
-      gameCreation: {
-        [Op.gte]: from,
-        [Op.lte]: to,
-      },
-    },
-  });
-
-  // riotMatch 참가자 중 nameCache에 없는 puuid 추가 조회
-  const missingPuuids = new Set();
-  for (const match of riotMatches) {
-    const filtered = match.participants.filter((elem) => puuIds.includes(elem));
-    for (const puuId of filtered) {
-      if (nameCache[puuId] == null) missingPuuids.add(puuId);
-    }
-  }
-  if (missingPuuids.size > 0) {
-    const extraSummoners = await models.summoner.findAll({
-      where: { puuid: [...missingPuuids] },
-      attributes: ['puuid', 'name'],
-      raw: true,
-    });
-    for (const s of extraSummoners) {
-      nameCache[s.puuid] = s.name;
-    }
-  }
-
-  const riotMatchSet = {};
-  const riotMatchPlayCountMap = {};
-  for (let match of riotMatches) {
-    const filtered = match.participants.filter((elem) => puuIds.includes(elem));
-    if (filtered.length <= 1) continue;
-
-    for (let puuId of filtered) {
-      const name = nameCache[puuId];
-      if (riotMatchSet[name] == null) {
-        riotMatchSet[name] = [];
-      }
-
-      const others = filtered.filter((elem) => elem != puuId && !riotMatchSet[name].includes(elem));
-      if (others.length == 0) {
-        continue;
-      }
-
-      riotMatchSet[name].push(...others);
-      riotMatchPlayCountMap[name] = (riotMatchPlayCountMap[name] || 0) + others.length;
-    }
-  }
-
-  let result = [];
-  for (let user of users) {
-    const name = nameCache[user.puuid];
-    if (!name) continue;
-
-    const riotMatchPlayCount = riotMatchPlayCountMap[name] || 0;
-    const matchPlayCount = matchPlayCountMap[name] || 0;
-    const fixedMatchPlayCount = fixedMatchPlayCountMap[name] || 0;
-    const point = matchPlayCount + riotMatchPlayCount;
-    result.push({
-      name,
-      riotMatchPlayCount,
-      matchPlayCount,
-      fixedMatchPlayCount,
-      point,
-    });
-  }
-
-  result = result.sort((a, b) => b.point - a.point);
-
-  const completedTableConfig = {
-    border: table.getBorderCharacters('ramac'),
-    columns: {
-      0: { alignment: 'center', width: 5 },
-      1: { alignment: 'center', width: 20 },
-      2: { alignment: 'center', width: 10 },
-      3: { alignment: 'center', width: 10 },
-      4: { alignment: 'center', width: 10 },
-      5: { alignment: 'center', width: 10 },
-    },
-  };
-
-  const matchCountCondition = 4;
-  const riotMatchCountCondition = 8;
-
-  const completedTableData = [['No', '닉네임', '내전', '롤데인', '합산']];
-  let rank = 1;
-  for (let elem of result.filter(
-    (elem) => elem.matchPlayCount >= matchCountCondition || elem.riotMatchPlayCount >= riotMatchCountCondition,
-  )) {
-    completedTableData.push([rank++, elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
-  }
-
-  const uncompletedTableConfig = {
-    border: table.getBorderCharacters('ramac'),
-    columns: {
-      0: { alignment: 'center', width: 20 },
-      1: { alignment: 'center', width: 10 },
-      2: { alignment: 'center', width: 10 },
-      3: { alignment: 'center', width: 10 },
-      4: { alignment: 'center', width: 10 },
-    },
-  };
-
-  const uncompletedTableData = [['닉네임', '내전', '롤데인', '합산']];
-  for (let elem of result.filter(
-    (elem) => elem.matchPlayCount < matchCountCondition && elem.riotMatchPlayCount < riotMatchCountCondition,
-  )) {
-    uncompletedTableData.push([elem.name, elem.matchPlayCount, elem.riotMatchPlayCount, elem.point]);
-  }
-
-  let msg = `<pre><h1>달성자</h1>${table.table(
-    completedTableData,
-    completedTableConfig,
-  )}<br><h1>미달성자</h1>${table.table(uncompletedTableData, uncompletedTableConfig)}</pre>`;
-  msg = msg.replaceAll('\n', '<br>');
-
-  return {
-    result: msg,
-    status: 200,
-  };
 };
 
 module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, search = null) => {

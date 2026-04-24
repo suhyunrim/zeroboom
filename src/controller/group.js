@@ -7,7 +7,6 @@ const elo = require('arpad');
 const LatestMatchDateConditionDays = 60;
 const RankingMinumumMatchCount = 5;
 
-const matchController = require('../controller/match');
 const ratingCalculator = new elo(16);
 
 /**
@@ -62,29 +61,6 @@ module.exports.getByDiscordGuildId = async (id) => {
 module.exports.registerGroup = async (groupName) => {
   const result = await models.group.findOrCreate({ where: { groupName } });
   return { result: result[1] ? 'succeed' : 'already exist', status: 200 };
-};
-
-module.exports.retrieveMatches = async (groupName) => {
-  const group = await models.group.findOne({ where: { groupName } });
-  if (!group) return { result: 'group is not exist' };
-
-  try {
-    const users = await models.user.findAll({ where: { groupId: group.id } });
-    const accountIds = users.map((elem) => elem.accountId);
-    const tokens = await models.token.findAll({
-      where: { accountId: accountIds },
-    });
-
-    for (const token of tokens) {
-      const data = token.dataValues;
-      await matchController.registerMatch(data.token, data.name);
-    }
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
-  }
-
-  return { status: 200 };
 };
 
 module.exports.setUserRole = async (groupName, accountId, role) => {

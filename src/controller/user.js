@@ -1,67 +1,6 @@
 const models = require('../db/models');
 const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
-const { getCustomGames } = require('../services/riot-api');
-const { getKSTYearStart } = require('../utils/timeUtils');
-
-module.exports.calculateChampionScore = async (groupId, accountId, tokenId) => {
-  try {
-    const until = getKSTYearStart();
-    const riotMatches = await getCustomGames(tokenId, accountId, until);
-
-    const riotMatchIds = riotMatches.map((elem) => elem.gameId);
-    const availableMatchIds = await models.match
-      .findAll({
-        where: { groupId: groupId, gameId: riotMatchIds },
-        raw: true,
-      })
-      .map((elem) => parseInt(elem.gameId));
-
-    const filteredMatches = riotMatches.filter(
-      (riotMatch) =>
-        availableMatchIds.findIndex((gameId) => gameId === riotMatch.gameId) !==
-        -1,
-    );
-
-    let userChampionScores = {};
-    for (const matchRiotData of filteredMatches) {
-      const userData = matchRiotData.participants[0];
-      const championId = userData.championId;
-
-      let result = userChampionScores[championId];
-      if (!result) {
-        result = models.userChampionScore.build().get();
-      }
-
-      for (const key in userData.stats) {
-        if (!result.hasOwnProperty(key)) continue;
-
-        if (key == 'win') {
-          result[userData.stats.win ? 'win' : 'lose']++;
-          continue;
-        }
-
-        result[key] += userData.stats[key];
-      }
-      result.gameDuration += matchRiotData.gameDuration;
-
-      result.groupId = groupId;
-      result.accountId = accountId;
-      result.championId = championId;
-
-      userChampionScores[championId] = result;
-    }
-
-    for (const [_, championScore] of Object.entries(userChampionScores)) {
-      await models.userChampionScore.upsert(championScore);
-    }
-
-    return { result: userChampionScores, status: 200 };
-  } catch (e) {
-    logger.error(e.stack);
-    return { result: e.message, status: 501 };
-  }
-};
 
 module.exports.getGroupList = async (puuid) => {
   let result = [];
