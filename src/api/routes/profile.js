@@ -56,7 +56,9 @@ module.exports = (app) => {
 
   /**
    * GET /api/profile/:groupId/:puuid/comments
-   * 댓글 목록 (비밀글은 작성자/프로필주인/어드민만 보임)
+   * 댓글 목록을 트리 구조로 반환 (top-level + 그 밑 replies).
+   * 비밀글: 작성자/프로필주인/어드민, 답글은 부모 댓글 작성자도 추가로 봄.
+   * 부모가 삭제된 경우 답글이 있으면 isDeleted: true placeholder로 표시.
    */
   route.get('/:groupId/:puuid/comments', optionalAuth, async (req, res) => {
     const groupId = Number(req.params.groupId);
@@ -70,15 +72,18 @@ module.exports = (app) => {
       const ownerDiscordId = await getProfileOwnerDiscordId(groupId, puuid);
       const isAdmin = viewerDiscordId ? await isGroupAdmin(groupId, viewerDiscordId) : false;
 
-      const comments = await models.profile_comment.findAll({
+      // paranoid: false — soft-deleted 부모도 가져와서 답글 그룹핑에 사용
+      const all = await models.profile_comment.findAll({
         where: { targetPuuid: puuid, targetGroupId: groupId },
         order: [['createdAt', 'DESC']],
+        paranoid: false,
       });
 
-      const commentIds = comments.map((c) => c.id);
-      const likeRows = commentIds.length
+      // 살아있는 댓글의 좋아요만 집계
+      const aliveIds = all.filter((c) => !c.deletedAt).map((c) => c.id);
+      const likeRows = aliveIds.length
         ? await models.comment_like.findAll({
-            where: { commentId: commentIds },
+            where: { commentId: aliveIds },
             attributes: ['commentId', 'likerDiscordId'],
           })
         : [];
@@ -92,25 +97,80 @@ module.exports = (app) => {
         }
       });
 
-      const result = comments
-        .filter((c) =>
-          profileController.canViewComment({
-            comment: c,
-            viewerDiscordId,
-            ownerDiscordId,
-            isAdmin,
-          }),
-        )
-        .map((c) => ({
-          id: c.id,
-          authorDiscordId: c.authorDiscordId,
-          authorName: c.authorName,
-          content: c.content,
-          isSecret: c.isSecret,
-          likeCount: likeCountMap[c.id] || 0,
-          likedByMe: likedByViewer.has(c.id),
-          createdAt: c.createdAt,
-        }));
+      const mapAlive = (c) => ({
+        id: c.id,
+        parentId: c.parentId || null,
+        authorDiscordId: c.authorDiscordId,
+        authorName: c.authorName,
+        content: c.content,
+        isSecret: c.isSecret,
+        isDeleted: false,
+        likeCount: likeCountMap[c.id] || 0,
+        likedByMe: likedByViewer.has(c.id),
+        createdAt: c.createdAt,
+      });
+
+      // 답글: parentId별 그룹핑, 오래된 순(ASC)으로 정렬
+      const repliesByParent = {};
+      all
+        .filter((c) => c.parentId)
+        .forEach((r) => {
+          if (!repliesByParent[r.parentId]) repliesByParent[r.parentId] = [];
+          repliesByParent[r.parentId].push(r);
+        });
+      Object.keys(repliesByParent).forEach((k) => {
+        repliesByParent[k].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      });
+
+      const buildReplies = (parentId, parentAuthorDiscordId) =>
+        (repliesByParent[parentId] || [])
+          .filter((r) => !r.deletedAt)
+          .filter((r) =>
+            profileController.canViewComment({
+              comment: r,
+              viewerDiscordId,
+              ownerDiscordId,
+              isAdmin,
+              parentAuthorDiscordId,
+            }),
+          )
+          .map(mapAlive);
+
+      // top-level (parentId === null)만 결과로
+      const result = all
+        .filter((c) => !c.parentId)
+        .map((top) => {
+          const replyList = buildReplies(top.id, top.authorDiscordId);
+          if (top.deletedAt) {
+            // 답글이 하나도 없으면 노출 안 함
+            if (replyList.length === 0) return null;
+            return {
+              id: top.id,
+              parentId: null,
+              authorDiscordId: null,
+              authorName: null,
+              content: null,
+              isSecret: false,
+              isDeleted: true,
+              likeCount: 0,
+              likedByMe: false,
+              createdAt: top.createdAt,
+              replies: replyList,
+            };
+          }
+          if (
+            !profileController.canViewComment({
+              comment: top,
+              viewerDiscordId,
+              ownerDiscordId,
+              isAdmin,
+            })
+          ) {
+            return null;
+          }
+          return { ...mapAlive(top), replies: replyList };
+        })
+        .filter((x) => x !== null);
 
       return res.status(200).json({ result });
     } catch (e) {
@@ -121,13 +181,14 @@ module.exports = (app) => {
 
   /**
    * POST /api/profile/:groupId/:puuid/comments
-   * 댓글 작성 (인증 필요)
-   * body: { content, isSecret }
+   * 댓글 작성 (인증 필요).
+   * body: { content, isSecret, parentId? }
+   * parentId가 다른 답글이면 평탄화해서 root parentId로 저장.
    */
   route.post('/:groupId/:puuid/comments', verifyToken, async (req, res) => {
     const groupId = Number(req.params.groupId);
     const { puuid } = req.params;
-    const { content, isSecret } = req.body;
+    const { content, isSecret, parentId: rawParentId } = req.body;
     const { discordId, globalName, username } = req.user;
 
     if (!groupId || !puuid) {
@@ -149,6 +210,21 @@ module.exports = (app) => {
         return res.status(404).json({ result: '대상 유저가 그룹에 없습니다.' });
       }
 
+      // parentId 검증 + 평탄화
+      let parentId = null;
+      if (rawParentId !== undefined && rawParentId !== null) {
+        const pid = Number(rawParentId);
+        if (!pid) {
+          return res.status(400).json({ result: 'parentId가 올바르지 않습니다.' });
+        }
+        const parent = await models.profile_comment.findByPk(pid);
+        if (!parent || parent.targetPuuid !== puuid || parent.targetGroupId !== groupId) {
+          return res.status(400).json({ result: '답글 대상 댓글을 찾을 수 없습니다.' });
+        }
+        // 답글의 답글이면 root로 평탄화
+        parentId = parent.parentId || parent.id;
+      }
+
       const authorName = globalName || username || null;
       const created = await models.profile_comment.create({
         targetPuuid: puuid,
@@ -157,6 +233,7 @@ module.exports = (app) => {
         authorName,
         content: content.trim(),
         isSecret: !!isSecret,
+        parentId,
       });
 
       auditLog.log({
@@ -164,20 +241,28 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName: authorName,
         action: 'profile.comment_create',
-        details: { commentId: created.id, targetPuuid: puuid, isSecret: !!isSecret },
+        details: {
+          commentId: created.id,
+          targetPuuid: puuid,
+          isSecret: !!isSecret,
+          parentId,
+        },
         source: 'web',
       });
 
       return res.status(200).json({
         result: {
           id: created.id,
+          parentId: created.parentId || null,
           authorDiscordId: created.authorDiscordId,
           authorName: created.authorName,
           content: created.content,
           isSecret: created.isSecret,
+          isDeleted: false,
           likeCount: 0,
           likedByMe: false,
           createdAt: created.createdAt,
+          replies: [],
         },
       });
     } catch (e) {

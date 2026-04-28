@@ -41,6 +41,30 @@ describe('canViewComment', () => {
       }),
     ).toBe(false);
   });
+
+  test('비밀 답글은 부모 댓글 작성자에게 보임 (스레드 참여자)', () => {
+    expect(
+      canViewComment({
+        comment: secretComment,
+        viewerDiscordId: 'PARENT_AUTHOR',
+        ownerDiscordId: 'OWNER',
+        isAdmin: false,
+        parentAuthorDiscordId: 'PARENT_AUTHOR',
+      }),
+    ).toBe(true);
+  });
+
+  test('비밀 답글은 부모 작성자가 아니면 여전히 안 보임', () => {
+    expect(
+      canViewComment({
+        comment: secretComment,
+        viewerDiscordId: 'OTHER',
+        ownerDiscordId: 'OWNER',
+        isAdmin: false,
+        parentAuthorDiscordId: 'PARENT_AUTHOR',
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('canDeleteComment', () => {

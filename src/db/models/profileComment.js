@@ -32,6 +32,10 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: false,
       },
+      parentId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {
       paranoid: true,
@@ -41,6 +45,10 @@ module.exports = (sequelize, DataTypes) => {
     profileComment.hasMany(models.comment_like, {
       foreignKey: 'commentId',
       as: 'likes',
+    });
+    profileComment.hasMany(models.profile_comment, {
+      foreignKey: 'parentId',
+      as: 'replies',
     });
   };
   return profileComment;

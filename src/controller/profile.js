@@ -5,13 +5,15 @@
 
 /**
  * 비밀글이 뷰어에게 보여야 하는지 판단.
- * 공개글은 모두에게 보임. 비밀글은 작성자/프로필주인/그룹어드민에게만 보임.
+ * 공개글은 모두에게 보임. 비밀글은 작성자/프로필주인/그룹어드민,
+ * 그리고 답글이라면 부모 댓글 작성자에게도 보임 (스레드 대화 참여자).
  */
-const canViewComment = ({ comment, viewerDiscordId, ownerDiscordId, isAdmin }) => {
+const canViewComment = ({ comment, viewerDiscordId, ownerDiscordId, isAdmin, parentAuthorDiscordId }) => {
   if (!comment.isSecret) return true;
   if (!viewerDiscordId) return false;
   if (comment.authorDiscordId === viewerDiscordId) return true;
   if (ownerDiscordId && ownerDiscordId === viewerDiscordId) return true;
+  if (parentAuthorDiscordId && parentAuthorDiscordId === viewerDiscordId) return true;
   if (isAdmin) return true;
   return false;
 };
