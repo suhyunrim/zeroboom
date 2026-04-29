@@ -29,6 +29,75 @@ const create = async ({ recipientDiscordId, groupId, type, targetKey, actorDisco
 };
 
 /**
+ * 같은 (recipient, type, targetKey, actor) 미읽음 알림이 이미 있으면 skip.
+ * 좋아요 토글처럼 빈번한 이벤트가 동일 알림 row를 누적시키는 것 방지.
+ * targetKey 또는 actorDiscordId가 없으면 dedupe 없이 그냥 create.
+ */
+const createIfNotPending = async ({
+  recipientDiscordId,
+  groupId,
+  type,
+  targetKey,
+  actorDiscordId,
+  actorName,
+  payload,
+}) => {
+  if (!recipientDiscordId || !type) return null;
+  if (actorDiscordId && actorDiscordId === recipientDiscordId) return null;
+
+  if (targetKey && actorDiscordId) {
+    try {
+      const existing = await models.notification.findOne({
+        where: {
+          recipientDiscordId,
+          type,
+          targetKey,
+          actorDiscordId,
+          readAt: null,
+        },
+        attributes: ['id'],
+      });
+      if (existing) return null;
+    } catch (e) {
+      logger.error('알림 dedupe 조회 실패:', e);
+      // 조회 실패 시 안전하게 그냥 create로 진행
+    }
+  }
+
+  return create({ recipientDiscordId, groupId, type, targetKey, actorDiscordId, actorName, payload });
+};
+
+/**
+ * 각 row가 서로 다른 payload를 가질 수 있는 다건 알림 일괄 생성.
+ * 챌린지/시즌 종료처럼 사람마다 finalRank가 다른 경우용.
+ * rows: [{ recipientDiscordId, groupId, type, targetKey, actorDiscordId, actorName, payload }]
+ * actor 자기 자신은 자동 skip.
+ */
+const createMany = async (rows) => {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const valid = rows.filter(
+    (r) => r && r.recipientDiscordId && r.type && (!r.actorDiscordId || r.actorDiscordId !== r.recipientDiscordId),
+  );
+  if (valid.length === 0) return [];
+  try {
+    return await models.notification.bulkCreate(
+      valid.map((r) => ({
+        recipientDiscordId: r.recipientDiscordId,
+        groupId: r.groupId || null,
+        type: r.type,
+        targetKey: r.targetKey || null,
+        actorDiscordId: r.actorDiscordId || null,
+        actorName: r.actorName || null,
+        payload: r.payload || null,
+      })),
+    );
+  } catch (e) {
+    logger.error('알림 다건 생성 실패:', e);
+    return [];
+  }
+};
+
+/**
  * 다수 recipient에게 같은 알림 일괄 생성.
  * actor 자기 자신은 자동 skip.
  */
@@ -166,6 +235,8 @@ const markGroupRead = async ({ recipientDiscordId, type, targetKey, id }) => {
 
 module.exports = {
   create,
+  createIfNotPending,
+  createMany,
   createBulk,
   buildTextPreview,
   groupNotifications,

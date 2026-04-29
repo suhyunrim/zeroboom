@@ -38,15 +38,17 @@ const formatVisitDate = (date = new Date()) => {
 };
 
 /**
- * 댓글 content에서 <@puuid> 멘션 토큰을 추출 (중복 제거).
+ * 댓글 content에서 <@puuid> 멘션 토큰을 추출 (중복 제거 + 상한 적용).
  * 같은 그룹 본캐인지 검증은 호출자 책임.
+ * 댓글당 최대 MENTION_LIMIT명까지만 — 그 이상은 알림 폭격 방지로 무시.
  */
 const MENTION_REGEX = /<@([\w-]+)>/g;
+const MENTION_LIMIT = 5;
 const extractMentionPuuids = (content) => {
   if (!content) return [];
   const set = new Set();
   Array.from(String(content).matchAll(MENTION_REGEX)).forEach((m) => {
-    if (m[1]) set.add(m[1]);
+    if (m[1] && set.size < MENTION_LIMIT) set.add(m[1]);
   });
   return [...set];
 };
@@ -56,4 +58,5 @@ module.exports = {
   canDeleteComment,
   formatVisitDate,
   extractMentionPuuids,
+  MENTION_LIMIT,
 };

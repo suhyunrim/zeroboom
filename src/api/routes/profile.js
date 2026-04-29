@@ -1,31 +1,15 @@
 const { Router } = require('express');
-const jwt = require('jsonwebtoken');
-const config = require('../../config');
 const { logger } = require('../../loaders/logger');
-const { verifyToken } = require('../middlewares/auth');
+const { verifyToken, optionalAuth } = require('../middlewares/auth');
 const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
 const notificationController = require('../../controller/notification');
+const { fetchProfileIconMap } = require('../../utils/profileIcon');
 
 const route = Router();
 
 const COMMENT_MAX_LENGTH = 500;
-
-/**
- * Authorization 헤더가 있으면 디코딩해서 req.user 세팅, 없거나 invalid면 그냥 통과.
- * 댓글 목록 / 방문 기록 등에서 비로그인도 허용해야 하는 엔드포인트용.
- */
-const optionalAuth = (req, _res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
-  try {
-    req.user = jwt.verify(authHeader.split(' ')[1], config.jwtSecret);
-  } catch (e) {
-    // 무효 토큰은 그냥 비로그인 취급
-  }
-  return next();
-};
 
 /**
  * 그룹 어드민 여부 확인 (슈퍼 어드민 또는 user.role === 'admin')
@@ -69,23 +53,6 @@ const fetchAuthorPuuidMap = async (groupId, discordIds) => {
   return map;
 };
 
-/**
- * puuid 배열로 summoner.profileIconId 일괄 조회.
- */
-const fetchProfileIconMap = async (puuids) => {
-  const valid = (puuids || []).filter(Boolean);
-  if (valid.length === 0) return {};
-  const rows = await models.summoner.findAll({
-    where: { puuid: valid },
-    attributes: ['puuid', 'profileIconId'],
-  });
-  const map = {};
-  rows.forEach((s) => {
-    map[s.puuid] = s.profileIconId;
-  });
-  return map;
-};
-
 module.exports = (app) => {
   app.use('/profile', route);
 
@@ -94,7 +61,7 @@ module.exports = (app) => {
    * 댓글 목록을 트리 구조로 반환 (top-level + 그 밑 replies).
    * 비밀글: 작성자/프로필주인/어드민, 답글은 부모 댓글 작성자도 추가로 봄.
    * 부모가 삭제된 경우 답글이 있으면 isDeleted: true placeholder로 표시.
-   * 각 댓글의 author는 { discordId, name, puuid, avatarUrl } 객체로 옴.
+   * 각 댓글의 author는 { discordId, name, puuid, profileIconId } 객체로 옴.
    */
   route.get('/:groupId/:puuid/comments', optionalAuth, async (req, res) => {
     const groupId = Number(req.params.groupId);
@@ -273,8 +240,19 @@ module.exports = (app) => {
         if (!parent || parent.targetPuuid !== puuid || parent.targetGroupId !== groupId) {
           return res.status(400).json({ result: '답글 대상 댓글을 찾을 수 없습니다.' });
         }
-        // 답글의 답글이면 root로 평탄화
-        parentId = parent.parentId || parent.id;
+        if (parent.deletedAt) {
+          return res.status(400).json({ result: '삭제된 댓글에는 답글을 달 수 없습니다.' });
+        }
+        // 답글의 답글이면 root로 평탄화 (단, root parent의 deletedAt도 검증해야 함)
+        if (parent.parentId) {
+          const rootParent = await models.profile_comment.findByPk(parent.parentId);
+          if (!rootParent || rootParent.deletedAt) {
+            return res.status(400).json({ result: '삭제된 댓글에는 답글을 달 수 없습니다.' });
+          }
+          parentId = parent.parentId;
+        } else {
+          parentId = parent.id;
+        }
         parentAuthorDiscordId = parent.authorDiscordId;
       }
 
@@ -468,25 +446,22 @@ module.exports = (app) => {
         return res.status(404).json({ result: '댓글을 찾을 수 없습니다.' });
       }
 
-      const existing = await models.comment_like.findOne({
+      // findOrCreate로 race 안전성 확보 (동시 더블클릭 시 unique 위반 방지)
+      const [, created] = await models.comment_like.findOrCreate({
         where: { commentId, likerDiscordId: discordId },
-      });
-
-      let liked;
-      if (existing) {
-        await existing.destroy();
-        liked = false;
-      } else {
-        await models.comment_like.create({
+        defaults: {
           commentId,
           likerDiscordId: discordId,
           likerName: globalName || username || null,
-        });
-        liked = true;
+        },
+      });
 
-        // 댓글 작성자에게 알림 (자기 좋아요는 컨트롤러가 skip)
+      let liked;
+      if (created) {
+        liked = true;
+        // 댓글 작성자에게 알림 (자기 좋아요는 컨트롤러가 skip, dedupe도 컨트롤러가 처리)
         if (comment.authorDiscordId) {
-          notificationController.create({
+          notificationController.createIfNotPending({
             recipientDiscordId: comment.authorDiscordId,
             groupId: comment.targetGroupId,
             type: 'guestbook_like',
@@ -503,6 +478,12 @@ module.exports = (app) => {
             },
           });
         }
+      } else {
+        // 이미 있던 좋아요 → 취소
+        await models.comment_like.destroy({
+          where: { commentId, likerDiscordId: discordId },
+        });
+        liked = false;
       }
 
       const likeCount = await models.comment_like.count({ where: { commentId } });

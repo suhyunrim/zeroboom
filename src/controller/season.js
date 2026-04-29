@@ -71,22 +71,20 @@ module.exports.resetSeason = async (groupId, actorDiscordId, actorName) => {
         seen.add(e.discordId);
         return true;
       });
-      for (let i = 0; i < dedup.length; i += 1) {
-        const e = dedup[i];
-        await notificationController.create({
-          recipientDiscordId: e.discordId,
-          groupId,
-          type: 'season_end',
-          targetKey: `season:${groupId}:${currentSeason}`,
-          payload: {
-            fromSeason: currentSeason,
-            toSeason: newSeason,
-            finalRank: i + 1,
-            finalRating: e.totalRating,
-            totalParticipants: dedup.length,
-          },
-        });
-      }
+      const rows = dedup.map((e, i) => ({
+        recipientDiscordId: e.discordId,
+        groupId,
+        type: 'season_end',
+        targetKey: `season:${groupId}:${currentSeason}`,
+        payload: {
+          fromSeason: currentSeason,
+          toSeason: newSeason,
+          finalRank: i + 1,
+          finalRating: e.totalRating,
+          totalParticipants: dedup.length,
+        },
+      }));
+      await notificationController.createMany(rows);
     } catch (e) {
       logger.error(`[시즌] 종료 알림 발송 실패 (groupId=${groupId}): ${e.message}`);
     }

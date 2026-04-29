@@ -4,6 +4,7 @@ const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
 const notificationController = require('../../controller/notification');
+const { fetchProfileIconMap } = require('../../utils/profileIcon');
 
 const route = Router();
 
@@ -32,23 +33,6 @@ const fetchActorPuuidMap = async (groups) => {
   const map = {};
   rows.forEach((u) => {
     map[`${u.groupId}:${u.discordId}`] = u.puuid;
-  });
-  return map;
-};
-
-/**
- * actor puuid 배열로 summoner.profileIconId 일괄 조회.
- */
-const fetchProfileIconMap = async (puuids) => {
-  const valid = (puuids || []).filter(Boolean);
-  if (valid.length === 0) return {};
-  const rows = await models.summoner.findAll({
-    where: { puuid: valid },
-    attributes: ['puuid', 'profileIconId'],
-  });
-  const map = {};
-  rows.forEach((s) => {
-    map[s.puuid] = s.profileIconId;
   });
   return map;
 };

@@ -108,7 +108,7 @@ async function saveLeaderboardSnapshot(challengeId) {
       `[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId}, ${leaderboardResult.result.length}명)`,
     );
 
-    // 종료 알림 발송 (참가자 전원에게 finalRank 포함)
+    // 종료 알림 발송 (참가자 전원에게 finalRank 포함, 단일 bulkCreate)
     try {
       const ranks = leaderboardResult.result;
       const puuids = ranks.map((e) => e.puuid);
@@ -121,22 +121,25 @@ async function saveLeaderboardSnapshot(challengeId) {
         users.forEach((u) => {
           if (u.discordId) discordByPuuid[u.puuid] = u.discordId;
         });
-        for (const entry of ranks) {
-          const did = discordByPuuid[entry.puuid];
-          if (!did) continue;
-          await notificationController.create({
-            recipientDiscordId: did,
-            groupId: challenge.groupId,
-            type: 'challenge_end',
-            targetKey: `challenge:${challengeId}`,
-            payload: {
-              challengeId,
-              challengeTitle: challenge.title,
-              finalRank: entry.rank,
-              totalParticipants: ranks.length,
-            },
-          });
-        }
+        const rows = ranks
+          .map((entry) => {
+            const did = discordByPuuid[entry.puuid];
+            if (!did) return null;
+            return {
+              recipientDiscordId: did,
+              groupId: challenge.groupId,
+              type: 'challenge_end',
+              targetKey: `challenge:${challengeId}`,
+              payload: {
+                challengeId,
+                challengeTitle: challenge.title,
+                finalRank: entry.rank,
+                totalParticipants: ranks.length,
+              },
+            };
+          })
+          .filter(Boolean);
+        await notificationController.createMany(rows);
       }
     } catch (e) {
       logger.error(`[챌린지] 종료 알림 발송 실패 (challengeId=${challengeId}): ${e.message}`);

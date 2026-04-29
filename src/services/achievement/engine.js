@@ -305,7 +305,7 @@ async function processAchievements(trigger, context) {
     if (newUnlocks.length > 0) {
       await models.user_achievement.bulkCreate(newUnlocks, { ignoreDuplicates: true });
 
-      // 알림 발송 (lazy require — 순환 의존 방지)
+      // 알림 발송 (lazy require — 순환 의존 방지, 단일 bulkCreate)
       try {
         const notificationController = require('../../controller/notification');
         const puuids = [...new Set(newUnlocks.map((u) => u.puuid))];
@@ -317,23 +317,26 @@ async function processAchievements(trigger, context) {
         userDocs.forEach((u) => {
           if (u.discordId) discordByPuuid[u.puuid] = u.discordId;
         });
-        for (const unlock of newUnlocks) {
-          const did = discordByPuuid[unlock.puuid];
-          if (!did) continue;
-          const def = definitions.find((d) => d.id === unlock.achievementId);
-          await notificationController.create({
-            recipientDiscordId: did,
-            groupId,
-            type: 'achievement_unlock',
-            targetKey: null,
-            payload: {
-              achievementId: unlock.achievementId,
-              achievementName: def ? def.name : null,
-              achievementTier: def ? def.tier : null,
-              achievementEmoji: def ? def.emoji : null,
-            },
-          });
-        }
+        const rows = newUnlocks
+          .map((unlock) => {
+            const did = discordByPuuid[unlock.puuid];
+            if (!did) return null;
+            const def = definitions.find((d) => d.id === unlock.achievementId);
+            return {
+              recipientDiscordId: did,
+              groupId,
+              type: 'achievement_unlock',
+              targetKey: null,
+              payload: {
+                achievementId: unlock.achievementId,
+                achievementName: def ? def.name : null,
+                achievementTier: def ? def.tier : null,
+                achievementEmoji: def ? def.emoji : null,
+              },
+            };
+          })
+          .filter(Boolean);
+        await notificationController.createMany(rows);
       } catch (e) {
         logger.error('업적 알림 발송 실패:', e);
       }
