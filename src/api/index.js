@@ -12,6 +12,8 @@ const achievement = require('./routes/achievement');
 const tempVoice = require('./routes/temp-voice');
 const auditLog = require('./routes/audit-log');
 const balanceReport = require('./routes/balance-report');
+const profile = require('./routes/profile');
+const notification = require('./routes/notification');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -33,6 +35,8 @@ module.exports = () => {
   tempVoice(app);
   auditLog(app);
   balanceReport(app);
+  profile(app);
+  notification(app);
 
   // v2
   groupsV2(app);

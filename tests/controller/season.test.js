@@ -17,6 +17,10 @@ const mockModels = {
   season_snapshot: {
     bulkCreate: jest.fn(),
   },
+  notification: {
+    create: jest.fn().mockResolvedValue(null),
+    bulkCreate: jest.fn().mockResolvedValue([]),
+  },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
@@ -66,14 +70,14 @@ describe('season.resetSeason', () => {
     // SQL 일괄 업데이트 확인
     expect(mockModels.sequelize.query).toHaveBeenCalledWith(
       'UPDATE users SET additionalRating = FLOOR(additionalRating / 2) WHERE groupId = ?',
-      { replacements: [1], transaction: mockTransaction },
+      {
+        replacements: [1],
+        transaction: mockTransaction,
+      },
     );
 
     // currentSeason 증가 확인
-    expect(group.update).toHaveBeenCalledWith(
-      { settings: { currentSeason: 2 } },
-      { transaction: mockTransaction },
-    );
+    expect(group.update).toHaveBeenCalledWith({ settings: { currentSeason: 2 } }, { transaction: mockTransaction });
 
     // 트랜잭션 커밋 확인
     expect(mockTransaction.commit).toHaveBeenCalled();

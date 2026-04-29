@@ -6,6 +6,9 @@ const { getGuildIconUrl } = require('../../utils/discordUtils');
 const route = Router();
 const userController = require('../../controller/user');
 const summonerController = require('../../controller/summoner');
+const auditLog = require('../../controller/audit-log');
+
+const STATUS_MESSAGE_MAX_LENGTH = 50;
 
 module.exports = (app) => {
   app.use('/user', route);
@@ -162,6 +165,117 @@ module.exports = (app) => {
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: e.message });
+    }
+  });
+
+  /**
+   * PUT /api/user/status-message
+   * 나의 한마디 등록/수정 (Discord 인증 필요, 본인 계정만 가능)
+   * body: { groupId, puuid, content }
+   */
+  route.put('/status-message', verifyToken, async (req, res) => {
+    const { groupId: rawGroupId, puuid, content } = req.body;
+    const groupId = Number(rawGroupId);
+    const { discordId, globalName, username } = req.user;
+
+    if (!groupId || !puuid) {
+      return res.status(400).json({ result: 'groupId와 puuid가 필요합니다.' });
+    }
+    if (typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ result: '내용을 입력해주세요.' });
+    }
+    // 줄바꿈은 공백으로 치환 (한 줄 한마디 강제)
+    const trimmed = content.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+      return res.status(400).json({ result: '내용을 입력해주세요.' });
+    }
+    if (trimmed.length > STATUS_MESSAGE_MAX_LENGTH) {
+      return res.status(400).json({ result: `한마디는 ${STATUS_MESSAGE_MAX_LENGTH}자 이하로 작성해주세요.` });
+    }
+
+    try {
+      const target = await models.user.findOne({ where: { groupId, puuid } });
+      if (!target) {
+        return res.status(404).json({ result: '대상 유저가 그룹에 없습니다.' });
+      }
+      if (target.primaryPuuid) {
+        return res.status(400).json({ result: '부캐 계정에는 한마디를 등록할 수 없습니다.' });
+      }
+      if (!target.discordId || target.discordId !== discordId) {
+        return res.status(403).json({ result: '본인 계정에만 등록할 수 있습니다.' });
+      }
+
+      const before = target.statusMessage || null;
+      const now = new Date();
+      target.statusMessage = trimmed;
+      target.statusMessageUpdatedAt = now;
+      await target.save();
+
+      auditLog.log({
+        groupId,
+        actorDiscordId: discordId,
+        actorName: globalName || username || null,
+        action: before ? 'user.status_message_update' : 'user.status_message_create',
+        details: { puuid, before, after: trimmed },
+        source: 'web',
+      });
+
+      return res.status(200).json({
+        result: { content: trimmed, updatedAt: now },
+      });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  /**
+   * DELETE /api/user/status-message
+   * 나의 한마디 삭제 (Discord 인증 필요, 본인 계정만 가능)
+   * body: { groupId, puuid }
+   */
+  route.delete('/status-message', verifyToken, async (req, res) => {
+    const { groupId: rawGroupId, puuid } = req.body;
+    const groupId = Number(rawGroupId);
+    const { discordId, globalName, username } = req.user;
+
+    if (!groupId || !puuid) {
+      return res.status(400).json({ result: 'groupId와 puuid가 필요합니다.' });
+    }
+
+    try {
+      const target = await models.user.findOne({ where: { groupId, puuid } });
+      if (!target) {
+        return res.status(404).json({ result: '대상 유저가 그룹에 없습니다.' });
+      }
+      if (target.primaryPuuid) {
+        return res.status(400).json({ result: '부캐 계정에는 한마디를 등록할 수 없습니다.' });
+      }
+      if (!target.discordId || target.discordId !== discordId) {
+        return res.status(403).json({ result: '본인 계정에만 삭제할 수 있습니다.' });
+      }
+      if (!target.statusMessage) {
+        return res.status(404).json({ result: '등록된 한마디가 없습니다.' });
+      }
+
+      const before = target.statusMessage;
+      target.statusMessage = null;
+      target.statusMessageUpdatedAt = null;
+      await target.save();
+
+      auditLog.log({
+        groupId,
+        actorDiscordId: discordId,
+        actorName: globalName || username || null,
+        action: 'user.status_message_delete',
+        details: { puuid, before },
+        source: 'web',
+      });
+
+      return res.status(200).json({ result: '한마디가 삭제되었습니다.' });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
 

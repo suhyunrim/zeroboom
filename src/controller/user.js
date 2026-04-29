@@ -413,7 +413,18 @@ module.exports.getInfo = async (groupId, puuid) => {
       };
     }
 
-    return { result: { userInfo, summonerInfo, detailedStats, honorStats, subAccount }, status: 200 };
+    // 나의 한마디
+    const statusMessage = userInfo.statusMessage
+      ? {
+        content: userInfo.statusMessage,
+        updatedAt: userInfo.statusMessageUpdatedAt,
+      }
+      : null;
+
+    return {
+      result: { userInfo, summonerInfo, detailedStats, honorStats, subAccount, statusMessage },
+      status: 200,
+    };
   } catch (e) {
     logger.error(e.stack);
     return { result: e.message, status: 501 };

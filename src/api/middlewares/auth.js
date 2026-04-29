@@ -22,6 +22,21 @@ const verifyToken = (req, res, next) => {
 };
 
 /**
+ * Authorization 헤더가 있으면 디코딩해서 req.user 세팅, 없거나 invalid면 그냥 통과.
+ * 비로그인도 허용해야 하는 엔드포인트용 (예: 방명록 댓글 목록).
+ */
+const optionalAuth = (req, _res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
+  try {
+    req.user = jwt.verify(authHeader.split(' ')[1], config.jwtSecret);
+  } catch (e) {
+    // 무효 토큰은 그냥 비로그인 취급
+  }
+  return next();
+};
+
+/**
  * 그룹 관리자 권한 확인 미들웨어
  * 슈퍼 어드민은 모든 그룹 통과, 아니면 DB의 user.role === 'admin' 확인
  */
@@ -53,4 +68,4 @@ const requireGroupAdmin = async (req, res, next) => {
   }
 };
 
-module.exports = { verifyToken, requireGroupAdmin };
+module.exports = { verifyToken, optionalAuth, requireGroupAdmin };

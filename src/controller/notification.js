@@ -1,0 +1,233 @@
+const models = require('../db/models');
+const { logger } = require('../loaders/logger');
+
+const TEXT_PREVIEW_MAX = 50;
+const LIST_FETCH_LIMIT = 200;
+const ACTOR_SAMPLE_PER_GROUP = 3;
+
+const NOTIFICATION_TYPES = Object.freeze({
+  GUESTBOOK_COMMENT: 'guestbook_comment',
+  GUESTBOOK_REPLY: 'guestbook_reply',
+  GUESTBOOK_LIKE: 'guestbook_like',
+  GUESTBOOK_MENTION: 'guestbook_mention',
+  CHALLENGE_END: 'challenge_end',
+  ACHIEVEMENT_UNLOCK: 'achievement_unlock',
+  SEASON_END: 'season_end',
+});
+
+/**
+ * 알림 한 건 생성. actor === recipient면 skip.
+ * 실패해도 throw하지 않음 (호출 측 비즈니스 로직 보호).
+ */
+const create = async ({ recipientDiscordId, groupId, type, targetKey, actorDiscordId, actorName, payload }) => {
+  if (!recipientDiscordId || !type) return null;
+  if (actorDiscordId && actorDiscordId === recipientDiscordId) return null;
+  try {
+    return await models.notification.create({
+      recipientDiscordId,
+      groupId: groupId || null,
+      type,
+      targetKey: targetKey || null,
+      actorDiscordId: actorDiscordId || null,
+      actorName: actorName || null,
+      payload: payload || null,
+    });
+  } catch (e) {
+    logger.error('알림 생성 실패:', e);
+    return null;
+  }
+};
+
+/**
+ * 같은 (recipient, type, targetKey, actor) 미읽음 알림이 이미 있으면 skip.
+ * 좋아요 토글처럼 빈번한 이벤트가 동일 알림 row를 누적시키는 것 방지.
+ * targetKey 또는 actorDiscordId가 없으면 dedupe 없이 그냥 create.
+ */
+const createIfNotPending = async ({
+  recipientDiscordId,
+  groupId,
+  type,
+  targetKey,
+  actorDiscordId,
+  actorName,
+  payload,
+}) => {
+  if (!recipientDiscordId || !type) return null;
+  if (actorDiscordId && actorDiscordId === recipientDiscordId) return null;
+
+  if (targetKey && actorDiscordId) {
+    try {
+      const existing = await models.notification.findOne({
+        where: {
+          recipientDiscordId,
+          type,
+          targetKey,
+          actorDiscordId,
+          readAt: null,
+        },
+        attributes: ['id'],
+      });
+      if (existing) return null;
+    } catch (e) {
+      logger.error('알림 dedupe 조회 실패:', e);
+      // 조회 실패 시 안전하게 그냥 create로 진행
+    }
+  }
+
+  return create({ recipientDiscordId, groupId, type, targetKey, actorDiscordId, actorName, payload });
+};
+
+/**
+ * 각 row가 서로 다른 payload를 가질 수 있는 다건 알림 일괄 생성.
+ * 챌린지/시즌 종료처럼 사람마다 finalRank가 다른 경우용.
+ * rows: [{ recipientDiscordId, groupId, type, targetKey, actorDiscordId, actorName, payload }]
+ * actor 자기 자신은 자동 skip.
+ */
+const createMany = async (rows) => {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const valid = rows.filter(
+    (r) => r && r.recipientDiscordId && r.type && (!r.actorDiscordId || r.actorDiscordId !== r.recipientDiscordId),
+  );
+  if (valid.length === 0) return [];
+  try {
+    return await models.notification.bulkCreate(
+      valid.map((r) => ({
+        recipientDiscordId: r.recipientDiscordId,
+        groupId: r.groupId || null,
+        type: r.type,
+        targetKey: r.targetKey || null,
+        actorDiscordId: r.actorDiscordId || null,
+        actorName: r.actorName || null,
+        payload: r.payload || null,
+      })),
+    );
+  } catch (e) {
+    logger.error('알림 다건 생성 실패:', e);
+    return [];
+  }
+};
+
+/**
+ * 텍스트 미리보기 잘라내기 (방명록 댓글/답글용).
+ */
+const buildTextPreview = (text, max = TEXT_PREVIEW_MAX) => {
+  if (!text) return '';
+  const trimmed = String(text)
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
+};
+
+/**
+ * 같은 (type, targetKey) 알림들을 하나의 그룹으로 묶기.
+ * targetKey가 null인 알림은 묶지 않음(개별 row가 그룹 1개).
+ *
+ * 입력: 알림 row 배열 (createdAt DESC 정렬된 상태)
+ * 출력: 그룹 배열 — { key, type, targetKey, groupId, latestAt, hasUnread, count, actors[], items[] }
+ */
+const groupNotifications = (rows) => {
+  const groups = [];
+  const indexByKey = new Map();
+
+  rows.forEach((row) => {
+    const groupKey = row.targetKey ? `${row.type}::${row.targetKey}` : `single::${row.id}`;
+    let group = indexByKey.get(groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        type: row.type,
+        targetKey: row.targetKey || null,
+        groupId: row.groupId || null,
+        latestAt: row.createdAt,
+        hasUnread: false,
+        count: 0,
+        actors: [],
+        items: [],
+      };
+      indexByKey.set(groupKey, group);
+      groups.push(group);
+    }
+    group.count += 1;
+    group.items.push(row);
+    if (!row.readAt) group.hasUnread = true;
+    if (new Date(row.createdAt) > new Date(group.latestAt)) {
+      group.latestAt = row.createdAt;
+    }
+    if (
+      row.actorDiscordId &&
+      group.actors.length < ACTOR_SAMPLE_PER_GROUP &&
+      !group.actors.some((a) => a.discordId === row.actorDiscordId)
+    ) {
+      group.actors.push({ discordId: row.actorDiscordId, name: row.actorName || null });
+    }
+  });
+
+  groups.sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt));
+  return groups;
+};
+
+/**
+ * 내 알림 목록 (그룹화).
+ */
+const getList = async (recipientDiscordId, { limit = 50 } = {}) => {
+  const rows = await models.notification.findAll({
+    where: { recipientDiscordId },
+    order: [['createdAt', 'DESC']],
+    limit: LIST_FETCH_LIMIT,
+  });
+  const plain = rows.map((r) => r.get({ plain: true }));
+  const groups = groupNotifications(plain);
+  return groups.slice(0, limit);
+};
+
+/**
+ * 미읽음 그룹 수 (인스타식 빨간 점).
+ * 안 읽은 row만 가져와 그룹화 후 그 그룹 수를 카운트.
+ */
+const getUnreadGroupCount = async (recipientDiscordId) => {
+  const rows = await models.notification.findAll({
+    where: { recipientDiscordId, readAt: null },
+    order: [['createdAt', 'DESC']],
+    limit: LIST_FETCH_LIMIT,
+  });
+  const plain = rows.map((r) => r.get({ plain: true }));
+  return groupNotifications(plain).length;
+};
+
+/**
+ * 전체 일괄 읽음 처리.
+ */
+const markAllRead = async (recipientDiscordId) => {
+  return models.notification.update({ readAt: new Date() }, { where: { recipientDiscordId, readAt: null } });
+};
+
+/**
+ * 특정 그룹(type+targetKey) 읽음 처리. targetKey null이면 id 기준.
+ */
+const markGroupRead = async ({ recipientDiscordId, type, targetKey, id }) => {
+  const where = { recipientDiscordId, readAt: null };
+  if (targetKey) {
+    where.type = type;
+    where.targetKey = targetKey;
+  } else if (id) {
+    where.id = id;
+  } else {
+    return [0];
+  }
+  return models.notification.update({ readAt: new Date() }, { where });
+};
+
+module.exports = {
+  create,
+  createIfNotPending,
+  createMany,
+  buildTextPreview,
+  groupNotifications,
+  getList,
+  getUnreadGroupCount,
+  markAllRead,
+  markGroupRead,
+  TEXT_PREVIEW_MAX,
+  NOTIFICATION_TYPES,
+};

@@ -1,5 +1,5 @@
-const models = require('../../db/models');
 const { Op } = require('sequelize');
+const models = require('../../db/models');
 const { definitions, TIERS, STAT_TYPES } = require('./definitions');
 const { getTierName } = require('../../utils/tierUtils');
 const { logger } = require('../../loaders/logger');
@@ -182,24 +182,24 @@ async function processAchievements(trigger, context) {
     const needsChallenge = defs.some((d) => d.category === 'challenge');
     const needsStats = defs.some(
       (d) =>
-        d.category === 'win_streak'
-        || d.category === 'lose_streak'
-        || d.category === 'underdog'
-        || d.category === 'late_night'
-        || d.category === 'tier'
-        || d.category === 'weekend_games'
-        || d.category === 'weekday_games'
-        || d.category === 'games_per_day'
-        || d.category === 'welcomer'
-        || d.category === 'consecutive_days'
-        || d.category === 'match_mvp'
-        || d.category === 'match_mvp_streak'
-        || d.category === 'reverse_win'
-        || d.category === 'reverse_lose'
-        || d.category === 'sweep_win'
-        || d.category === 'sweep_lose'
-        || d.category === 'night_owl'
-        || d.category === 'channel_creator',
+        d.category === 'win_streak' ||
+        d.category === 'lose_streak' ||
+        d.category === 'underdog' ||
+        d.category === 'late_night' ||
+        d.category === 'tier' ||
+        d.category === 'weekend_games' ||
+        d.category === 'weekday_games' ||
+        d.category === 'games_per_day' ||
+        d.category === 'welcomer' ||
+        d.category === 'consecutive_days' ||
+        d.category === 'match_mvp' ||
+        d.category === 'match_mvp_streak' ||
+        d.category === 'reverse_win' ||
+        d.category === 'reverse_lose' ||
+        d.category === 'sweep_win' ||
+        d.category === 'sweep_lose' ||
+        d.category === 'night_owl' ||
+        d.category === 'channel_creator',
     );
     const needsHonor = defs.some((d) => d.category === 'honor_received' || d.category === 'honor_voted_count');
 
@@ -304,6 +304,36 @@ async function processAchievements(trigger, context) {
 
     if (newUnlocks.length > 0) {
       await models.user_achievement.bulkCreate(newUnlocks, { ignoreDuplicates: true });
+
+      // lazy require — 순환 의존 방지
+      try {
+        const notificationController = require('../../controller/notification');
+        const { fetchDiscordIdMap } = require('../../utils/userLookup');
+        const discordByPuuid = await fetchDiscordIdMap(groupId, newUnlocks.map((u) => u.puuid));
+        const defById = new Map(definitions.map((d) => [d.id, d]));
+        const rows = newUnlocks
+          .map((unlock) => {
+            const did = discordByPuuid[unlock.puuid];
+            if (!did) return null;
+            const def = defById.get(unlock.achievementId);
+            return {
+              recipientDiscordId: did,
+              groupId,
+              type: notificationController.NOTIFICATION_TYPES.ACHIEVEMENT_UNLOCK,
+              targetKey: null,
+              payload: {
+                achievementId: unlock.achievementId,
+                achievementName: def ? def.name : null,
+                achievementTier: def ? def.tier : null,
+                achievementEmoji: def ? def.emoji : null,
+              },
+            };
+          })
+          .filter(Boolean);
+        await notificationController.createMany(rows);
+      } catch (e) {
+        logger.error('업적 알림 발송 실패:', e);
+      }
     }
 
     return newUnlocks;

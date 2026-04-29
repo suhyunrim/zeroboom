@@ -53,6 +53,14 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      statusMessage: {
+        type: DataTypes.STRING(200),
+        allowNull: true,
+      },
+      statusMessageUpdatedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {},
   );
