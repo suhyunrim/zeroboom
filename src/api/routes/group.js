@@ -6,7 +6,7 @@ const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
-const { getGuildIconUrl } = require('../../utils/discordUtils');
+const { getGuildIconUrl, getUserAvatarUrl } = require('../../utils/discordUtils');
 const auditLog = require('../../controller/audit-log');
 const groupController = require('../../controller/group');
 const seasonController = require('../../controller/season');
@@ -50,6 +50,54 @@ module.exports = (app) => {
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: e.message });
+    }
+  });
+
+  /**
+   * GET /api/group/:groupId/members
+   * 멘션·태그 목록용. 본캐(primaryPuuid: null) + outsider 제외 + 길드 잔류자만.
+   * 응답: [{ puuid, name, avatarUrl }]
+   */
+  route.get('/:groupId/members', async (req, res) => {
+    const groupId = Number(req.params.groupId);
+    if (!groupId) return res.status(400).json({ result: 'groupId가 필요합니다.' });
+
+    try {
+      const users = await models.user.findAll({
+        where: {
+          groupId,
+          primaryPuuid: null,
+          role: { [Op.ne]: 'outsider' },
+          leftGuildAt: null,
+        },
+        attributes: ['puuid', 'discordId'],
+      });
+
+      const puuids = users.map((u) => u.puuid);
+      const summoners = puuids.length
+        ? await models.summoner.findAll({
+            where: { puuid: puuids },
+            attributes: ['puuid', 'name'],
+          })
+        : [];
+      const nameByPuuid = {};
+      summoners.forEach((s) => {
+        nameByPuuid[s.puuid] = s.name;
+      });
+
+      const client = req.app.discordClient;
+      const result = users
+        .map((u) => ({
+          puuid: u.puuid,
+          name: nameByPuuid[u.puuid] || null,
+          avatarUrl: getUserAvatarUrl(client, u.discordId),
+        }))
+        .filter((m) => m.name);
+
+      return res.status(200).json({ result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
 

@@ -1,4 +1,9 @@
-const { canViewComment, canDeleteComment, formatVisitDate } = require('../../src/controller/profile');
+const {
+  canViewComment,
+  canDeleteComment,
+  formatVisitDate,
+  extractMentionPuuids,
+} = require('../../src/controller/profile');
 
 describe('canViewComment', () => {
   const publicComment = { isSecret: false, authorDiscordId: 'AUTHOR' };
@@ -94,5 +99,30 @@ describe('formatVisitDate', () => {
 
   test('두 자리 월/일도 정상', () => {
     expect(formatVisitDate(new Date(2026, 11, 31))).toBe('2026-12-31');
+  });
+});
+
+describe('extractMentionPuuids', () => {
+  test('빈/null 입력은 빈 배열', () => {
+    expect(extractMentionPuuids('')).toEqual([]);
+    expect(extractMentionPuuids(null)).toEqual([]);
+  });
+
+  test('멘션 없으면 빈 배열', () => {
+    expect(extractMentionPuuids('안녕하세요 좋은 하루')).toEqual([]);
+  });
+
+  test('단일 멘션 추출', () => {
+    expect(extractMentionPuuids('안녕 <@abc123-xyz>')).toEqual(['abc123-xyz']);
+  });
+
+  test('여러 멘션 추출, 중복 제거', () => {
+    const out = extractMentionPuuids('<@p1>야 <@p2>도 와봐 <@p1>');
+    expect(out.sort()).toEqual(['p1', 'p2']);
+  });
+
+  test('잘못된 형식은 매칭 안 됨', () => {
+    expect(extractMentionPuuids('@abc 그냥 텍스트')).toEqual([]);
+    expect(extractMentionPuuids('<@>')).toEqual([]);
   });
 });

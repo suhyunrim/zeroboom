@@ -324,6 +324,35 @@ module.exports = (app) => {
         });
       }
 
+      // 멘션 알림 (비밀글이면 가시성 누설 방지로 skip)
+      if (!isSecret) {
+        const mentionedPuuids = profileController.extractMentionPuuids(content);
+        if (mentionedPuuids.length > 0) {
+          const validMentioned = await models.user.findAll({
+            where: { groupId, puuid: mentionedPuuids, primaryPuuid: null },
+            attributes: ['discordId'],
+          });
+          const mentionRecipientIds = validMentioned.map((u) => u.discordId).filter(Boolean);
+          if (mentionRecipientIds.length > 0) {
+            notificationController.createBulk({
+              recipientDiscordIds: mentionRecipientIds,
+              groupId,
+              type: 'guestbook_mention',
+              targetKey: null,
+              actorDiscordId: discordId,
+              actorName: authorName,
+              payload: {
+                commentId: created.id,
+                parentCommentId: created.parentId || null,
+                profileGroupId: groupId,
+                profilePuuid: puuid,
+                textPreview,
+              },
+            });
+          }
+        }
+      }
+
       const puuidMap = await fetchAuthorPuuidMap(groupId, [discordId]);
       const client = req.app.discordClient;
       return res.status(200).json({
