@@ -132,6 +132,19 @@ module.exports = (app) => {
         createdAt: c.createdAt,
       });
 
+      // 비밀글이지만 viewer가 못 보는 경우 — author는 노출하고 content만 가림.
+      const mapSecretMasked = (c) => ({
+        id: c.id,
+        parentId: c.parentId || null,
+        author: buildAuthor(c.authorDiscordId, c.authorName),
+        content: null,
+        isSecret: true,
+        isDeleted: false,
+        likeCount: likeCountMap[c.id] || 0,
+        likedByMe: likedByViewer.has(c.id),
+        createdAt: c.createdAt,
+      });
+
       // 답글: parentId별 그룹핑, 오래된 순(ASC)으로 정렬
       const repliesByParent = {};
       all
@@ -147,16 +160,16 @@ module.exports = (app) => {
       const buildReplies = (parentId, parentAuthorDiscordId) =>
         (repliesByParent[parentId] || [])
           .filter((r) => !r.deletedAt)
-          .filter((r) =>
-            profileController.canViewComment({
+          .map((r) => {
+            const canView = profileController.canViewComment({
               comment: r,
               viewerDiscordId,
               ownerDiscordId,
               isAdmin,
               parentAuthorDiscordId,
-            }),
-          )
-          .map(mapAlive);
+            });
+            return canView ? mapAlive(r) : mapSecretMasked(r);
+          });
 
       // top-level (parentId === null)만 결과로
       const result = all
@@ -179,17 +192,14 @@ module.exports = (app) => {
               replies: replyList,
             };
           }
-          if (
-            !profileController.canViewComment({
-              comment: top,
-              viewerDiscordId,
-              ownerDiscordId,
-              isAdmin,
-            })
-          ) {
-            return null;
-          }
-          return { ...mapAlive(top), replies: replyList };
+          const canView = profileController.canViewComment({
+            comment: top,
+            viewerDiscordId,
+            ownerDiscordId,
+            isAdmin,
+          });
+          const base = canView ? mapAlive(top) : mapSecretMasked(top);
+          return { ...base, replies: replyList };
         })
         .filter((x) => x !== null);
 
