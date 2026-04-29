@@ -4,7 +4,6 @@ const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
 const notificationController = require('../../controller/notification');
-const { getUserAvatarUrl } = require('../../utils/discordUtils');
 
 const route = Router();
 
@@ -37,7 +36,24 @@ const fetchActorPuuidMap = async (groups) => {
   return map;
 };
 
-const sanitizeGroup = (g, { puuidMap = {}, client = null } = {}) => ({
+/**
+ * actor puuid 배열로 summoner.profileIconId 일괄 조회.
+ */
+const fetchProfileIconMap = async (puuids) => {
+  const valid = (puuids || []).filter(Boolean);
+  if (valid.length === 0) return {};
+  const rows = await models.summoner.findAll({
+    where: { puuid: valid },
+    attributes: ['puuid', 'profileIconId'],
+  });
+  const map = {};
+  rows.forEach((s) => {
+    map[s.puuid] = s.profileIconId;
+  });
+  return map;
+};
+
+const sanitizeGroup = (g, { puuidMap = {}, iconMap = {} } = {}) => ({
   key: g.key,
   type: g.type,
   targetKey: g.targetKey,
@@ -45,12 +61,15 @@ const sanitizeGroup = (g, { puuidMap = {}, client = null } = {}) => ({
   latestAt: g.latestAt,
   hasUnread: g.hasUnread,
   count: g.count,
-  actors: g.actors.map((a) => ({
-    discordId: a.discordId,
-    name: a.name,
-    puuid: g.groupId ? puuidMap[`${g.groupId}:${a.discordId}`] || null : null,
-    avatarUrl: getUserAvatarUrl(client, a.discordId),
-  })),
+  actors: g.actors.map((a) => {
+    const actorPuuid = g.groupId ? puuidMap[`${g.groupId}:${a.discordId}`] || null : null;
+    return {
+      discordId: a.discordId,
+      name: a.name,
+      puuid: actorPuuid,
+      profileIconId: actorPuuid ? iconMap[actorPuuid] || null : null,
+    };
+  }),
   // 가장 최근 1건의 payload를 대표로 노출 (UI에서 텍스트/링크 구성용)
   latestPayload: g.items[0] ? g.items[0].payload : null,
   latestActorName: g.items[0] ? g.items[0].actorName : null,
@@ -72,9 +91,9 @@ module.exports = (app) => {
     try {
       const groups = await notificationController.getList(discordId, { limit });
       const puuidMap = await fetchActorPuuidMap(groups);
-      const client = req.app.discordClient;
+      const iconMap = await fetchProfileIconMap(Object.values(puuidMap));
       return res.status(200).json({
-        result: groups.map((g) => sanitizeGroup(g, { puuidMap, client })),
+        result: groups.map((g) => sanitizeGroup(g, { puuidMap, iconMap })),
       });
     } catch (e) {
       logger.error(e);

@@ -7,7 +7,6 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
 const notificationController = require('../../controller/notification');
-const { getUserAvatarUrl } = require('../../utils/discordUtils');
 
 const route = Router();
 
@@ -70,6 +69,23 @@ const fetchAuthorPuuidMap = async (groupId, discordIds) => {
   return map;
 };
 
+/**
+ * puuid 배열로 summoner.profileIconId 일괄 조회.
+ */
+const fetchProfileIconMap = async (puuids) => {
+  const valid = (puuids || []).filter(Boolean);
+  if (valid.length === 0) return {};
+  const rows = await models.summoner.findAll({
+    where: { puuid: valid },
+    attributes: ['puuid', 'profileIconId'],
+  });
+  const map = {};
+  rows.forEach((s) => {
+    map[s.puuid] = s.profileIconId;
+  });
+  return map;
+};
+
 module.exports = (app) => {
   app.use('/profile', route);
 
@@ -117,19 +133,20 @@ module.exports = (app) => {
         }
       });
 
-      // author batch enrichment: 같은 그룹 본캐 puuid 일괄 조회
+      // author batch enrichment: 같은 그룹 본캐 puuid + profileIconId 일괄 조회
       const authorDiscordIds = [
         ...new Set(all.filter((c) => c.authorDiscordId && !c.deletedAt).map((c) => c.authorDiscordId)),
       ];
       const authorPuuidMap = await fetchAuthorPuuidMap(groupId, authorDiscordIds);
-      const client = req.app.discordClient;
+      const iconMap = await fetchProfileIconMap(Object.values(authorPuuidMap));
       const buildAuthor = (discordId, name) => {
         if (!discordId) return null;
+        const authorPuuid = authorPuuidMap[discordId] || null;
         return {
           discordId,
           name: name || null,
-          puuid: authorPuuidMap[discordId] || null,
-          avatarUrl: getUserAvatarUrl(client, discordId),
+          puuid: authorPuuid,
+          profileIconId: authorPuuid ? iconMap[authorPuuid] || null : null,
         };
       };
 
@@ -354,7 +371,8 @@ module.exports = (app) => {
       }
 
       const puuidMap = await fetchAuthorPuuidMap(groupId, [discordId]);
-      const client = req.app.discordClient;
+      const myPuuid = puuidMap[discordId] || null;
+      const myIconMap = await fetchProfileIconMap([myPuuid]);
       return res.status(200).json({
         result: {
           id: created.id,
@@ -362,8 +380,8 @@ module.exports = (app) => {
           author: {
             discordId,
             name: authorName,
-            puuid: puuidMap[discordId] || null,
-            avatarUrl: getUserAvatarUrl(client, discordId),
+            puuid: myPuuid,
+            profileIconId: myPuuid ? myIconMap[myPuuid] || null : null,
           },
           content: created.content,
           isSecret: created.isSecret,
@@ -520,17 +538,20 @@ module.exports = (app) => {
 
       const likerDiscordIds = [...new Set(likes.map((l) => l.likerDiscordId).filter(Boolean))];
       const puuidMap = await fetchAuthorPuuidMap(comment.targetGroupId, likerDiscordIds);
-      const client = req.app.discordClient;
+      const iconMap = await fetchProfileIconMap(Object.values(puuidMap));
 
-      const result = likes.map((l) => ({
-        liker: {
-          discordId: l.likerDiscordId,
-          name: l.likerName || null,
-          puuid: puuidMap[l.likerDiscordId] || null,
-          avatarUrl: getUserAvatarUrl(client, l.likerDiscordId),
-        },
-        createdAt: l.createdAt,
-      }));
+      const result = likes.map((l) => {
+        const likerPuuid = puuidMap[l.likerDiscordId] || null;
+        return {
+          liker: {
+            discordId: l.likerDiscordId,
+            name: l.likerName || null,
+            puuid: likerPuuid,
+            profileIconId: likerPuuid ? iconMap[likerPuuid] || null : null,
+          },
+          createdAt: l.createdAt,
+        };
+      });
 
       return res.status(200).json({ result });
     } catch (e) {

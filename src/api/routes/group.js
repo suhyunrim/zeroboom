@@ -6,7 +6,7 @@ const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
-const { getGuildIconUrl, getUserAvatarUrl } = require('../../utils/discordUtils');
+const { getGuildIconUrl } = require('../../utils/discordUtils');
 const auditLog = require('../../controller/audit-log');
 const groupController = require('../../controller/group');
 const seasonController = require('../../controller/season');
@@ -77,21 +77,23 @@ module.exports = (app) => {
       const summoners = puuids.length
         ? await models.summoner.findAll({
             where: { puuid: puuids },
-            attributes: ['puuid', 'name'],
+            attributes: ['puuid', 'name', 'profileIconId'],
           })
         : [];
-      const nameByPuuid = {};
+      const summonerByPuuid = {};
       summoners.forEach((s) => {
-        nameByPuuid[s.puuid] = s.name;
+        summonerByPuuid[s.puuid] = s;
       });
 
-      const client = req.app.discordClient;
       const result = users
-        .map((u) => ({
-          puuid: u.puuid,
-          name: nameByPuuid[u.puuid] || null,
-          avatarUrl: getUserAvatarUrl(client, u.discordId),
-        }))
+        .map((u) => {
+          const s = summonerByPuuid[u.puuid];
+          return {
+            puuid: u.puuid,
+            name: s ? s.name : null,
+            profileIconId: s ? s.profileIconId : null,
+          };
+        })
         .filter((m) => m.name);
 
       return res.status(200).json({ result });
