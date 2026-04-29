@@ -6,6 +6,7 @@ const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
+const notificationController = require('../../controller/notification');
 
 const route = Router();
 
@@ -204,7 +205,7 @@ module.exports = (app) => {
     try {
       const owner = await models.user.findOne({
         where: { groupId, puuid },
-        attributes: ['puuid'],
+        attributes: ['puuid', 'discordId'],
       });
       if (!owner) {
         return res.status(404).json({ result: '대상 유저가 그룹에 없습니다.' });
@@ -212,6 +213,7 @@ module.exports = (app) => {
 
       // parentId 검증 + 평탄화
       let parentId = null;
+      let parentAuthorDiscordId = null;
       if (rawParentId !== undefined && rawParentId !== null) {
         const pid = Number(rawParentId);
         if (!pid) {
@@ -223,6 +225,7 @@ module.exports = (app) => {
         }
         // 답글의 답글이면 root로 평탄화
         parentId = parent.parentId || parent.id;
+        parentAuthorDiscordId = parent.authorDiscordId;
       }
 
       const authorName = globalName || username || null;
@@ -249,6 +252,44 @@ module.exports = (app) => {
         },
         source: 'web',
       });
+
+      // 알림 발행
+      const textPreview = notificationController.buildTextPreview(content);
+      if (parentId) {
+        const recipientIds = [...new Set([parentAuthorDiscordId, owner.discordId].filter(Boolean))];
+        notificationController.createBulk({
+          recipientDiscordIds: recipientIds,
+          groupId,
+          type: 'guestbook_reply',
+          targetKey: `reply:${parentId}`,
+          actorDiscordId: discordId,
+          actorName: authorName,
+          payload: {
+            commentId: created.id,
+            parentCommentId: parentId,
+            profileGroupId: groupId,
+            profilePuuid: puuid,
+            textPreview,
+            isSecret: !!isSecret,
+          },
+        });
+      } else if (owner.discordId) {
+        notificationController.create({
+          recipientDiscordId: owner.discordId,
+          groupId,
+          type: 'guestbook_comment',
+          targetKey: null,
+          actorDiscordId: discordId,
+          actorName: authorName,
+          payload: {
+            commentId: created.id,
+            profileGroupId: groupId,
+            profilePuuid: puuid,
+            textPreview,
+            isSecret: !!isSecret,
+          },
+        });
+      }
 
       return res.status(200).json({
         result: {
@@ -356,6 +397,26 @@ module.exports = (app) => {
           likerName: globalName || username || null,
         });
         liked = true;
+
+        // 댓글 작성자에게 알림 (자기 좋아요는 컨트롤러가 skip)
+        if (comment.authorDiscordId) {
+          notificationController.create({
+            recipientDiscordId: comment.authorDiscordId,
+            groupId: comment.targetGroupId,
+            type: 'guestbook_like',
+            targetKey: `like:${comment.id}`,
+            actorDiscordId: discordId,
+            actorName: globalName || username || null,
+            payload: {
+              commentId: comment.id,
+              parentCommentId: comment.parentId || null,
+              profileGroupId: comment.targetGroupId,
+              profilePuuid: comment.targetPuuid,
+              commentPreview: notificationController.buildTextPreview(comment.content),
+              isReply: !!comment.parentId,
+            },
+          });
+        }
       }
 
       const likeCount = await models.comment_like.count({ where: { commentId } });
