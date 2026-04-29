@@ -54,11 +54,12 @@ module.exports = (app) => {
   });
 
   /**
-   * GET /api/group/:groupId/members
+   * GET /api/group/:groupId/active-members
    * 멘션·태그 목록용. 본캐(primaryPuuid: null) + outsider 제외 + 길드 잔류자만.
-   * 응답: [{ puuid, name, avatarUrl }]
+   * 응답: [{ puuid, name, profileIconId }]
+   * blacklist.js의 /members와 path 충돌을 피하기 위해 별도 path 사용.
    */
-  route.get('/:groupId/members', async (req, res) => {
+  route.get('/:groupId/active-members', async (req, res) => {
     const groupId = Number(req.params.groupId);
     if (!groupId) return res.status(400).json({ result: 'groupId가 필요합니다.' });
 
