@@ -8,7 +8,7 @@ const userController = require('../../controller/user');
 const summonerController = require('../../controller/summoner');
 const auditLog = require('../../controller/audit-log');
 
-const STATUS_MESSAGE_MAX_LENGTH = 200;
+const STATUS_MESSAGE_MAX_LENGTH = 50;
 
 module.exports = (app) => {
   app.use('/user', route);
@@ -184,7 +184,11 @@ module.exports = (app) => {
     if (typeof content !== 'string' || !content.trim()) {
       return res.status(400).json({ result: '내용을 입력해주세요.' });
     }
-    const trimmed = content.trim();
+    // 줄바꿈은 공백으로 치환 (한 줄 한마디 강제)
+    const trimmed = content.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+      return res.status(400).json({ result: '내용을 입력해주세요.' });
+    }
     if (trimmed.length > STATUS_MESSAGE_MAX_LENGTH) {
       return res.status(400).json({ result: `한마디는 ${STATUS_MESSAGE_MAX_LENGTH}자 이하로 작성해주세요.` });
     }
