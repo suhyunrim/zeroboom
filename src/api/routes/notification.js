@@ -4,6 +4,7 @@ const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
 const notificationController = require('../../controller/notification');
+const { getUserAvatarUrl } = require('../../utils/discordUtils');
 
 const route = Router();
 
@@ -36,20 +37,6 @@ const fetchActorPuuidMap = async (groups) => {
   return map;
 };
 
-/**
- * Discord client 캐시에서 avatar URL 시도. cache miss면 null.
- */
-const getActorAvatarUrl = (client, discordId) => {
-  if (!client || !discordId) return null;
-  const user = client.users.cache.get(discordId);
-  if (!user) return null;
-  try {
-    return user.displayAvatarURL({ size: 64, extension: 'png' });
-  } catch (e) {
-    return null;
-  }
-};
-
 const sanitizeGroup = (g, { puuidMap = {}, client = null } = {}) => ({
   key: g.key,
   type: g.type,
@@ -62,7 +49,7 @@ const sanitizeGroup = (g, { puuidMap = {}, client = null } = {}) => ({
     discordId: a.discordId,
     name: a.name,
     puuid: g.groupId ? puuidMap[`${g.groupId}:${a.discordId}`] || null : null,
-    avatarUrl: getActorAvatarUrl(client, a.discordId),
+    avatarUrl: getUserAvatarUrl(client, a.discordId),
   })),
   // 가장 최근 1건의 payload를 대표로 노출 (UI에서 텍스트/링크 구성용)
   latestPayload: g.items[0] ? g.items[0].payload : null,

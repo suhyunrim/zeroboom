@@ -7,6 +7,7 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
 const notificationController = require('../../controller/notification');
+const { getUserAvatarUrl } = require('../../utils/discordUtils');
 
 const route = Router();
 
@@ -52,6 +53,23 @@ const getProfileOwnerDiscordId = async (groupId, puuid) => {
   return u ? u.discordId : null;
 };
 
+/**
+ * 같은 그룹 본캐 puuid를 discordId로 일괄 조회.
+ * 부캐(primaryPuuid != null)는 제외 — 클릭 시 본캐 프로필로 이동.
+ */
+const fetchAuthorPuuidMap = async (groupId, discordIds) => {
+  if (!groupId || !discordIds || discordIds.length === 0) return {};
+  const rows = await models.user.findAll({
+    where: { groupId, discordId: discordIds, primaryPuuid: null },
+    attributes: ['discordId', 'puuid'],
+  });
+  const map = {};
+  rows.forEach((u) => {
+    map[u.discordId] = u.puuid;
+  });
+  return map;
+};
+
 module.exports = (app) => {
   app.use('/profile', route);
 
@@ -60,6 +78,7 @@ module.exports = (app) => {
    * 댓글 목록을 트리 구조로 반환 (top-level + 그 밑 replies).
    * 비밀글: 작성자/프로필주인/어드민, 답글은 부모 댓글 작성자도 추가로 봄.
    * 부모가 삭제된 경우 답글이 있으면 isDeleted: true placeholder로 표시.
+   * 각 댓글의 author는 { discordId, name, puuid, avatarUrl } 객체로 옴.
    */
   route.get('/:groupId/:puuid/comments', optionalAuth, async (req, res) => {
     const groupId = Number(req.params.groupId);
@@ -98,11 +117,26 @@ module.exports = (app) => {
         }
       });
 
+      // author batch enrichment: 같은 그룹 본캐 puuid 일괄 조회
+      const authorDiscordIds = [
+        ...new Set(all.filter((c) => c.authorDiscordId && !c.deletedAt).map((c) => c.authorDiscordId)),
+      ];
+      const authorPuuidMap = await fetchAuthorPuuidMap(groupId, authorDiscordIds);
+      const client = req.app.discordClient;
+      const buildAuthor = (discordId, name) => {
+        if (!discordId) return null;
+        return {
+          discordId,
+          name: name || null,
+          puuid: authorPuuidMap[discordId] || null,
+          avatarUrl: getUserAvatarUrl(client, discordId),
+        };
+      };
+
       const mapAlive = (c) => ({
         id: c.id,
         parentId: c.parentId || null,
-        authorDiscordId: c.authorDiscordId,
-        authorName: c.authorName,
+        author: buildAuthor(c.authorDiscordId, c.authorName),
         content: c.content,
         isSecret: c.isSecret,
         isDeleted: false,
@@ -148,8 +182,7 @@ module.exports = (app) => {
             return {
               id: top.id,
               parentId: null,
-              authorDiscordId: null,
-              authorName: null,
+              author: null,
               content: null,
               isSecret: false,
               isDeleted: true,
@@ -291,12 +324,18 @@ module.exports = (app) => {
         });
       }
 
+      const puuidMap = await fetchAuthorPuuidMap(groupId, [discordId]);
+      const client = req.app.discordClient;
       return res.status(200).json({
         result: {
           id: created.id,
           parentId: created.parentId || null,
-          authorDiscordId: created.authorDiscordId,
-          authorName: created.authorName,
+          author: {
+            discordId,
+            name: authorName,
+            puuid: puuidMap[discordId] || null,
+            avatarUrl: getUserAvatarUrl(client, discordId),
+          },
           content: created.content,
           isSecret: created.isSecret,
           isDeleted: false,
@@ -439,14 +478,28 @@ module.exports = (app) => {
     }
 
     try {
+      // 댓글의 그룹 컨텍스트 확보 (puuid 매핑용)
+      const comment = await models.profile_comment.findByPk(commentId, { paranoid: false });
+      if (!comment) {
+        return res.status(404).json({ result: '댓글을 찾을 수 없습니다.' });
+      }
+
       const likes = await models.comment_like.findAll({
         where: { commentId },
         order: [['createdAt', 'DESC']],
       });
 
+      const likerDiscordIds = [...new Set(likes.map((l) => l.likerDiscordId).filter(Boolean))];
+      const puuidMap = await fetchAuthorPuuidMap(comment.targetGroupId, likerDiscordIds);
+      const client = req.app.discordClient;
+
       const result = likes.map((l) => ({
-        likerDiscordId: l.likerDiscordId,
-        likerName: l.likerName,
+        liker: {
+          discordId: l.likerDiscordId,
+          name: l.likerName || null,
+          puuid: puuidMap[l.likerDiscordId] || null,
+          avatarUrl: getUserAvatarUrl(client, l.likerDiscordId),
+        },
         createdAt: l.createdAt,
       }));
 
