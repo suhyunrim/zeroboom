@@ -3,6 +3,7 @@ const models = require('../db/models');
 const { logger } = require('../loaders/logger');
 const { getMatchIdsFromPuuid, getMatchData, getRankDataByPuuid } = require('../services/riot-api');
 const notificationController = require('./notification');
+const { fetchDiscordIdMap } = require('../utils/userLookup');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -108,39 +109,28 @@ async function saveLeaderboardSnapshot(challengeId) {
       `[챌린지] 리더보드 스냅샷 저장 완료 (challengeId=${challengeId}, ${leaderboardResult.result.length}명)`,
     );
 
-    // 종료 알림 발송 (참가자 전원에게 finalRank 포함, 단일 bulkCreate)
     try {
       const ranks = leaderboardResult.result;
-      const puuids = ranks.map((e) => e.puuid);
-      if (puuids.length > 0) {
-        const users = await models.user.findAll({
-          where: { groupId: challenge.groupId, puuid: puuids },
-          attributes: ['puuid', 'discordId'],
-        });
-        const discordByPuuid = {};
-        users.forEach((u) => {
-          if (u.discordId) discordByPuuid[u.puuid] = u.discordId;
-        });
-        const rows = ranks
-          .map((entry) => {
-            const did = discordByPuuid[entry.puuid];
-            if (!did) return null;
-            return {
-              recipientDiscordId: did,
-              groupId: challenge.groupId,
-              type: 'challenge_end',
-              targetKey: `challenge:${challengeId}`,
-              payload: {
-                challengeId,
-                challengeTitle: challenge.title,
-                finalRank: entry.rank,
-                totalParticipants: ranks.length,
-              },
-            };
-          })
-          .filter(Boolean);
-        await notificationController.createMany(rows);
-      }
+      const discordByPuuid = await fetchDiscordIdMap(challenge.groupId, ranks.map((e) => e.puuid));
+      const rows = ranks
+        .map((entry) => {
+          const did = discordByPuuid[entry.puuid];
+          if (!did) return null;
+          return {
+            recipientDiscordId: did,
+            groupId: challenge.groupId,
+            type: notificationController.NOTIFICATION_TYPES.CHALLENGE_END,
+            targetKey: `challenge:${challengeId}`,
+            payload: {
+              challengeId,
+              challengeTitle: challenge.title,
+              finalRank: entry.rank,
+              totalParticipants: ranks.length,
+            },
+          };
+        })
+        .filter(Boolean);
+      await notificationController.createMany(rows);
     } catch (e) {
       logger.error(`[챌린지] 종료 알림 발송 실패 (challengeId=${challengeId}): ${e.message}`);
     }

@@ -305,27 +305,21 @@ async function processAchievements(trigger, context) {
     if (newUnlocks.length > 0) {
       await models.user_achievement.bulkCreate(newUnlocks, { ignoreDuplicates: true });
 
-      // 알림 발송 (lazy require — 순환 의존 방지, 단일 bulkCreate)
+      // lazy require — 순환 의존 방지
       try {
         const notificationController = require('../../controller/notification');
-        const puuids = [...new Set(newUnlocks.map((u) => u.puuid))];
-        const userDocs = await models.user.findAll({
-          where: { groupId, puuid: puuids },
-          attributes: ['puuid', 'discordId'],
-        });
-        const discordByPuuid = {};
-        userDocs.forEach((u) => {
-          if (u.discordId) discordByPuuid[u.puuid] = u.discordId;
-        });
+        const { fetchDiscordIdMap } = require('../../utils/userLookup');
+        const discordByPuuid = await fetchDiscordIdMap(groupId, newUnlocks.map((u) => u.puuid));
+        const defById = new Map(definitions.map((d) => [d.id, d]));
         const rows = newUnlocks
           .map((unlock) => {
             const did = discordByPuuid[unlock.puuid];
             if (!did) return null;
-            const def = definitions.find((d) => d.id === unlock.achievementId);
+            const def = defById.get(unlock.achievementId);
             return {
               recipientDiscordId: did,
               groupId,
-              type: 'achievement_unlock',
+              type: notificationController.NOTIFICATION_TYPES.ACHIEVEMENT_UNLOCK,
               targetKey: null,
               payload: {
                 achievementId: unlock.achievementId,

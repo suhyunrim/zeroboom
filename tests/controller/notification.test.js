@@ -83,26 +83,35 @@ describe('create', () => {
   });
 });
 
-describe('createBulk', () => {
+describe('createMany', () => {
   test('빈 배열 입력은 즉시 빈 배열 반환', async () => {
-    const r = await notificationController.createBulk({
-      recipientDiscordIds: [],
-      type: 'season_end',
-    });
+    const r = await notificationController.createMany([]);
     expect(r).toEqual([]);
     expect(mockModels.notification.bulkCreate).not.toHaveBeenCalled();
   });
 
-  test('actor 자기 자신은 자동 제외', async () => {
+  test('actor === recipient row는 자동 제외', async () => {
     mockModels.notification.bulkCreate.mockResolvedValue([{ id: 1 }]);
-    await notificationController.createBulk({
-      recipientDiscordIds: ['A', 'B', 'C'],
-      actorDiscordId: 'B',
-      type: 'guestbook_reply',
-    });
+    await notificationController.createMany([
+      { recipientDiscordId: 'A', type: 'guestbook_reply', actorDiscordId: 'B' },
+      { recipientDiscordId: 'B', type: 'guestbook_reply', actorDiscordId: 'B' },
+      { recipientDiscordId: 'C', type: 'guestbook_reply', actorDiscordId: 'B' },
+    ]);
     const call = mockModels.notification.bulkCreate.mock.calls[0][0];
     expect(call.length).toBe(2);
     expect(call.map((r) => r.recipientDiscordId)).toEqual(['A', 'C']);
+  });
+
+  test('필수 필드 빠진 row는 제외', async () => {
+    mockModels.notification.bulkCreate.mockResolvedValue([{ id: 1 }]);
+    await notificationController.createMany([
+      { recipientDiscordId: 'A', type: 'guestbook_reply' },
+      { recipientDiscordId: '', type: 'guestbook_reply' },
+      { recipientDiscordId: 'B', type: '' },
+    ]);
+    const call = mockModels.notification.bulkCreate.mock.calls[0][0];
+    expect(call.length).toBe(1);
+    expect(call[0].recipientDiscordId).toBe('A');
   });
 });
 

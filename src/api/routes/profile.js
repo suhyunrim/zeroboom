@@ -5,6 +5,8 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
 const notificationController = require('../../controller/notification');
+
+const { NOTIFICATION_TYPES } = notificationController;
 const { fetchProfileIconMap } = require('../../utils/profileIcon');
 
 const route = Router();
@@ -285,27 +287,32 @@ module.exports = (app) => {
       const textPreview = notificationController.buildTextPreview(content);
       if (parentId) {
         const recipientIds = [...new Set([parentAuthorDiscordId, owner.discordId].filter(Boolean))];
-        notificationController.createBulk({
-          recipientDiscordIds: recipientIds,
-          groupId,
-          type: 'guestbook_reply',
-          targetKey: `reply:${parentId}`,
-          actorDiscordId: discordId,
-          actorName: authorName,
-          payload: {
-            commentId: created.id,
-            parentCommentId: parentId,
-            profileGroupId: groupId,
-            profilePuuid: puuid,
-            textPreview,
-            isSecret: !!isSecret,
-          },
-        });
+        const replyPayload = {
+          commentId: created.id,
+          parentCommentId: parentId,
+          profileGroupId: groupId,
+          profilePuuid: puuid,
+          textPreview,
+          isSecret: !!isSecret,
+        };
+        notificationController.createMany(
+          recipientIds
+            .filter((rid) => rid !== discordId)
+            .map((rid) => ({
+              recipientDiscordId: rid,
+              groupId,
+              type: NOTIFICATION_TYPES.GUESTBOOK_REPLY,
+              targetKey: `reply:${parentId}`,
+              actorDiscordId: discordId,
+              actorName: authorName,
+              payload: replyPayload,
+            })),
+        );
       } else if (owner.discordId) {
         notificationController.create({
           recipientDiscordId: owner.discordId,
           groupId,
-          type: 'guestbook_comment',
+          type: NOTIFICATION_TYPES.GUESTBOOK_COMMENT,
           targetKey: null,
           actorDiscordId: discordId,
           actorName: authorName,
@@ -327,24 +334,27 @@ module.exports = (app) => {
             where: { groupId, puuid: mentionedPuuids, primaryPuuid: null },
             attributes: ['discordId'],
           });
-          const mentionRecipientIds = validMentioned.map((u) => u.discordId).filter(Boolean);
-          if (mentionRecipientIds.length > 0) {
-            notificationController.createBulk({
-              recipientDiscordIds: mentionRecipientIds,
-              groupId,
-              type: 'guestbook_mention',
-              targetKey: null,
-              actorDiscordId: discordId,
-              actorName: authorName,
-              payload: {
-                commentId: created.id,
-                parentCommentId: created.parentId || null,
-                profileGroupId: groupId,
-                profilePuuid: puuid,
-                textPreview,
-              },
-            });
-          }
+          const mentionPayload = {
+            commentId: created.id,
+            parentCommentId: created.parentId || null,
+            profileGroupId: groupId,
+            profilePuuid: puuid,
+            textPreview,
+          };
+          notificationController.createMany(
+            validMentioned
+              .map((u) => u.discordId)
+              .filter((rid) => rid && rid !== discordId)
+              .map((rid) => ({
+                recipientDiscordId: rid,
+                groupId,
+                type: NOTIFICATION_TYPES.GUESTBOOK_MENTION,
+                targetKey: null,
+                actorDiscordId: discordId,
+                actorName: authorName,
+                payload: mentionPayload,
+              })),
+          );
         }
       }
 
@@ -447,7 +457,7 @@ module.exports = (app) => {
       }
 
       // findOrCreate로 race 안전성 확보 (동시 더블클릭 시 unique 위반 방지)
-      const [, created] = await models.comment_like.findOrCreate({
+      const [like, created] = await models.comment_like.findOrCreate({
         where: { commentId, likerDiscordId: discordId },
         defaults: {
           commentId,
@@ -459,12 +469,11 @@ module.exports = (app) => {
       let liked;
       if (created) {
         liked = true;
-        // 댓글 작성자에게 알림 (자기 좋아요는 컨트롤러가 skip, dedupe도 컨트롤러가 처리)
         if (comment.authorDiscordId) {
           notificationController.createIfNotPending({
             recipientDiscordId: comment.authorDiscordId,
             groupId: comment.targetGroupId,
-            type: 'guestbook_like',
+            type: NOTIFICATION_TYPES.GUESTBOOK_LIKE,
             targetKey: `like:${comment.id}`,
             actorDiscordId: discordId,
             actorName: globalName || username || null,
@@ -479,10 +488,7 @@ module.exports = (app) => {
           });
         }
       } else {
-        // 이미 있던 좋아요 → 취소
-        await models.comment_like.destroy({
-          where: { commentId, likerDiscordId: discordId },
-        });
+        await like.destroy();
         liked = false;
       }
 

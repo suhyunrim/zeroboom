@@ -5,6 +5,16 @@ const TEXT_PREVIEW_MAX = 50;
 const LIST_FETCH_LIMIT = 200;
 const ACTOR_SAMPLE_PER_GROUP = 3;
 
+const NOTIFICATION_TYPES = Object.freeze({
+  GUESTBOOK_COMMENT: 'guestbook_comment',
+  GUESTBOOK_REPLY: 'guestbook_reply',
+  GUESTBOOK_LIKE: 'guestbook_like',
+  GUESTBOOK_MENTION: 'guestbook_mention',
+  CHALLENGE_END: 'challenge_end',
+  ACHIEVEMENT_UNLOCK: 'achievement_unlock',
+  SEASON_END: 'season_end',
+});
+
 /**
  * 알림 한 건 생성. actor === recipient면 skip.
  * 실패해도 throw하지 않음 (호출 측 비즈니스 로직 보호).
@@ -93,31 +103,6 @@ const createMany = async (rows) => {
     );
   } catch (e) {
     logger.error('알림 다건 생성 실패:', e);
-    return [];
-  }
-};
-
-/**
- * 다수 recipient에게 같은 알림 일괄 생성.
- * actor 자기 자신은 자동 skip.
- */
-const createBulk = async ({ recipientDiscordIds, groupId, type, targetKey, actorDiscordId, actorName, payload }) => {
-  if (!Array.isArray(recipientDiscordIds) || recipientDiscordIds.length === 0) return [];
-  const filtered = recipientDiscordIds.filter((id) => id && id !== actorDiscordId);
-  if (filtered.length === 0) return [];
-  try {
-    const rows = filtered.map((rid) => ({
-      recipientDiscordId: rid,
-      groupId: groupId || null,
-      type,
-      targetKey: targetKey || null,
-      actorDiscordId: actorDiscordId || null,
-      actorName: actorName || null,
-      payload: payload || null,
-    }));
-    return await models.notification.bulkCreate(rows);
-  } catch (e) {
-    logger.error('알림 일괄 생성 실패:', e);
     return [];
   }
 };
@@ -237,7 +222,6 @@ module.exports = {
   create,
   createIfNotPending,
   createMany,
-  createBulk,
   buildTextPreview,
   groupNotifications,
   getList,
@@ -245,4 +229,5 @@ module.exports = {
   markAllRead,
   markGroupRead,
   TEXT_PREVIEW_MAX,
+  NOTIFICATION_TYPES,
 };

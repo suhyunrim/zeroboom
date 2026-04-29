@@ -74,7 +74,7 @@ module.exports.resetSeason = async (groupId, actorDiscordId, actorName) => {
       const rows = dedup.map((e, i) => ({
         recipientDiscordId: e.discordId,
         groupId,
-        type: 'season_end',
+        type: notificationController.NOTIFICATION_TYPES.SEASON_END,
         targetKey: `season:${groupId}:${currentSeason}`,
         payload: {
           fromSeason: currentSeason,
