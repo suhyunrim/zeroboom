@@ -7,7 +7,7 @@ const profileController = require('../../controller/profile');
 const notificationController = require('../../controller/notification');
 
 const { NOTIFICATION_TYPES } = notificationController;
-const { fetchProfileIconMap } = require('../../utils/profileIcon');
+const { fetchSummonerSummaryMap } = require('../../utils/profileIcon');
 
 const route = Router();
 
@@ -107,15 +107,16 @@ module.exports = (app) => {
         ...new Set(all.filter((c) => c.authorDiscordId && !c.deletedAt).map((c) => c.authorDiscordId)),
       ];
       const authorPuuidMap = await fetchAuthorPuuidMap(groupId, authorDiscordIds);
-      const iconMap = await fetchProfileIconMap(Object.values(authorPuuidMap));
-      const buildAuthor = (discordId, name) => {
+      const summaryMap = await fetchSummonerSummaryMap(Object.values(authorPuuidMap));
+      const buildAuthor = (discordId, fallbackName) => {
         if (!discordId) return null;
         const authorPuuid = authorPuuidMap[discordId] || null;
+        const summary = authorPuuid ? summaryMap[authorPuuid] : null;
         return {
           discordId,
-          name: name || null,
+          name: (summary && summary.name) || fallbackName || null,
           puuid: authorPuuid,
-          profileIconId: authorPuuid ? iconMap[authorPuuid] || null : null,
+          profileIconId: summary ? summary.profileIconId : null,
         };
       };
 
@@ -360,16 +361,17 @@ module.exports = (app) => {
 
       const puuidMap = await fetchAuthorPuuidMap(groupId, [discordId]);
       const myPuuid = puuidMap[discordId] || null;
-      const myIconMap = await fetchProfileIconMap([myPuuid]);
+      const mySummaryMap = await fetchSummonerSummaryMap([myPuuid]);
+      const mySummary = myPuuid ? mySummaryMap[myPuuid] : null;
       return res.status(200).json({
         result: {
           id: created.id,
           parentId: created.parentId || null,
           author: {
             discordId,
-            name: authorName,
+            name: (mySummary && mySummary.name) || authorName,
             puuid: myPuuid,
-            profileIconId: myPuuid ? myIconMap[myPuuid] || null : null,
+            profileIconId: mySummary ? mySummary.profileIconId : null,
           },
           content: created.content,
           isSecret: created.isSecret,
@@ -525,16 +527,17 @@ module.exports = (app) => {
 
       const likerDiscordIds = [...new Set(likes.map((l) => l.likerDiscordId).filter(Boolean))];
       const puuidMap = await fetchAuthorPuuidMap(comment.targetGroupId, likerDiscordIds);
-      const iconMap = await fetchProfileIconMap(Object.values(puuidMap));
+      const summaryMap = await fetchSummonerSummaryMap(Object.values(puuidMap));
 
       const result = likes.map((l) => {
         const likerPuuid = puuidMap[l.likerDiscordId] || null;
+        const summary = likerPuuid ? summaryMap[likerPuuid] : null;
         return {
           liker: {
             discordId: l.likerDiscordId,
-            name: l.likerName || null,
+            name: (summary && summary.name) || l.likerName || null,
             puuid: likerPuuid,
-            profileIconId: likerPuuid ? iconMap[likerPuuid] || null : null,
+            profileIconId: summary ? summary.profileIconId : null,
           },
           createdAt: l.createdAt,
         };

@@ -4,7 +4,7 @@ const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
 const models = require('../../db/models');
 const notificationController = require('../../controller/notification');
-const { fetchProfileIconMap } = require('../../utils/profileIcon');
+const { fetchSummonerSummaryMap } = require('../../utils/profileIcon');
 
 const route = Router();
 
@@ -37,29 +37,34 @@ const fetchActorPuuidMap = async (groups) => {
   return map;
 };
 
-const sanitizeGroup = (g, { puuidMap = {}, iconMap = {} } = {}) => ({
-  key: g.key,
-  type: g.type,
-  targetKey: g.targetKey,
-  groupId: g.groupId,
-  latestAt: g.latestAt,
-  hasUnread: g.hasUnread,
-  count: g.count,
-  actors: g.actors.map((a) => {
+const sanitizeGroup = (g, { puuidMap = {}, summaryMap = {} } = {}) => {
+  const resolvedActors = g.actors.map((a) => {
     const actorPuuid = g.groupId ? puuidMap[`${g.groupId}:${a.discordId}`] || null : null;
+    const summary = actorPuuid ? summaryMap[actorPuuid] : null;
     return {
       discordId: a.discordId,
-      name: a.name,
+      name: (summary && summary.name) || a.name || null,
       puuid: actorPuuid,
-      profileIconId: actorPuuid ? iconMap[actorPuuid] || null : null,
+      profileIconId: summary ? summary.profileIconId : null,
     };
-  }),
-  // 가장 최근 1건의 payload를 대표로 노출 (UI에서 텍스트/링크 구성용)
-  latestPayload: g.items[0] ? g.items[0].payload : null,
-  latestActorName: g.items[0] ? g.items[0].actorName : null,
-  // 그룹의 대표 id — read 처리/이동에 활용
-  representativeId: g.items[0] ? g.items[0].id : null,
-});
+  });
+  return {
+    key: g.key,
+    type: g.type,
+    targetKey: g.targetKey,
+    groupId: g.groupId,
+    latestAt: g.latestAt,
+    hasUnread: g.hasUnread,
+    count: g.count,
+    actors: resolvedActors,
+    // 가장 최근 1건의 payload를 대표로 노출 (UI에서 텍스트/링크 구성용)
+    latestPayload: g.items[0] ? g.items[0].payload : null,
+    // 최신 row의 actor === actors[0] (controller에서 DESC 순으로 dedupe하므로)
+    latestActorName: resolvedActors[0] ? resolvedActors[0].name : null,
+    // 그룹의 대표 id — read 처리/이동에 활용
+    representativeId: g.items[0] ? g.items[0].id : null,
+  };
+};
 
 module.exports = (app) => {
   app.use('/notifications', route);
@@ -75,9 +80,9 @@ module.exports = (app) => {
     try {
       const groups = await notificationController.getList(discordId, { limit });
       const puuidMap = await fetchActorPuuidMap(groups);
-      const iconMap = await fetchProfileIconMap(Object.values(puuidMap));
+      const summaryMap = await fetchSummonerSummaryMap(Object.values(puuidMap));
       return res.status(200).json({
-        result: groups.map((g) => sanitizeGroup(g, { puuidMap, iconMap })),
+        result: groups.map((g) => sanitizeGroup(g, { puuidMap, summaryMap })),
       });
     } catch (e) {
       logger.error(e);
