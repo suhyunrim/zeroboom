@@ -1,11 +1,56 @@
 const { Router } = require('express');
+const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const { verifyToken } = require('../middlewares/auth');
+const models = require('../../db/models');
 const notificationController = require('../../controller/notification');
 
 const route = Router();
 
-const sanitizeGroup = (g) => ({
+/**
+ * actor 본캐 puuid를 (groupId, discordId) 단위로 일괄 조회.
+ * 부캐(primaryPuuid != null)는 제외 — 알림 클릭 시 본캐 프로필로 이동.
+ */
+const fetchActorPuuidMap = async (groups) => {
+  const pairs = new Set();
+  groups.forEach((g) => {
+    if (!g.groupId) return;
+    g.actors.forEach((a) => {
+      if (a.discordId) pairs.add(`${g.groupId}:${a.discordId}`);
+    });
+  });
+  if (pairs.size === 0) return {};
+
+  const orClauses = [...pairs].map((p) => {
+    const [gid, did] = p.split(':');
+    return { groupId: Number(gid), discordId: did };
+  });
+  const rows = await models.user.findAll({
+    where: { [Op.or]: orClauses, primaryPuuid: null },
+    attributes: ['groupId', 'discordId', 'puuid'],
+  });
+  const map = {};
+  rows.forEach((u) => {
+    map[`${u.groupId}:${u.discordId}`] = u.puuid;
+  });
+  return map;
+};
+
+/**
+ * Discord client 캐시에서 avatar URL 시도. cache miss면 null.
+ */
+const getActorAvatarUrl = (client, discordId) => {
+  if (!client || !discordId) return null;
+  const user = client.users.cache.get(discordId);
+  if (!user) return null;
+  try {
+    return user.displayAvatarURL({ size: 64, extension: 'png' });
+  } catch (e) {
+    return null;
+  }
+};
+
+const sanitizeGroup = (g, { puuidMap = {}, client = null } = {}) => ({
   key: g.key,
   type: g.type,
   targetKey: g.targetKey,
@@ -13,7 +58,12 @@ const sanitizeGroup = (g) => ({
   latestAt: g.latestAt,
   hasUnread: g.hasUnread,
   count: g.count,
-  actors: g.actors,
+  actors: g.actors.map((a) => ({
+    discordId: a.discordId,
+    name: a.name,
+    puuid: g.groupId ? puuidMap[`${g.groupId}:${a.discordId}`] || null : null,
+    avatarUrl: getActorAvatarUrl(client, a.discordId),
+  })),
   // 가장 최근 1건의 payload를 대표로 노출 (UI에서 텍스트/링크 구성용)
   latestPayload: g.items[0] ? g.items[0].payload : null,
   latestActorName: g.items[0] ? g.items[0].actorName : null,
@@ -34,7 +84,11 @@ module.exports = (app) => {
 
     try {
       const groups = await notificationController.getList(discordId, { limit });
-      return res.status(200).json({ result: groups.map(sanitizeGroup) });
+      const puuidMap = await fetchActorPuuidMap(groups);
+      const client = req.app.discordClient;
+      return res.status(200).json({
+        result: groups.map((g) => sanitizeGroup(g, { puuidMap, client })),
+      });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
