@@ -95,6 +95,10 @@ async function saveLeaderboardSnapshot(challengeId) {
     const challenge = await models.challenge.findByPk(challengeId);
     if (!challenge || challenge.leaderboardSnapshot) return;
 
+    // 스냅샷은 항상 fresh compute. 오염된 캐시(예: 데이터 동기화 전 캐싱된 빈 결과)가
+    // 그대로 스냅샷으로 굳어버리는 사고를 방지한다.
+    await models.challenge.update({ leaderboardCache: null }, { where: { id: challengeId } });
+
     const leaderboardResult = await module.exports.getLeaderboard(challengeId);
     if (leaderboardResult.status !== 200) return;
 
