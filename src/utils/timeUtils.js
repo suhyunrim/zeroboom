@@ -96,6 +96,24 @@ function isWeekdayTime(date) {
 }
 
 /**
+ * 입력 시각이 속한 KST 날짜의 00:00:00.000 KST에 해당하는 UTC Date 반환
+ */
+function kstDayStart(input) {
+  const d = new Date(new Date(input).getTime() + KST_OFFSET_MS);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - KST_OFFSET_MS);
+}
+
+/**
+ * 입력 시각이 속한 KST 날짜의 23:59:59.999 KST에 해당하는 UTC Date 반환
+ */
+function kstDayEnd(input) {
+  const d = new Date(new Date(input).getTime() + KST_OFFSET_MS);
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999) - KST_OFFSET_MS,
+  );
+}
+
+/**
  * YYYYMMDD 숫자 키 간의 일수 차이 (key1 - key2). 실제 달력 기준.
  */
 function kstDayKeyDiff(key1, key2) {
@@ -121,5 +139,7 @@ module.exports = {
   getKSTDateKey,
   isWeekendTime,
   isWeekdayTime,
+  kstDayStart,
+  kstDayEnd,
   kstDayKeyDiff,
 };

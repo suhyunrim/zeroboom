@@ -4,6 +4,7 @@ const { logger } = require('../loaders/logger');
 const { getMatchIdsFromPuuid, getMatchData, getRankDataByPuuid } = require('../services/riot-api');
 const notificationController = require('./notification');
 const { fetchDiscordIdMap } = require('../utils/userLookup');
+const { kstDayStart, kstDayEnd } = require('../utils/timeUtils');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -245,13 +246,14 @@ module.exports.createChallenge = async (groupId, data, createdBy) => {
     const group = await models.group.findByPk(groupId);
     if (!group) return { result: '그룹을 찾을 수 없습니다.', status: 404 };
 
+    // 챌린지는 일단위. 입력 시각이 어떻든 KST 그날의 00:00~23:59:59로 정규화한다.
     const challenge = await models.challenge.create({
       groupId,
       title: data.title,
       description: data.description || null,
       gameType: data.gameType,
-      startAt: new Date(data.startAt),
-      endAt: new Date(data.endAt),
+      startAt: kstDayStart(data.startAt),
+      endAt: kstDayEnd(data.endAt),
       scoringType: data.scoringType || 'points',
       isVisible: data.isVisible || false,
       createdBy,
@@ -288,6 +290,8 @@ module.exports.updateChallenge = async (challengeId, data) => {
         updateFields[field] = data[field];
       }
     }
+    if (updateFields.startAt !== undefined) updateFields.startAt = kstDayStart(updateFields.startAt);
+    if (updateFields.endAt !== undefined) updateFields.endAt = kstDayEnd(updateFields.endAt);
 
     await models.challenge.update(updateFields, { where: { id: challengeId } });
     const updated = await models.challenge.findByPk(challengeId);
