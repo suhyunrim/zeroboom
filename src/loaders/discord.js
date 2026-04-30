@@ -530,10 +530,10 @@ module.exports = async (app) => {
           const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
           let actualName = parsedNickname;
 
-          // discordId가 있으면 DB에서 실제 소환사 이름 조회
+          // discordId가 있으면 DB에서 실제 소환사 이름 조회 (본캐 우선)
           if (memberData && memberData.discordId) {
             const userData = await models.user.findOne({
-              where: { groupId: group.id, discordId: memberData.discordId },
+              where: { groupId: group.id, discordId: memberData.discordId, primaryPuuid: null },
             });
             if (userData) {
               const summonerData = await models.summoner.findOne({
@@ -826,9 +826,9 @@ module.exports = async (app) => {
           return;
         }
 
-        // 투표자 식별
+        // 투표자 식별 (매치는 본캐 puuid로 진행되므로 본캐 우선)
         const voterUser = await models.user.findOne({
-          where: { groupId: session.groupId, discordId: interaction.user.id },
+          where: { groupId: session.groupId, discordId: interaction.user.id, primaryPuuid: null },
         });
 
         if (!voterUser) {
@@ -1110,9 +1110,9 @@ module.exports = async (app) => {
           return;
         }
 
-        // 투표자 식별
+        // 투표자 식별 (매치는 본캐 puuid로 진행되므로 본캐 우선)
         const voterUser = await models.user.findOne({
-          where: { groupId: session.groupId, discordId: interaction.user.id },
+          where: { groupId: session.groupId, discordId: interaction.user.id, primaryPuuid: null },
         });
 
         if (!voterUser) {
@@ -1277,10 +1277,12 @@ module.exports = async (app) => {
               );
               await activity.update({ lastLeftAt: now });
 
-              // 보이스 업적 체크 (알림 없이 달성만 기록)
+              // 보이스 업적 체크 (알림 없이 달성만 기록, 본캐에 누적)
               const group = await models.group.findOne({ where: { discordGuildId: guildId } });
               if (group) {
-                const user = await models.user.findOne({ where: { groupId: group.id, discordId: memberId } });
+                const user = await models.user.findOne({
+                  where: { groupId: group.id, discordId: memberId, primaryPuuid: null },
+                });
                 if (user) {
                   // 밤새기: 단일 세션 12시간 이상이면 stat 증가
                   const sessionMs = now.getTime() - new Date(activity.lastJoinedAt).getTime();
@@ -1365,10 +1367,10 @@ module.exports = async (app) => {
             generatorId: generator.id,
           });
 
-          // 채널 개척자 업적: stat 증가 + 체크
+          // 채널 개척자 업적: stat 증가 + 체크 (본캐에 누적)
           try {
             const ownerUser = await models.user.findOne({
-              where: { groupId: generator.groupId, discordId: member.id },
+              where: { groupId: generator.groupId, discordId: member.id, primaryPuuid: null },
             });
             if (ownerUser) {
               const { STAT_TYPES } = require('../services/achievement/definitions');

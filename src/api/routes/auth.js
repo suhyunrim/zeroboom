@@ -78,10 +78,13 @@ module.exports = (app) => {
       });
 
       // 4. discordId로 유저 정보 조회 → puuid 확인
+      // 본캐(primaryPuuid: null)를 우선 선택. 부캐가 먼저 잡히면 세션 puuid가
+      // 부캐로 발급되어 이후 모든 API가 부캐 시점 데이터를 참조하게 된다.
       const users = await models.user.findAll({
         where: { discordId: discordUser.id },
       });
-      const puuid = users.length > 0 ? users[0].puuid : null;
+      const mainUser = users.find((u) => !u.primaryPuuid) || users[0];
+      const puuid = mainUser ? mainUser.puuid : null;
 
       // 5. 그룹 목록 조회 (puuid 있으면 최근 매치 정렬 포함)
       let groups;
