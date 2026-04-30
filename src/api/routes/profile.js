@@ -20,11 +20,13 @@ const isGroupAdmin = async (groupId, discordId) => {
   if (!discordId) return false;
   const superAdmin = await models.super_admin.findByPk(discordId);
   if (superAdmin) return true;
-  const u = await models.user.findOne({
-    where: { groupId, discordId },
+  // 같은 discordId로 본캐+부캐가 등록된 경우 admin 행이 LIMIT 1에서 누락될 수 있어
+  // role='admin'인 행이 하나라도 있는지로 판정한다.
+  const adminRow = await models.user.findOne({
+    where: { groupId, discordId, role: 'admin' },
     attributes: ['role'],
   });
-  return !!u && u.role === 'admin';
+  return !!adminRow;
 };
 
 /**
