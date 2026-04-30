@@ -48,8 +48,9 @@ function isDiscordAdmin(member) {
  * @param {Object} group - DB group 레코드
  */
 async function syncAdminRoles(members, group) {
+  // 부캐는 항상 member 유지. Discord 권한은 본캐에만 동기화한다.
   const users = await models.user.findAll({
-    where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
+    where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null, primaryPuuid: null },
     attributes: ['puuid', 'discordId', 'role'],
   });
 
@@ -1534,8 +1535,9 @@ module.exports = async (app) => {
       const group = await models.group.findOne({ where: { discordGuildId: newMember.guild.id } });
       if (!group) return;
 
+      // 부캐는 항상 member 유지. 본캐 행만 권한 동기화 대상.
       const user = await models.user.findOne({
-        where: { groupId: group.id, discordId: newMember.id },
+        where: { groupId: group.id, discordId: newMember.id, primaryPuuid: null },
       });
       if (!user || user.role === 'outsider') return;
 
