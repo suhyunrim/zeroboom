@@ -285,6 +285,22 @@ module.exports.updateChallenge = async (challengeId, data) => {
       'isVisible',
       'displayOrder',
     ];
+    // 종료/취소된 챌린지는 cosmetic 필드만 수정 허용. 기간/타입/스코어링 변경은
+    // 스냅샷·집계 정합성을 깨므로 차단한다.
+    const status = getChallengeStatus(challenge);
+    const isFrozen = status === 'ended' || status === 'canceled';
+    const COSMETIC_FIELDS = ['title', 'description', 'displayOrder', 'isVisible'];
+    if (isFrozen) {
+      const blocked = allowedFields.filter(
+        (f) => data[f] !== undefined && !COSMETIC_FIELDS.includes(f),
+      );
+      if (blocked.length > 0) {
+        return {
+          result: `종료/취소된 챌린지는 ${blocked.join(', ')} 항목을 수정할 수 없습니다.`,
+          status: 400,
+        };
+      }
+    }
     for (const field of allowedFields) {
       if (data[field] !== undefined) {
         updateFields[field] = data[field];
