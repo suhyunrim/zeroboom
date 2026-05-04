@@ -14,6 +14,7 @@ const auditLog = require('./routes/audit-log');
 const balanceReport = require('./routes/balance-report');
 const profile = require('./routes/profile');
 const notification = require('./routes/notification');
+const tournament = require('./routes/tournament');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -37,6 +38,7 @@ module.exports = () => {
   balanceReport(app);
   profile(app);
   notification(app);
+  tournament(app);
 
   // v2
   groupsV2(app);
