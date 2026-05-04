@@ -1,27 +1,27 @@
 const { Op } = require('sequelize');
+const elo = require('arpad');
 const models = require('../db/models');
 
 const TEAM_SIZE = 5;
 const VALID_POSITIONS = ['top', 'jungle', 'mid', 'adc', 'support'];
 
-/**
- * 다음 2의 거듭제곱(>= teamCount). 최소 2.
- */
+const STATUS = {
+  PREPARING: 'preparing',
+  IN_PROGRESS: 'in_progress',
+  FINISHED: 'finished',
+};
+
+const ratingCalculator = new elo(16);
+
 const computeBracketSize = (teamCount) => {
   if (teamCount < 2) return 2;
   return 2 ** Math.ceil(Math.log2(teamCount));
 };
 
-/**
- * BO 매치의 승리 조건 점수 (ceil(bestOf / 2)).
- */
 const getWinningScore = (bestOf) => Math.ceil(bestOf / 2);
 
-/**
- * 라운드 라벨 계산. teamCount < bracketSize 이면 R1은 '예선'.
- * 이외는 결승/4강/8강/... 로 채움.
- */
 const computeRoundLabels = (bracketSize, teamCount) => {
+  if (!bracketSize) return {};
   const totalRounds = Math.log2(bracketSize);
   const labels = {};
   for (let r = 1; r <= totalRounds; r += 1) {
@@ -34,20 +34,12 @@ const computeRoundLabels = (bracketSize, teamCount) => {
   return labels;
 };
 
-/**
- * (round, slot) 기준 다음 매치 위치 반환.
- * 다음 매치의 어느 슬롯(team1/team2)으로 진출하는지도 포함.
- */
 const getNextMatchPosition = (round, slot) => ({
   round: round + 1,
   slot: Math.floor(slot / 2),
   side: slot % 2 === 0 ? 'team1' : 'team2',
 });
 
-/**
- * BO 매치 점수 유효성 검증.
- * 승자는 정확히 winningScore, 패자는 winningScore 미만, 둘 다 음수 아님.
- */
 const validateScore = (bestOf, team1Score, team2Score) => {
   if (!Number.isInteger(team1Score) || !Number.isInteger(team2Score)) return false;
   if (team1Score < 0 || team2Score < 0) return false;
@@ -61,9 +53,6 @@ const validateScore = (bestOf, team1Score, team2Score) => {
   return true;
 };
 
-/**
- * 팀 멤버 입력 검증. 5명, puuid 중복 없음, 포지션 유효, 팀장이 멤버에 있음.
- */
 const validateTeamInput = ({ name, captainPuuid, members }) => {
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
     return '팀명이 필요합니다.';
@@ -84,29 +73,40 @@ const validateTeamInput = ({ name, captainPuuid, members }) => {
   return null;
 };
 
-/**
- * 표준 ELO 승률: P(A) = 1 / (1 + 10^((R_B - R_A) / 400)).
- * 한쪽 레이팅이 없으면 null.
- */
-const computeWinProbability = (ratingA, ratingB) => {
-  if (ratingA == null || ratingB == null) return null;
-  return 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
+const validateSlotMapping = (slotMapping, teams, bracketSize, teamCount) => {
+  if (!Array.isArray(slotMapping) || slotMapping.length !== bracketSize) {
+    return `slotMapping은 길이 ${bracketSize}의 배열이어야 합니다.`;
+  }
+  const placedIds = slotMapping.filter((v) => v !== null && v !== undefined);
+  if (placedIds.length !== teamCount) {
+    return `정확히 ${teamCount}개의 팀을 배치해야 합니다.`;
+  }
+  if (new Set(placedIds).size !== placedIds.length) {
+    return '같은 팀이 여러 슬롯에 배치되었습니다.';
+  }
+  const teamIdSet = new Set(teams.map((t) => t.id));
+  if (!placedIds.every((tid) => teamIdSet.has(tid))) {
+    return '존재하지 않는 팀이 슬롯에 포함되어 있습니다.';
+  }
+  for (let i = 0; i < bracketSize; i += 2) {
+    if (!slotMapping[i] && !slotMapping[i + 1]) {
+      return '한 매치에 두 BYE가 들어갈 수 없습니다.';
+    }
+  }
+  return null;
 };
 
-/**
- * 팀 멤버 puuid 배열로 평균 레이팅 계산.
- * ratingByPuuid: { puuid: rating } 맵. 누락된 puuid는 평균에서 제외.
- * 한 명도 없으면 null.
- */
+const computeWinProbability = (ratingA, ratingB) => {
+  if (ratingA == null || ratingB == null) return null;
+  return ratingCalculator.expectedScore(ratingA, ratingB);
+};
+
 const computeTeamAvgRating = (members, ratingByPuuid) => {
   const ratings = members.map((m) => ratingByPuuid[m.puuid]).filter((r) => r != null);
   if (ratings.length === 0) return null;
   return ratings.reduce((a, b) => a + b, 0) / ratings.length;
 };
 
-/**
- * 그룹 등록 유저인지 확인 (모든 멤버 puuid가 user 테이블에 존재해야 함).
- */
 const verifyMembersInGroup = async (groupId, puuids) => {
   const rows = await models.user.findAll({
     where: { groupId, puuid: puuids },
@@ -115,10 +115,6 @@ const verifyMembersInGroup = async (groupId, puuids) => {
   return rows.length === puuids.length;
 };
 
-/**
- * 토너먼트 내 다른 팀에 puuid가 이미 등록되어 있는지 확인.
- * excludeTeamId: 본인 팀 제외 (수정 시 사용).
- */
 const findDuplicatePuuids = async (tournamentId, puuids, excludeTeamId = null) => {
   const where = { tournamentId };
   if (excludeTeamId) where.id = { [Op.ne]: excludeTeamId };
@@ -130,10 +126,6 @@ const findDuplicatePuuids = async (tournamentId, puuids, excludeTeamId = null) =
   return puuids.filter((p) => existing.has(p));
 };
 
-/**
- * 토너먼트의 모든 매치 행을 빈 상태로 미리 생성.
- * 결승 라운드만 finalBestOf 적용.
- */
 const generateMatchRows = (tournamentId, bracketSize, defaultBestOf, finalBestOf) => {
   const totalRounds = Math.log2(bracketSize);
   const rows = [];
@@ -157,14 +149,14 @@ const generateMatchRows = (tournamentId, bracketSize, defaultBestOf, finalBestOf
   return rows;
 };
 
-/**
- * 1라운드 슬롯 매핑(teamId 또는 null 배열, 길이 = bracketSize)을 받아
- * R1 매치들의 team1Id/team2Id를 채운다. 한쪽만 팀이면 BYE → 즉시 winner 설정 후 다음 라운드 진출.
- */
-const placeTeamsAndResolveByes = async (tournament, slotMapping) => {
+// BYE 매치가 다음 라운드의 같은 매치로 진출하는 경우(인접 슬롯이 둘 다 BYE)를
+// 동시 write로 race 시키지 않으려고 sequential하게 처리한다. 슬롯 매핑 단계에서
+// 한 매치에 두 BYE가 들어가지 않도록 검증하지만, 안전망으로 직렬 진행을 유지.
+const placeTeamsAndResolveByes = async (tournament, slotMapping, options = {}) => {
   const r1Matches = await models.tournament_match.findAll({
     where: { tournamentId: tournament.id, round: 1 },
     order: [['bracketSlot', 'ASC']],
+    transaction: options.transaction,
   });
 
   for (const match of r1Matches) {
@@ -173,54 +165,40 @@ const placeTeamsAndResolveByes = async (tournament, slotMapping) => {
     match.team1Id = team1Id;
     match.team2Id = team2Id;
 
-    // BYE 처리: 한쪽 팀만 있으면 자동 진출
     if ((team1Id && !team2Id) || (!team1Id && team2Id)) {
       const winnerTeamId = team1Id || team2Id;
       match.winnerTeamId = winnerTeamId;
-      await match.save();
-      await propagateWinner(tournament, match.round, match.bracketSlot, winnerTeamId);
+      await match.save({ transaction: options.transaction });
+      await propagateWinner(tournament, match.round, match.bracketSlot, winnerTeamId, options);
     } else {
-      await match.save();
+      await match.save({ transaction: options.transaction });
     }
   }
 };
 
-/**
- * (round, slot) 매치의 승자를 다음 라운드 매치에 진출시킨다.
- * 다음 매치의 두 슬롯이 모두 BYE 결과로 차면 그 매치도 자동으로 BYE 처리되어 또 진출.
- * 결승이면 챔피언 + status='finished' 처리.
- */
-const propagateWinner = async (tournament, round, slot, winnerTeamId) => {
+const propagateWinner = async (tournament, round, slot, winnerTeamId, options = {}) => {
   const totalRounds = Math.log2(tournament.bracketSize);
   if (round === totalRounds) {
     tournament.championTeamId = winnerTeamId;
-    tournament.status = 'finished';
-    await tournament.save();
+    tournament.status = STATUS.FINISHED;
+    await tournament.save({ transaction: options.transaction });
     return;
   }
 
   const next = getNextMatchPosition(round, slot);
   const nextMatch = await models.tournament_match.findOne({
     where: { tournamentId: tournament.id, round: next.round, bracketSlot: next.slot },
+    transaction: options.transaction,
   });
   if (!nextMatch) return;
 
   if (next.side === 'team1') nextMatch.team1Id = winnerTeamId;
   else nextMatch.team2Id = winnerTeamId;
 
-  // 다음 매치도 한쪽만 채워진 채 다른 쪽이 영원히 안 올 수 있음 (인접 슬롯이 둘 다 BYE인 케이스).
-  // 양 슬롯이 다 채워졌지만 한쪽이 null인 경우: 형제 매치가 아직 안 끝났을 수도, 혹은 BYE 결과일 수도.
-  // BYE-only 진출은 R1에서만 발생하므로 R2에서 형제 슬롯이 null로 남는 경우는
-  // 형제 R1 매치도 BYE-only인 경우뿐. 그 매치도 winnerTeamId가 null이면 양쪽 다 BYE.
-  // 양쪽 다 BYE면 nextMatch는 진행 불가 상태가 되지만, 실제로는 슬롯 매핑 단계에서
-  // 한 매치 안에 두 BYE가 들어가지 않도록 클라이언트가 막아야 한다.
-  await nextMatch.save();
+  await nextMatch.save({ transaction: options.transaction });
 };
 
-/**
- * 매치 결과 기록. 점수 검증 → winner 결정 → 다음 라운드 진출.
- */
-const recordMatchResult = async (match, team1Score, team2Score) => {
+const recordMatchResult = async (match, team1Score, team2Score, options = {}) => {
   if (!match.team1Id || !match.team2Id) {
     return { ok: false, error: '두 팀이 모두 배정되어야 결과를 입력할 수 있습니다.' };
   }
@@ -235,10 +213,12 @@ const recordMatchResult = async (match, team1Score, team2Score) => {
   match.team1Score = team1Score;
   match.team2Score = team2Score;
   match.winnerTeamId = winnerTeamId;
-  await match.save();
+  await match.save({ transaction: options.transaction });
 
-  const tournament = await models.tournament.findByPk(match.tournamentId);
-  await propagateWinner(tournament, match.round, match.bracketSlot, winnerTeamId);
+  const tournament = await models.tournament.findByPk(match.tournamentId, {
+    transaction: options.transaction,
+  });
+  await propagateWinner(tournament, match.round, match.bracketSlot, winnerTeamId, options);
 
   return { ok: true, match, tournament };
 };
@@ -246,12 +226,14 @@ const recordMatchResult = async (match, team1Score, team2Score) => {
 module.exports = {
   TEAM_SIZE,
   VALID_POSITIONS,
+  STATUS,
   computeBracketSize,
   getWinningScore,
   computeRoundLabels,
   getNextMatchPosition,
   validateScore,
   validateTeamInput,
+  validateSlotMapping,
   verifyMembersInGroup,
   findDuplicatePuuids,
   generateMatchRows,

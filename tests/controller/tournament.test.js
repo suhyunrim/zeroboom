@@ -201,6 +201,52 @@ describe('validateTeamInput', () => {
   });
 });
 
+describe('validateSlotMapping', () => {
+  const teams = [{ id: 10 }, { id: 11 }, { id: 12 }, { id: 13 }];
+
+  test('정상 4팀 8슬롯 (모두 채움)', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 11, 12, 13], teams.slice(0, 4), 4, 4),
+    ).toBeNull();
+  });
+
+  test('BYE 포함 정상', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, null, 11, null], teams.slice(0, 2), 4, 2),
+    ).toBeNull();
+  });
+
+  test('길이 불일치', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 11, 12], teams, 4, 4),
+    ).toBe('slotMapping은 길이 4의 배열이어야 합니다.');
+  });
+
+  test('팀 수 불일치', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 11, null, null], teams, 4, 4),
+    ).toBe('정확히 4개의 팀을 배치해야 합니다.');
+  });
+
+  test('중복 배치', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 10, 11, 12], teams, 4, 4),
+    ).toBe('같은 팀이 여러 슬롯에 배치되었습니다.');
+  });
+
+  test('존재하지 않는 팀', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 11, 12, 99], teams, 4, 4),
+    ).toBe('존재하지 않는 팀이 슬롯에 포함되어 있습니다.');
+  });
+
+  test('한 매치에 두 BYE', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, 11, null, null], teams.slice(0, 2), 4, 2),
+    ).toBe('한 매치에 두 BYE가 들어갈 수 없습니다.');
+  });
+});
+
 describe('computeWinProbability', () => {
   test('동일 레이팅이면 50%', () => {
     expect(tournamentController.computeWinProbability(500, 500)).toBeCloseTo(0.5);
