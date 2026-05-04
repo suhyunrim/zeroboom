@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
-const { verifyToken, optionalAuth } = require('../middlewares/auth');
+const { verifyToken, optionalAuth, isGroupAdmin } = require('../middlewares/auth');
 const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const profileController = require('../../controller/profile');
@@ -12,22 +12,6 @@ const { fetchSummonerSummaryMap } = require('../../utils/profileIcon');
 const route = Router();
 
 const COMMENT_MAX_LENGTH = 500;
-
-/**
- * 그룹 어드민 여부 확인 (슈퍼 어드민 또는 user.role === 'admin')
- */
-const isGroupAdmin = async (groupId, discordId) => {
-  if (!discordId) return false;
-  const superAdmin = await models.super_admin.findByPk(discordId);
-  if (superAdmin) return true;
-  // 같은 discordId로 본캐+부캐가 등록된 경우 admin 행이 LIMIT 1에서 누락될 수 있어
-  // role='admin'인 행이 하나라도 있는지로 판정한다.
-  const adminRow = await models.user.findOne({
-    where: { groupId, discordId, role: 'admin' },
-    attributes: ['role'],
-  });
-  return !!adminRow;
-};
 
 /**
  * 프로필 주인 puuid의 discordId 조회 (비밀글 가시성 판단용)

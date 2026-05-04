@@ -37,37 +37,31 @@ const optionalAuth = (req, _res, next) => {
 };
 
 /**
- * 그룹 관리자 권한 확인 미들웨어
- * 슈퍼 어드민은 모든 그룹 통과, 아니면 DB의 user.role === 'admin' 확인
+ * 그룹 어드민 여부를 boolean으로 반환. 슈퍼 어드민이면 모든 그룹 통과.
+ * 같은 discordId로 본캐+부캐가 등록된 경우 admin 행이 LIMIT 1에서 누락될 수 있어
+ * role='admin'인 행이 하나라도 있는지로 판정한다.
  */
+const isGroupAdmin = async (groupId, discordId) => {
+  if (!groupId || !discordId) return false;
+  const superAdmin = await models.super_admin.findByPk(discordId);
+  if (superAdmin) return true;
+  const adminRow = await models.user.findOne({
+    where: { groupId, discordId, role: 'admin' },
+    attributes: ['role'],
+  });
+  return !!adminRow;
+};
+
 const requireGroupAdmin = async (req, res, next) => {
   const groupId = Number(req.params.groupId || req.body.groupId);
   const { discordId } = req.user;
 
-  if (!groupId || !discordId) {
-    return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
-  }
-
   try {
-    // 슈퍼 어드민이면 모든 그룹에 대해 통과
-    const superAdmin = await models.super_admin.findByPk(discordId);
-    if (superAdmin) return next();
-
-    // 같은 discordId로 본캐+부캐가 등록된 경우 admin 행이 LIMIT 1에서 누락될 수 있어
-    // role='admin'인 행이 하나라도 있는지로 판정한다.
-    const adminRow = await models.user.findOne({
-      where: { groupId, discordId, role: 'admin' },
-      attributes: ['role'],
-    });
-
-    if (!adminRow) {
-      return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
-    }
-
-    return next();
+    if (await isGroupAdmin(groupId, discordId)) return next();
+    return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
   } catch (e) {
     return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
   }
 };
 
-module.exports = { verifyToken, optionalAuth, requireGroupAdmin };
+module.exports = { verifyToken, optionalAuth, requireGroupAdmin, isGroupAdmin };

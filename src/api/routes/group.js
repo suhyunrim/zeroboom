@@ -71,7 +71,7 @@ module.exports = (app) => {
           role: { [Op.ne]: 'outsider' },
           leftGuildAt: null,
         },
-        attributes: ['puuid', 'discordId'],
+        attributes: ['puuid', 'discordId', 'defaultRating', 'additionalRating'],
       });
 
       const puuids = users.map((u) => u.puuid);
@@ -93,6 +93,7 @@ module.exports = (app) => {
             puuid: u.puuid,
             name: s ? s.name : null,
             profileIconId: s ? s.profileIconId : null,
+            rating: (u.defaultRating || 0) + (u.additionalRating || 0),
           };
         })
         .filter((m) => m.name);
