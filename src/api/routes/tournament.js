@@ -19,10 +19,58 @@ const isGroupAdmin = async (groupId, discordId) => {
 };
 
 /**
+ * 그룹 멤버 puuid → rating(defaultRating + additionalRating) 맵 조회.
+ */
+const fetchRatingMap = async (groupId, puuids) => {
+  if (!puuids.length) return {};
+  const users = await models.user.findAll({
+    where: { groupId, puuid: puuids },
+    attributes: ['puuid', 'defaultRating', 'additionalRating'],
+  });
+  const map = {};
+  users.forEach((u) => {
+    map[u.puuid] = (u.defaultRating || 0) + (u.additionalRating || 0);
+  });
+  return map;
+};
+
+/**
+ * teams 각각에 avgRating 부여 (런타임 계산).
+ */
+const enrichTeamsWithRating = (teams, ratingByPuuid) => {
+  return teams.map((t) => {
+    const data = t.toJSON ? t.toJSON() : t;
+    data.avgRating = tournamentController.computeTeamAvgRating(data.members || [], ratingByPuuid);
+    return data;
+  });
+};
+
+/**
+ * matches 각각에 team1WinProb / team2WinProb 부여 (런타임 계산).
+ * 한쪽이라도 팀 미배정이면 둘 다 null.
+ */
+const enrichMatchesWithWinProb = (matches, avgRatingByTeamId) => {
+  return matches.map((m) => {
+    const data = m.toJSON ? m.toJSON() : m;
+    if (data.team1Id && data.team2Id) {
+      const r1 = avgRatingByTeamId[data.team1Id];
+      const r2 = avgRatingByTeamId[data.team2Id];
+      data.team1WinProb = tournamentController.computeWinProbability(r1, r2);
+      data.team2WinProb = tournamentController.computeWinProbability(r2, r1);
+    } else {
+      data.team1WinProb = null;
+      data.team2WinProb = null;
+    }
+    return data;
+  });
+};
+
+/**
  * 토너먼트 상세 페이로드 조립 (토너먼트 + 팀 전체 + 매치 전체 + 라운드 라벨).
+ * teams에 avgRating, matches에 winProb 부여.
  */
 const buildDetail = async (tournament) => {
-  const [teams, matches] = await Promise.all([
+  const [teamsRaw, matchesRaw] = await Promise.all([
     models.tournament_team.findAll({
       where: { tournamentId: tournament.id },
       order: [['id', 'ASC']],
@@ -32,6 +80,17 @@ const buildDetail = async (tournament) => {
       order: [['round', 'ASC'], ['bracketSlot', 'ASC']],
     }),
   ]);
+
+  const allPuuids = new Set();
+  teamsRaw.forEach((t) => (t.members || []).forEach((m) => allPuuids.add(m.puuid)));
+  const ratingByPuuid = await fetchRatingMap(tournament.groupId, [...allPuuids]);
+  const teams = enrichTeamsWithRating(teamsRaw, ratingByPuuid);
+  const avgRatingByTeamId = {};
+  teams.forEach((t) => {
+    avgRatingByTeamId[t.id] = t.avgRating;
+  });
+  const matches = enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId);
+
   const roundLabels = tournament.bracketSize
     ? tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount)
     : {};
@@ -43,7 +102,7 @@ module.exports = (app) => {
 
   /**
    * GET /api/tournament/group/:groupId
-   * 그룹의 토너먼트 목록 (요약).
+   * 그룹의 토너먼트 목록. finished 항목은 championTeam(name + members) 동봉.
    */
   route.get('/group/:groupId', async (req, res) => {
     const groupId = Number(req.params.groupId);
@@ -53,7 +112,26 @@ module.exports = (app) => {
         where: { groupId },
         order: [['createdAt', 'DESC']],
       });
-      return res.status(200).json({ result: 'ok', tournaments: list });
+
+      const championIds = list.map((t) => t.championTeamId).filter((v) => v != null);
+      const champions = championIds.length
+        ? await models.tournament_team.findAll({
+            where: { id: championIds },
+            attributes: ['id', 'name', 'captainPuuid', 'members'],
+          })
+        : [];
+      const champById = {};
+      champions.forEach((c) => {
+        champById[c.id] = c;
+      });
+
+      const tournaments = list.map((t) => {
+        const data = t.toJSON ? t.toJSON() : t;
+        data.championTeam = t.championTeamId ? champById[t.championTeamId] || null : null;
+        return data;
+      });
+
+      return res.status(200).json({ result: 'ok', tournaments });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });

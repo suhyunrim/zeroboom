@@ -201,6 +201,60 @@ describe('validateTeamInput', () => {
   });
 });
 
+describe('computeWinProbability', () => {
+  test('동일 레이팅이면 50%', () => {
+    expect(tournamentController.computeWinProbability(500, 500)).toBeCloseTo(0.5);
+  });
+
+  test('400점 높으면 약 90.9%', () => {
+    expect(tournamentController.computeWinProbability(900, 500)).toBeCloseTo(0.909, 2);
+  });
+
+  test('400점 낮으면 약 9.1%', () => {
+    expect(tournamentController.computeWinProbability(500, 900)).toBeCloseTo(0.091, 2);
+  });
+
+  test('합이 1', () => {
+    const a = tournamentController.computeWinProbability(620, 480);
+    const b = tournamentController.computeWinProbability(480, 620);
+    expect(a + b).toBeCloseTo(1.0);
+  });
+
+  test('null 입력은 null 반환', () => {
+    expect(tournamentController.computeWinProbability(null, 500)).toBeNull();
+    expect(tournamentController.computeWinProbability(500, null)).toBeNull();
+    expect(tournamentController.computeWinProbability(null, null)).toBeNull();
+  });
+});
+
+describe('computeTeamAvgRating', () => {
+  test('5명 평균', () => {
+    const members = [
+      { puuid: 'p1' },
+      { puuid: 'p2' },
+      { puuid: 'p3' },
+      { puuid: 'p4' },
+      { puuid: 'p5' },
+    ];
+    const ratings = { p1: 500, p2: 600, p3: 400, p4: 700, p5: 300 };
+    expect(tournamentController.computeTeamAvgRating(members, ratings)).toBe(500);
+  });
+
+  test('일부 멤버만 레이팅 있으면 있는 것만 평균', () => {
+    const members = [{ puuid: 'p1' }, { puuid: 'p2' }];
+    const ratings = { p1: 500 };
+    expect(tournamentController.computeTeamAvgRating(members, ratings)).toBe(500);
+  });
+
+  test('아무도 레이팅 없으면 null', () => {
+    expect(tournamentController.computeTeamAvgRating([{ puuid: 'p1' }], {})).toBeNull();
+  });
+
+  test('빈 멤버 배열은 null', () => {
+    expect(tournamentController.computeTeamAvgRating([], { p1: 500 })).toBeNull();
+  });
+});
+
 describe('generateMatchRows', () => {
   test('8팀 브래킷은 7개 매치 (R1: 4 + R2: 2 + R3: 1)', () => {
     const rows = tournamentController.generateMatchRows(99, 8, 3, 5);

@@ -85,6 +85,26 @@ const validateTeamInput = ({ name, captainPuuid, members }) => {
 };
 
 /**
+ * 표준 ELO 승률: P(A) = 1 / (1 + 10^((R_B - R_A) / 400)).
+ * 한쪽 레이팅이 없으면 null.
+ */
+const computeWinProbability = (ratingA, ratingB) => {
+  if (ratingA == null || ratingB == null) return null;
+  return 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
+};
+
+/**
+ * 팀 멤버 puuid 배열로 평균 레이팅 계산.
+ * ratingByPuuid: { puuid: rating } 맵. 누락된 puuid는 평균에서 제외.
+ * 한 명도 없으면 null.
+ */
+const computeTeamAvgRating = (members, ratingByPuuid) => {
+  const ratings = members.map((m) => ratingByPuuid[m.puuid]).filter((r) => r != null);
+  if (ratings.length === 0) return null;
+  return ratings.reduce((a, b) => a + b, 0) / ratings.length;
+};
+
+/**
  * 그룹 등록 유저인지 확인 (모든 멤버 puuid가 user 테이블에 존재해야 함).
  */
 const verifyMembersInGroup = async (groupId, puuids) => {
@@ -238,4 +258,6 @@ module.exports = {
   placeTeamsAndResolveByes,
   propagateWinner,
   recordMatchResult,
+  computeWinProbability,
+  computeTeamAvgRating,
 };
