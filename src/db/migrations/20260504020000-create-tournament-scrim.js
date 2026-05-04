@@ -26,6 +26,10 @@ module.exports = {
         type: Sequelize.INTEGER,
         allowNull: false,
       },
+      winnerTeamId: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+      },
       recordedByDiscordId: {
         type: Sequelize.STRING,
         allowNull: false,
