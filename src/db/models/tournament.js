@@ -22,11 +22,11 @@ module.exports = (sequelize, DataTypes) => {
       },
       bracketSize: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
       },
       teamCount: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
       },
       defaultBestOf: {
         type: DataTypes.INTEGER,

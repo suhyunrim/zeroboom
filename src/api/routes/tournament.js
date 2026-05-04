@@ -32,12 +32,10 @@ const buildDetail = async (tournament) => {
       order: [['round', 'ASC'], ['bracketSlot', 'ASC']],
     }),
   ]);
-  return {
-    tournament,
-    teams,
-    matches,
-    roundLabels: tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount),
-  };
+  const roundLabels = tournament.bracketSize
+    ? tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount)
+    : {};
+  return { tournament, teams, matches, roundLabels };
 };
 
 module.exports = (app) => {
@@ -105,18 +103,15 @@ module.exports = (app) => {
 
   /**
    * POST /api/tournament
-   * body: { groupId, name, teamCount, defaultBestOf?, finalBestOf? }
-   * 토너먼트 생성 + 빈 매치 행 미리 생성. 같은 그룹에 in_progress 있으면 거부.
+   * body: { groupId, name, defaultBestOf?, finalBestOf? }
+   * 토너먼트 생성. bracketSize/teamCount/매치 행은 시작 시점에 결정됨.
    */
   route.post('/', verifyToken, async (req, res) => {
-    const { groupId, name, teamCount, defaultBestOf = 3, finalBestOf = 5 } = req.body || {};
+    const { groupId, name, defaultBestOf = 3, finalBestOf = 5 } = req.body || {};
     const { discordId, globalName, username } = req.user;
 
-    if (!groupId || !name || !teamCount) {
-      return res.status(400).json({ result: 'groupId, name, teamCount가 필요합니다.' });
-    }
-    if (teamCount < 2) {
-      return res.status(400).json({ result: '최소 2팀이 필요합니다.' });
+    if (!groupId || !name) {
+      return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
     if (!Number.isInteger(defaultBestOf) || defaultBestOf < 1 || defaultBestOf % 2 === 0) {
       return res.status(400).json({ result: 'defaultBestOf는 홀수 양의 정수여야 합니다.' });
@@ -130,36 +125,22 @@ module.exports = (app) => {
     }
 
     try {
-      const active = await models.tournament.findOne({ where: { groupId, status: 'in_progress' } });
-      if (active) {
-        return res.status(409).json({ result: '이미 진행중인 토너먼트가 있습니다.' });
-      }
-
-      const bracketSize = tournamentController.computeBracketSize(teamCount);
       const tournament = await models.tournament.create({
         groupId,
         name,
         status: 'preparing',
-        bracketSize,
-        teamCount,
+        bracketSize: null,
+        teamCount: null,
         defaultBestOf,
         finalBestOf,
       });
-
-      const matchRows = tournamentController.generateMatchRows(
-        tournament.id,
-        bracketSize,
-        defaultBestOf,
-        finalBestOf,
-      );
-      await models.tournament_match.bulkCreate(matchRows);
 
       auditLog.log({
         groupId,
         actorDiscordId: discordId,
         actorName: globalName || username || null,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, teamCount, bracketSize },
+        details: { tournamentId: tournament.id, name },
         source: 'web',
       });
 
@@ -239,11 +220,6 @@ module.exports = (app) => {
       const dups = await tournamentController.findDuplicatePuuids(id, puuids);
       if (dups.length > 0) {
         return res.status(409).json({ result: '다른 팀에 이미 등록된 팀원이 있습니다.', duplicatedPuuids: dups });
-      }
-
-      const existingCount = await models.tournament_team.count({ where: { tournamentId: id } });
-      if (existingCount >= tournament.teamCount) {
-        return res.status(409).json({ result: '팀 수가 토너먼트 정원을 초과합니다.' });
       }
 
       const team = await models.tournament_team.create({
@@ -367,8 +343,8 @@ module.exports = (app) => {
 
   /**
    * POST /api/tournament/:id/start
-   * body: { slotMapping: [teamId|null, ...] (length = bracketSize) }
-   * 1라운드 슬롯에 팀 배치 + BYE 자동 진출 + status=in_progress.
+   * body: { slotMapping: [teamId|null, ...] (length = nextPow2(teams.length)) }
+   * 등록된 팀 수로 bracketSize 결정 → 매치 행 생성 → 1라운드 슬롯 배치 + BYE 자동 진출.
    */
   route.post('/:id/start', verifyToken, async (req, res) => {
     const id = Number(req.params.id);
@@ -385,9 +361,6 @@ module.exports = (app) => {
       if (tournament.status !== 'preparing') {
         return res.status(409).json({ result: '준비중인 토너먼트만 시작할 수 있습니다.' });
       }
-      if (!Array.isArray(slotMapping) || slotMapping.length !== tournament.bracketSize) {
-        return res.status(400).json({ result: `slotMapping은 길이 ${tournament.bracketSize}의 배열이어야 합니다.` });
-      }
 
       // 같은 그룹에 다른 in_progress가 있으면 거부 (동시 진행 금지)
       const otherActive = await models.tournament.findOne({
@@ -397,29 +370,49 @@ module.exports = (app) => {
         return res.status(409).json({ result: '이미 진행중인 토너먼트가 있습니다.' });
       }
 
+      const teams = await models.tournament_team.findAll({ where: { tournamentId: id } });
+      const teamCount = teams.length;
+      if (teamCount < 2) {
+        return res.status(400).json({ result: '최소 2팀이 등록되어야 시작할 수 있습니다.' });
+      }
+      const bracketSize = tournamentController.computeBracketSize(teamCount);
+
+      if (!Array.isArray(slotMapping) || slotMapping.length !== bracketSize) {
+        return res.status(400).json({ result: `slotMapping은 길이 ${bracketSize}의 배열이어야 합니다.` });
+      }
+
       // teamId 유효성 + 중복 + 카운트 검증
       const placedIds = slotMapping.filter((v) => v !== null && v !== undefined);
-      if (placedIds.length !== tournament.teamCount) {
-        return res.status(400).json({ result: `정확히 ${tournament.teamCount}개의 팀을 배치해야 합니다.` });
+      if (placedIds.length !== teamCount) {
+        return res.status(400).json({ result: `정확히 ${teamCount}개의 팀을 배치해야 합니다.` });
       }
       if (new Set(placedIds).size !== placedIds.length) {
         return res.status(400).json({ result: '같은 팀이 여러 슬롯에 배치되었습니다.' });
       }
-      const teams = await models.tournament_team.findAll({ where: { tournamentId: id } });
       const teamIdSet = new Set(teams.map((t) => t.id));
       if (!placedIds.every((tid) => teamIdSet.has(tid))) {
         return res.status(400).json({ result: '존재하지 않는 팀이 슬롯에 포함되어 있습니다.' });
       }
 
       // 한 매치에 두 BYE가 들어가지 않도록 검증
-      for (let i = 0; i < tournament.bracketSize; i += 2) {
+      for (let i = 0; i < bracketSize; i += 2) {
         if (!slotMapping[i] && !slotMapping[i + 1]) {
           return res.status(400).json({ result: '한 매치에 두 BYE가 들어갈 수 없습니다.' });
         }
       }
 
+      tournament.bracketSize = bracketSize;
+      tournament.teamCount = teamCount;
       tournament.status = 'in_progress';
       await tournament.save();
+
+      const matchRows = tournamentController.generateMatchRows(
+        tournament.id,
+        bracketSize,
+        tournament.defaultBestOf,
+        tournament.finalBestOf,
+      );
+      await models.tournament_match.bulkCreate(matchRows);
 
       await tournamentController.placeTeamsAndResolveByes(tournament, slotMapping);
 
@@ -428,7 +421,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName: globalName || username || null,
         action: 'tournament.start',
-        details: { tournamentId: id, slotMapping },
+        details: { tournamentId: id, teamCount, bracketSize, slotMapping },
         source: 'web',
       });
 
