@@ -46,7 +46,7 @@ const enrichMatchesWithWinProb = (matches, avgRatingByTeamId) => {
 };
 
 const buildDetail = async (tournament) => {
-  const [teamsRaw, matchesRaw] = await Promise.all([
+  const [teamsRaw, matchesRaw, scrims] = await Promise.all([
     models.tournament_team.findAll({
       where: { tournamentId: tournament.id },
       order: [['id', 'ASC']],
@@ -54,6 +54,10 @@ const buildDetail = async (tournament) => {
     models.tournament_match.findAll({
       where: { tournamentId: tournament.id },
       order: [['round', 'ASC'], ['bracketSlot', 'ASC']],
+    }),
+    models.tournament_scrim.findAll({
+      where: { tournamentId: tournament.id },
+      order: [['createdAt', 'DESC']],
     }),
   ]);
 
@@ -67,7 +71,7 @@ const buildDetail = async (tournament) => {
   });
   const matches = enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
-  return { tournament, teams, matches, roundLabels };
+  return { tournament, teams, matches, scrims, roundLabels };
 };
 
 const loadTournamentForAdmin = async (req, res, { requireStatus, statusError } = {}) => {
@@ -468,6 +472,156 @@ module.exports = (app) => {
       await tournament.reload();
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 스크림: 토너먼트 시작 후(in_progress/finished)에만 가능. preparing은 팀 변동 가능성으로 제외.
+  const SCRIM_ALLOWED_STATUSES = [STATUS.IN_PROGRESS, STATUS.FINISHED];
+
+  const loadScrimContext = async (req, res, { requireScrimOwnership = false } = {}) => {
+    const id = Number(req.params.id);
+    const scrimId = Number(req.params.scrimId);
+    if (!id) {
+      res.status(400).json({ result: 'id가 필요합니다.' });
+      return null;
+    }
+    const tournament = await models.tournament.findByPk(id);
+    if (!tournament) {
+      res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
+      return null;
+    }
+    if (!SCRIM_ALLOWED_STATUSES.includes(tournament.status)) {
+      res.status(409).json({ result: '시작된 토너먼트만 스크림 기록이 가능합니다.' });
+      return null;
+    }
+    if (!requireScrimOwnership) return { tournament };
+
+    if (!scrimId) {
+      res.status(400).json({ result: 'scrimId가 필요합니다.' });
+      return null;
+    }
+    const scrim = await models.tournament_scrim.findOne({ where: { id: scrimId, tournamentId: id } });
+    if (!scrim) {
+      res.status(404).json({ result: '스크림 기록을 찾을 수 없습니다.' });
+      return null;
+    }
+    const isOwner = scrim.recordedByDiscordId === req.user.discordId;
+    const isAdmin = await isGroupAdmin(tournament.groupId, req.user.discordId);
+    if (!isOwner && !isAdmin) {
+      res.status(403).json({ result: '본인 또는 그룹 어드민만 가능합니다.' });
+      return null;
+    }
+    return { tournament, scrim };
+  };
+
+  route.post('/:id/scrims', verifyToken, async (req, res) => {
+    const { team1Id, team2Id, team1Score, team2Score } = req.body || {};
+    try {
+      const ctx = await loadScrimContext(req, res);
+      if (!ctx) return undefined;
+      const { tournament } = ctx;
+
+      const teams = await models.tournament_team.findAll({
+        where: { tournamentId: tournament.id },
+        attributes: ['id'],
+      });
+      const validationError = tournamentController.validateScrimInput(
+        { team1Id, team2Id, team1Score, team2Score },
+        teams,
+      );
+      if (validationError) return res.status(400).json({ result: validationError });
+
+      const winnerTeamId = tournamentController.computeScrimWinner(team1Id, team2Id, team1Score, team2Score);
+      const scrim = await models.tournament_scrim.create({
+        tournamentId: tournament.id,
+        team1Id,
+        team2Id,
+        team1Score,
+        team2Score,
+        winnerTeamId,
+        recordedByDiscordId: req.user.discordId,
+      });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.scrim_create',
+        details: { tournamentId: tournament.id, scrimId: scrim.id, team1Id, team2Id, team1Score, team2Score },
+        source: 'web',
+      });
+
+      return res.status(200).json({ result: 'ok', scrim });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  route.patch('/:id/scrims/:scrimId', verifyToken, async (req, res) => {
+    const { team1Id, team2Id, team1Score, team2Score } = req.body || {};
+    try {
+      const ctx = await loadScrimContext(req, res, { requireScrimOwnership: true });
+      if (!ctx) return undefined;
+      const { tournament, scrim } = ctx;
+
+      const teams = await models.tournament_team.findAll({
+        where: { tournamentId: tournament.id },
+        attributes: ['id'],
+      });
+      const validationError = tournamentController.validateScrimInput(
+        { team1Id, team2Id, team1Score, team2Score },
+        teams,
+      );
+      if (validationError) return res.status(400).json({ result: validationError });
+
+      scrim.team1Id = team1Id;
+      scrim.team2Id = team2Id;
+      scrim.team1Score = team1Score;
+      scrim.team2Score = team2Score;
+      scrim.winnerTeamId = tournamentController.computeScrimWinner(team1Id, team2Id, team1Score, team2Score);
+      await scrim.save();
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.scrim_update',
+        details: { tournamentId: tournament.id, scrimId: scrim.id, team1Id, team2Id, team1Score, team2Score },
+        source: 'web',
+      });
+
+      return res.status(200).json({ result: 'ok', scrim });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  route.delete('/:id/scrims/:scrimId', verifyToken, async (req, res) => {
+    try {
+      const ctx = await loadScrimContext(req, res, { requireScrimOwnership: true });
+      if (!ctx) return undefined;
+      const { tournament, scrim } = ctx;
+
+      await scrim.destroy();
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.scrim_delete',
+        details: { tournamentId: tournament.id, scrimId: scrim.id },
+        source: 'web',
+      });
+
+      return res.status(200).json({ result: '삭제되었습니다.' });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });

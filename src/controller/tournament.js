@@ -73,6 +73,32 @@ const validateTeamInput = ({ name, captainPuuid, members }) => {
   return null;
 };
 
+const validateScrimInput = ({ team1Id, team2Id, team1Score, team2Score }, teams) => {
+  if (!Number.isInteger(team1Id) || !Number.isInteger(team2Id)) {
+    return 'team1Id, team2Id가 필요합니다.';
+  }
+  if (team1Id === team2Id) {
+    return '같은 팀끼리 스크림을 할 수 없습니다.';
+  }
+  if (!Number.isInteger(team1Score) || !Number.isInteger(team2Score)) {
+    return '점수는 정수여야 합니다.';
+  }
+  if (team1Score < 0 || team2Score < 0) {
+    return '점수는 0 이상이어야 합니다.';
+  }
+  const teamIdSet = new Set(teams.map((t) => t.id));
+  if (!teamIdSet.has(team1Id) || !teamIdSet.has(team2Id)) {
+    return '두 팀 모두 이 토너먼트의 팀이어야 합니다.';
+  }
+  return null;
+};
+
+const computeScrimWinner = (team1Id, team2Id, team1Score, team2Score) => {
+  if (team1Score > team2Score) return team1Id;
+  if (team2Score > team1Score) return team2Id;
+  return null;
+};
+
 const validateSlotMapping = (slotMapping, teams, bracketSize, teamCount) => {
   if (!Array.isArray(slotMapping) || slotMapping.length !== bracketSize) {
     return `slotMapping은 길이 ${bracketSize}의 배열이어야 합니다.`;
@@ -234,6 +260,8 @@ module.exports = {
   validateScore,
   validateTeamInput,
   validateSlotMapping,
+  validateScrimInput,
+  computeScrimWinner,
   verifyMembersInGroup,
   findDuplicatePuuids,
   generateMatchRows,

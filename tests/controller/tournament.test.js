@@ -3,6 +3,7 @@ const mockModels = {
   tournament: { findByPk: jest.fn() },
   tournament_team: { findAll: jest.fn() },
   tournament_match: { findAll: jest.fn(), findOne: jest.fn() },
+  tournament_scrim: { findAll: jest.fn(), findOne: jest.fn(), create: jest.fn() },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
@@ -198,6 +199,86 @@ describe('validateTeamInput', () => {
     expect(
       tournamentController.validateTeamInput({ name: 'X', captainPuuid: 'p1', members: bad }),
     ).toBe('팀원의 puuid가 필요합니다.');
+  });
+});
+
+describe('validateScrimInput', () => {
+  const teams = [{ id: 1 }, { id: 2 }, { id: 3 }];
+
+  test('정상 입력', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 2, team1Score: 2, team2Score: 1 },
+        teams,
+      ),
+    ).toBeNull();
+  });
+
+  test('동점도 정상', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 2, team1Score: 1, team2Score: 1 },
+        teams,
+      ),
+    ).toBeNull();
+  });
+
+  test('같은 팀 매치업 거부', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 1, team1Score: 2, team2Score: 0 },
+        teams,
+      ),
+    ).toBe('같은 팀끼리 스크림을 할 수 없습니다.');
+  });
+
+  test('팀 ID 누락', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: null, team2Id: 2, team1Score: 0, team2Score: 0 },
+        teams,
+      ),
+    ).toBe('team1Id, team2Id가 필요합니다.');
+  });
+
+  test('음수 점수 거부', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 2, team1Score: -1, team2Score: 1 },
+        teams,
+      ),
+    ).toBe('점수는 0 이상이어야 합니다.');
+  });
+
+  test('비정수 점수 거부', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 2, team1Score: 1.5, team2Score: 0 },
+        teams,
+      ),
+    ).toBe('점수는 정수여야 합니다.');
+  });
+
+  test('토너먼트 팀이 아님', () => {
+    expect(
+      tournamentController.validateScrimInput(
+        { team1Id: 1, team2Id: 99, team1Score: 0, team2Score: 0 },
+        teams,
+      ),
+    ).toBe('두 팀 모두 이 토너먼트의 팀이어야 합니다.');
+  });
+});
+
+describe('computeScrimWinner', () => {
+  test('team1 승리', () => {
+    expect(tournamentController.computeScrimWinner(1, 2, 2, 0)).toBe(1);
+  });
+  test('team2 승리', () => {
+    expect(tournamentController.computeScrimWinner(1, 2, 0, 3)).toBe(2);
+  });
+  test('동점 무승부', () => {
+    expect(tournamentController.computeScrimWinner(1, 2, 1, 1)).toBeNull();
+    expect(tournamentController.computeScrimWinner(1, 2, 0, 0)).toBeNull();
   });
 });
 
