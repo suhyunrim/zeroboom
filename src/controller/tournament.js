@@ -73,8 +73,7 @@ const validateTeamInput = ({ name, captainPuuid, members }) => {
   return null;
 };
 
-const validateScrimInput = ({ team1Id, team2Id, team1Score, team2Score }, teams) => {
-  if (!Number.isInteger(team1Id) || !Number.isInteger(team2Id)) {
+const validateScrimInput = ({ team1Id, team2Id, team1Score, team2Score }, teams) => {  if (!Number.isInteger(team1Id) || !Number.isInteger(team2Id)) {
     return 'team1Id, team2Id가 필요합니다.';
   }
   if (team1Id === team2Id) {
@@ -91,6 +90,46 @@ const validateScrimInput = ({ team1Id, team2Id, team1Score, team2Score }, teams)
     return '두 팀 모두 이 토너먼트의 팀이어야 합니다.';
   }
   return null;
+};
+
+const computeTeamScrimRecord = (teamId, scrims) => {
+  let won = 0;
+  let lost = 0;
+  let played = 0;
+  scrims.forEach((s) => {
+    if (s.team1Id === teamId) {
+      won += s.team1Score;
+      lost += s.team2Score;
+      played += 1;
+    } else if (s.team2Id === teamId) {
+      won += s.team2Score;
+      lost += s.team1Score;
+      played += 1;
+    }
+  });
+  return { won, lost, played };
+};
+
+const computeHeadToHeadScrim = (team1Id, team2Id, scrims) => {
+  let t1Won = 0;
+  let t1Lost = 0;
+  let played = 0;
+  scrims.forEach((s) => {
+    if (s.team1Id === team1Id && s.team2Id === team2Id) {
+      t1Won += s.team1Score;
+      t1Lost += s.team2Score;
+      played += 1;
+    } else if (s.team1Id === team2Id && s.team2Id === team1Id) {
+      t1Won += s.team2Score;
+      t1Lost += s.team1Score;
+      played += 1;
+    }
+  });
+  return {
+    team1: { won: t1Won, lost: t1Lost },
+    team2: { won: t1Lost, lost: t1Won },
+    played,
+  };
 };
 
 const validateSlotMapping = (slotMapping, teams, bracketSize, teamCount) => {
@@ -263,4 +302,6 @@ module.exports = {
   recordMatchResult,
   computeWinProbability,
   computeTeamAvgRating,
+  computeTeamScrimRecord,
+  computeHeadToHeadScrim,
 };

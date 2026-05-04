@@ -45,6 +45,24 @@ const enrichMatchesWithWinProb = (matches, avgRatingByTeamId) => {
   });
 };
 
+const enrichTeamsWithScrimRecord = (teams, scrims) => {
+  return teams.map((t) => {
+    t.scrimRecord = tournamentController.computeTeamScrimRecord(t.id, scrims);
+    return t;
+  });
+};
+
+const enrichMatchesWithHeadToHead = (matches, scrims) => {
+  return matches.map((m) => {
+    if (m.team1Id && m.team2Id) {
+      m.headToHeadScrim = tournamentController.computeHeadToHeadScrim(m.team1Id, m.team2Id, scrims);
+    } else {
+      m.headToHeadScrim = null;
+    }
+    return m;
+  });
+};
+
 const buildDetail = async (tournament) => {
   const [teamsRaw, matchesRaw, scrims] = await Promise.all([
     models.tournament_team.findAll({
@@ -64,12 +82,12 @@ const buildDetail = async (tournament) => {
   const allPuuids = new Set();
   teamsRaw.forEach((t) => (t.members || []).forEach((m) => allPuuids.add(m.puuid)));
   const ratingByPuuid = await fetchRatingMap(tournament.groupId, [...allPuuids]);
-  const teams = enrichTeamsWithRating(teamsRaw, ratingByPuuid);
+  const teams = enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrims);
   const avgRatingByTeamId = {};
   teams.forEach((t) => {
     avgRatingByTeamId[t.id] = t.avgRating;
   });
-  const matches = enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId);
+  const matches = enrichMatchesWithHeadToHead(enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId), scrims);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
   return { tournament, teams, matches, scrims, roundLabels };
 };

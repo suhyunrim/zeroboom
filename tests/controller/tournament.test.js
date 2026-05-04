@@ -269,6 +269,79 @@ describe('validateScrimInput', () => {
   });
 });
 
+describe('computeTeamScrimRecord', () => {
+  const scrims = [
+    { team1Id: 1, team2Id: 2, team1Score: 3, team2Score: 0 },
+    { team1Id: 1, team2Id: 3, team1Score: 2, team2Score: 3 },
+    { team1Id: 2, team2Id: 1, team1Score: 1, team2Score: 1 },
+    { team1Id: 4, team2Id: 5, team1Score: 5, team2Score: 5 },
+  ];
+
+  test('team1 등장 시 자기 점수가 승, 상대 점수가 패', () => {
+    expect(tournamentController.computeTeamScrimRecord(1, scrims)).toEqual({
+      won: 3 + 2 + 1,
+      lost: 0 + 3 + 1,
+      played: 3,
+    });
+  });
+
+  test('team2 등장 시도 정확히 집계', () => {
+    expect(tournamentController.computeTeamScrimRecord(3, scrims)).toEqual({
+      won: 3,
+      lost: 2,
+      played: 1,
+    });
+  });
+
+  test('전적 없는 팀은 0', () => {
+    expect(tournamentController.computeTeamScrimRecord(99, scrims)).toEqual({
+      won: 0,
+      lost: 0,
+      played: 0,
+    });
+  });
+
+  test('빈 스크림 배열', () => {
+    expect(tournamentController.computeTeamScrimRecord(1, [])).toEqual({
+      won: 0,
+      lost: 0,
+      played: 0,
+    });
+  });
+});
+
+describe('computeHeadToHeadScrim', () => {
+  const scrims = [
+    { team1Id: 1, team2Id: 2, team1Score: 3, team2Score: 0 },
+    { team1Id: 2, team2Id: 1, team1Score: 1, team2Score: 2 },
+    { team1Id: 1, team2Id: 3, team1Score: 5, team2Score: 5 },
+  ];
+
+  test('양쪽 슬롯 다 합쳐서 집계 (team1 관점에서 5승 1패)', () => {
+    expect(tournamentController.computeHeadToHeadScrim(1, 2, scrims)).toEqual({
+      team1: { won: 3 + 2, lost: 0 + 1 },
+      team2: { won: 0 + 1, lost: 3 + 2 },
+      played: 2,
+    });
+  });
+
+  test('상대 팀 입장에서도 똑같이 동작', () => {
+    expect(tournamentController.computeHeadToHeadScrim(2, 1, scrims)).toEqual({
+      team1: { won: 0 + 1, lost: 3 + 2 },
+      team2: { won: 3 + 2, lost: 0 + 1 },
+      played: 2,
+    });
+  });
+
+  test('맞붙은 적 없으면 0', () => {
+    expect(tournamentController.computeHeadToHeadScrim(2, 3, scrims)).toEqual({
+      team1: { won: 0, lost: 0 },
+      team2: { won: 0, lost: 0 },
+      played: 0,
+    });
+  });
+});
+
 describe('validateSlotMapping', () => {
   const teams = [{ id: 10 }, { id: 11 }, { id: 12 }, { id: 13 }];
 
