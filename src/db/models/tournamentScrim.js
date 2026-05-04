@@ -27,10 +27,6 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: false,
       },
-      winnerTeamId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-      },
       recordedByDiscordId: {
         type: DataTypes.STRING,
         allowNull: false,

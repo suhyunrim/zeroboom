@@ -269,19 +269,6 @@ describe('validateScrimInput', () => {
   });
 });
 
-describe('computeScrimWinner', () => {
-  test('team1 승리', () => {
-    expect(tournamentController.computeScrimWinner(1, 2, 2, 0)).toBe(1);
-  });
-  test('team2 승리', () => {
-    expect(tournamentController.computeScrimWinner(1, 2, 0, 3)).toBe(2);
-  });
-  test('동점 무승부', () => {
-    expect(tournamentController.computeScrimWinner(1, 2, 1, 1)).toBeNull();
-    expect(tournamentController.computeScrimWinner(1, 2, 0, 0)).toBeNull();
-  });
-});
-
 describe('validateSlotMapping', () => {
   const teams = [{ id: 10 }, { id: 11 }, { id: 12 }, { id: 13 }];
 

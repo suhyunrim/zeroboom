@@ -534,14 +534,12 @@ module.exports = (app) => {
       );
       if (validationError) return res.status(400).json({ result: validationError });
 
-      const winnerTeamId = tournamentController.computeScrimWinner(team1Id, team2Id, team1Score, team2Score);
       const scrim = await models.tournament_scrim.create({
         tournamentId: tournament.id,
         team1Id,
         team2Id,
         team1Score,
         team2Score,
-        winnerTeamId,
         recordedByDiscordId: req.user.discordId,
       });
 
@@ -583,7 +581,6 @@ module.exports = (app) => {
       scrim.team2Id = team2Id;
       scrim.team1Score = team1Score;
       scrim.team2Score = team2Score;
-      scrim.winnerTeamId = tournamentController.computeScrimWinner(team1Id, team2Id, team1Score, team2Score);
       await scrim.save();
 
       const { discordId, actorName } = auditUser(req);

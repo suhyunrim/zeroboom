@@ -93,12 +93,6 @@ const validateScrimInput = ({ team1Id, team2Id, team1Score, team2Score }, teams)
   return null;
 };
 
-const computeScrimWinner = (team1Id, team2Id, team1Score, team2Score) => {
-  if (team1Score > team2Score) return team1Id;
-  if (team2Score > team1Score) return team2Id;
-  return null;
-};
-
 const validateSlotMapping = (slotMapping, teams, bracketSize, teamCount) => {
   if (!Array.isArray(slotMapping) || slotMapping.length !== bracketSize) {
     return `slotMapping은 길이 ${bracketSize}의 배열이어야 합니다.`;
@@ -261,7 +255,6 @@ module.exports = {
   validateTeamInput,
   validateSlotMapping,
   validateScrimInput,
-  computeScrimWinner,
   verifyMembersInGroup,
   findDuplicatePuuids,
   generateMatchRows,
