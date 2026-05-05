@@ -308,21 +308,29 @@ module.exports = (app) => {
   });
 
   route.patch('/:id/teams/:teamId', verifyToken, async (req, res) => {
+    const id = Number(req.params.id);
     const teamId = Number(req.params.teamId);
     const { name, captainPuuid, members } = req.body || {};
+    if (!id) return res.status(400).json({ result: 'id가 필요합니다.' });
     if (!teamId) return res.status(400).json({ result: 'teamId가 필요합니다.' });
 
     try {
-      const tournament = await loadTournamentForAdmin(req, res, {
-        requireStatus: STATUS.PREPARING,
-        statusError: '준비중인 토너먼트만 팀을 수정할 수 있습니다.',
-      });
-      if (!tournament) return undefined;
+      const tournament = await models.tournament.findByPk(id);
+      if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
+      if (tournament.status !== STATUS.PREPARING) {
+        return res.status(409).json({ result: '준비중인 토너먼트만 팀을 수정할 수 있습니다.' });
+      }
 
       const team = await models.tournament_team.findOne({
         where: { id: teamId, tournamentId: tournament.id },
       });
       if (!team) return res.status(404).json({ result: '팀을 찾을 수 없습니다.' });
+
+      const isCaptain = team.captainPuuid && team.captainPuuid === req.user.puuid;
+      const isAdmin = await isGroupAdmin(tournament.groupId, req.user.discordId);
+      if (!isCaptain && !isAdmin) {
+        return res.status(403).json({ result: '관리자 또는 팀장만 수정할 수 있습니다.' });
+      }
 
       const validationError = tournamentController.validateTeamInput({ name, captainPuuid, members });
       if (validationError) return res.status(400).json({ result: validationError });
