@@ -317,8 +317,8 @@ module.exports = (app) => {
     try {
       const tournament = await models.tournament.findByPk(id);
       if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
-      if (tournament.status !== STATUS.PREPARING) {
-        return res.status(409).json({ result: '준비중인 토너먼트만 팀을 수정할 수 있습니다.' });
+      if (![STATUS.PREPARING, STATUS.IN_PROGRESS].includes(tournament.status)) {
+        return res.status(409).json({ result: '준비중이거나 진행중인 토너먼트만 팀을 수정할 수 있습니다.' });
       }
 
       const team = await models.tournament_team.findOne({
