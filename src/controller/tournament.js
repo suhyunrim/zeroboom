@@ -4,6 +4,7 @@ const models = require('../db/models');
 const { incrementStat } = require('../services/achievement/stats');
 const { STAT_TYPES } = require('../services/achievement/definitions');
 const { processAchievements } = require('../services/achievement/engine');
+const { logger } = require('../loaders/logger');
 
 const TEAM_SIZE = 5;
 const VALID_POSITIONS = ['top', 'jungle', 'mid', 'adc', 'support'];
@@ -309,38 +310,43 @@ const findPerfectPredictors = (matches, predictions) => {
 };
 
 const handleTournamentFinishedAchievements = async (tournament) => {
-  const [matches, predictionsRaw] = await Promise.all([
-    models.tournament_match.findAll({ where: { tournamentId: tournament.id } }),
-    models.tournament_match_prediction.findAll({
-      include: [{
-        model: models.tournament_match,
-        where: { tournamentId: tournament.id },
-        attributes: [],
-        required: true,
-      }],
-    }),
-  ]);
-  const predictions = predictionsRaw.map((p) => ({
-    matchId: p.matchId,
-    userPuuid: p.userPuuid,
-    predictedTeamId: p.predictedTeamId,
-  }));
-  const perfectPuuids = findPerfectPredictors(matches, predictions);
-  if (perfectPuuids.length === 0) return [];
+  try {
+    const [matches, predictionsRaw] = await Promise.all([
+      models.tournament_match.findAll({ where: { tournamentId: tournament.id } }),
+      models.tournament_match_prediction.findAll({
+        include: [{
+          model: models.tournament_match,
+          where: { tournamentId: tournament.id },
+          attributes: [],
+          required: true,
+        }],
+      }),
+    ]);
+    const predictions = predictionsRaw.map((p) => ({
+      matchId: p.matchId,
+      userPuuid: p.userPuuid,
+      predictedTeamId: p.predictedTeamId,
+    }));
+    const perfectPuuids = findPerfectPredictors(matches, predictions);
+    if (perfectPuuids.length === 0) return [];
 
-  await Promise.all(perfectPuuids.map((puuid) => incrementStat(
-    puuid,
-    tournament.groupId,
-    STAT_TYPES.PREDICTION_PERFECT_COUNT,
-  )));
+    await Promise.all(perfectPuuids.map((puuid) => incrementStat(
+      puuid,
+      tournament.groupId,
+      STAT_TYPES.PREDICTION_PERFECT_COUNT,
+    )));
 
-  const users = await models.user.findAll({
-    where: { groupId: tournament.groupId, puuid: perfectPuuids },
-    raw: true,
-  });
-  const userMap = {};
-  users.forEach((u) => { userMap[u.puuid] = u; });
-  return processAchievements('tournament_end', { groupId: tournament.groupId, userMap });
+    const users = await models.user.findAll({
+      where: { groupId: tournament.groupId, puuid: perfectPuuids },
+      raw: true,
+    });
+    const userMap = {};
+    users.forEach((u) => { userMap[u.puuid] = u; });
+    return await processAchievements('tournament_end', { groupId: tournament.groupId, userMap });
+  } catch (e) {
+    logger.error('토너먼트 종료 업적 처리 실패:', e);
+    return [];
+  }
 };
 
 const isTournamentLocked = (matches) => {
