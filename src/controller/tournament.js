@@ -283,7 +283,12 @@ const recordMatchResult = async (match, team1Score, team2Score, options = {}) =>
 };
 
 const isTournamentLocked = (matches) => {
-  return matches.some((m) => m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null);
+  // BYE/미정 매치(한쪽 또는 양쪽 슬롯이 null)는 winnerTeamId가 자동 설정되거나
+  // 다음 라운드 placeholder라서 "매치 시작됨" 판정에서 제외한다.
+  return matches.some((m) => {
+    if (m.team1Id == null || m.team2Id == null) return false;
+    return m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null;
+  });
 };
 
 const validatePredictionsInput = ({ predictions, matches, teams }) => {

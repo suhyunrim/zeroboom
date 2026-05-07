@@ -489,26 +489,44 @@ describe('generateMatchRows', () => {
 describe('isTournamentLocked', () => {
   test('모든 매치가 시작 전이면 false', () => {
     const matches = [
-      { team1Score: 0, team2Score: 0, winnerTeamId: null },
-      { team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: 3, team2Id: 4, team1Score: 0, team2Score: 0, winnerTeamId: null },
     ];
     expect(tournamentController.isTournamentLocked(matches)).toBe(false);
   });
 
   test('한 매치라도 점수가 있으면 true', () => {
     const matches = [
-      { team1Score: 0, team2Score: 0, winnerTeamId: null },
-      { team1Score: 1, team2Score: 0, winnerTeamId: null },
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: 3, team2Id: 4, team1Score: 1, team2Score: 0, winnerTeamId: null },
     ];
     expect(tournamentController.isTournamentLocked(matches)).toBe(true);
   });
 
   test('한 매치라도 결과가 있으면 true', () => {
     const matches = [
-      { team1Score: 0, team2Score: 0, winnerTeamId: null },
-      { team1Score: 2, team2Score: 1, winnerTeamId: 5 },
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: 3, team2Id: 4, team1Score: 2, team2Score: 1, winnerTeamId: 3 },
     ];
     expect(tournamentController.isTournamentLocked(matches)).toBe(true);
+  });
+
+  test('BYE 매치(자동 winnerTeamId)는 락으로 인식하지 않음', () => {
+    // 16강 9팀처럼 BYE가 있을 때 R1 BYE 매치는 winnerTeamId가 자동 채워지지만 매치는 시작 안 됨
+    const matches = [
+      { team1Id: 1, team2Id: 7, team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: 3, team2Id: null, team1Score: 0, team2Score: 0, winnerTeamId: 3 },
+      { team1Id: null, team2Id: 4, team1Score: 0, team2Score: 0, winnerTeamId: 4 },
+    ];
+    expect(tournamentController.isTournamentLocked(matches)).toBe(false);
+  });
+
+  test('다음 라운드 placeholder(team1Id/team2Id 모두 null)도 제외', () => {
+    const matches = [
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Id: null, team2Id: null, team1Score: 0, team2Score: 0, winnerTeamId: null },
+    ];
+    expect(tournamentController.isTournamentLocked(matches)).toBe(false);
   });
 
   test('빈 배열은 false', () => {
