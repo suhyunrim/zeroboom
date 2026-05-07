@@ -532,6 +532,43 @@ describe('isTournamentLocked', () => {
   test('빈 배열은 false', () => {
     expect(tournamentController.isTournamentLocked([])).toBe(false);
   });
+
+  test('scheduledAt이 미래면 락 X', () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const now = new Date();
+    const matches = [
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null, scheduledAt: future },
+    ];
+    expect(tournamentController.isTournamentLocked(matches, now)).toBe(false);
+  });
+
+  test('scheduledAt이 과거면 락 O', () => {
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const now = new Date();
+    const matches = [
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null, scheduledAt: past },
+    ];
+    expect(tournamentController.isTournamentLocked(matches, now)).toBe(true);
+  });
+
+  test('BYE 매치는 일정 지나도 락 X', () => {
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const now = new Date();
+    const matches = [
+      { team1Id: 1, team2Id: null, team1Score: 0, team2Score: 0, winnerTeamId: 1, scheduledAt: past },
+    ];
+    expect(tournamentController.isTournamentLocked(matches, now)).toBe(false);
+  });
+
+  test('일부 매치만 일정 있어도 그중 과거가 있으면 락', () => {
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const now = new Date();
+    const matches = [
+      { team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null, scheduledAt: null },
+      { team1Id: 3, team2Id: 4, team1Score: 0, team2Score: 0, winnerTeamId: null, scheduledAt: past },
+    ];
+    expect(tournamentController.isTournamentLocked(matches, now)).toBe(true);
+  });
 });
 
 describe('validatePredictionsInput', () => {

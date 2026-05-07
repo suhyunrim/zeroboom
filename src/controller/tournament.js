@@ -349,12 +349,14 @@ const handleTournamentFinishedAchievements = async (tournament) => {
   }
 };
 
-const isTournamentLocked = (matches) => {
+const isTournamentLocked = (matches, now = new Date()) => {
   // BYE/미정 매치(한쪽 또는 양쪽 슬롯이 null)는 winnerTeamId가 자동 설정되거나
   // 다음 라운드 placeholder라서 "매치 시작됨" 판정에서 제외한다.
   return matches.some((m) => {
     if (m.team1Id == null || m.team2Id == null) return false;
-    return m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null;
+    if (m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null) return true;
+    if (m.scheduledAt && new Date(m.scheduledAt) <= now) return true;
+    return false;
   });
 };
 
