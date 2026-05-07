@@ -578,23 +578,65 @@ describe('validatePredictionsInput', () => {
     { id: 11, team1Id: 3, team2Id: 4 },
     { id: 12, team1Id: null, team2Id: null },
   ];
+  // 모든 매치 다 채운 신규 제출 케이스용 helper
+  const fullPreds = [
+    { matchId: 10, predictedTeamId: 1 },
+    { matchId: 11, predictedTeamId: 4 },
+    { matchId: 12, predictedTeamId: 2 },
+  ];
 
-  test('빈 배열은 통과', () => {
-    expect(tournamentController.validatePredictionsInput({ predictions: [], matches, teams })).toBeNull();
+  test('전체 매치 다 채워서 제출하면 통과', () => {
+    expect(tournamentController.validatePredictionsInput({ predictions: fullPreds, matches, teams })).toBeNull();
   });
 
-  test('정상 케이스 통과', () => {
+  test('일부 매치만 빠지면 reject', () => {
     const predictions = [
       { matchId: 10, predictedTeamId: 1 },
       { matchId: 11, predictedTeamId: 4 },
-      { matchId: 12, predictedTeamId: 2 },
     ];
-    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/모든 매치/);
   });
 
-  test('null predictedTeamId는 삭제 의도로 통과', () => {
+  test('빈 배열에 기존 예측도 없으면 reject', () => {
+    expect(tournamentController.validatePredictionsInput({ predictions: [], matches, teams })).toMatch(/모든 매치/);
+  });
+
+  test('기존 예측이 전체 매치 커버하고 있으면 빈 배열도 통과', () => {
+    const existingPredictions = [{ matchId: 10 }, { matchId: 11 }, { matchId: 12 }];
+    expect(tournamentController.validatePredictionsInput({
+      predictions: [], matches, teams, existingPredictions,
+    })).toBeNull();
+  });
+
+  test('기존 예측 일부 + 변경분으로 합쳐서 전체 커버되면 통과', () => {
+    const existingPredictions = [{ matchId: 10 }, { matchId: 11 }];
+    const predictions = [{ matchId: 12, predictedTeamId: 2 }];
+    expect(tournamentController.validatePredictionsInput({
+      predictions, matches, teams, existingPredictions,
+    })).toBeNull();
+  });
+
+  test('변경분에서 null로 삭제 시 전체가 안 차면 reject', () => {
+    const existingPredictions = [{ matchId: 10 }, { matchId: 11 }, { matchId: 12 }];
     const predictions = [{ matchId: 10, predictedTeamId: null }];
-    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+    expect(tournamentController.validatePredictionsInput({
+      predictions, matches, teams, existingPredictions,
+    })).toMatch(/모든 매치/);
+  });
+
+  test('BYE 매치는 강제 대상에서 제외', () => {
+    const matchesWithBye = [
+      { id: 10, team1Id: 1, team2Id: 2 },
+      { id: 11, team1Id: 3, team2Id: null }, // BYE
+      { id: 12, team1Id: null, team2Id: null }, // placeholder는 강제 대상
+    ];
+    const predictions = [
+      { matchId: 10, predictedTeamId: 1 },
+      { matchId: 12, predictedTeamId: 2 },
+    ];
+    expect(tournamentController.validatePredictionsInput({
+      predictions, matches: matchesWithBye, teams,
+    })).toBeNull();
   });
 
   test('matchId 누락 reject', () => {
@@ -626,8 +668,12 @@ describe('validatePredictionsInput', () => {
   });
 
   test('미정 매치는 어떤 토너먼트 팀도 허용', () => {
-    const predictions = [{ matchId: 12, predictedTeamId: 4 }];
-    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+    const predictions = [...fullPreds, { matchId: 12, predictedTeamId: 4 }].filter(
+      (v, i, a) => a.findIndex((x) => x.matchId === v.matchId) === i,
+    );
+    // 12번 매치를 4팀으로 (미정 매치라 토너먼트 팀 어느 거든 OK)
+    const adjusted = predictions.map((p) => (p.matchId === 12 ? { matchId: 12, predictedTeamId: 4 } : p));
+    expect(tournamentController.validatePredictionsInput({ predictions: adjusted, matches, teams })).toBeNull();
   });
 });
 

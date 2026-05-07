@@ -773,16 +773,28 @@ module.exports = (app) => {
         return res.status(403).json({ result: '이 토너먼트의 그룹 멤버만 예측할 수 있습니다.' });
       }
 
-      const [matches, teams] = await Promise.all([
+      const [matches, teams, existingPredictions] = await Promise.all([
         models.tournament_match.findAll({ where: { tournamentId: id } }),
         models.tournament_team.findAll({ where: { tournamentId: id } }),
+        models.tournament_match_prediction.findAll({
+          where: { userPuuid: req.user.puuid },
+          attributes: ['matchId'],
+          include: [{
+            model: models.tournament_match,
+            where: { tournamentId: id },
+            attributes: [],
+            required: true,
+          }],
+        }),
       ]);
 
       if (tournamentController.isTournamentLocked(matches)) {
         return res.status(409).json({ result: '이미 토너먼트가 시작되어 예측을 변경할 수 없습니다.' });
       }
 
-      const validationError = tournamentController.validatePredictionsInput({ predictions, matches, teams });
+      const validationError = tournamentController.validatePredictionsInput({
+        predictions, matches, teams, existingPredictions,
+      });
       if (validationError) return res.status(400).json({ result: validationError });
 
       const result = await models.sequelize.transaction(async (transaction) => {
