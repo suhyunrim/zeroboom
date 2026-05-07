@@ -203,6 +203,33 @@ describe('validateTeamInput', () => {
   });
 });
 
+describe('validateTrophyType', () => {
+  test('null/undefined은 통과 (optional)', () => {
+    expect(tournamentController.validateTrophyType(null)).toBeNull();
+    expect(tournamentController.validateTrophyType(undefined)).toBeNull();
+  });
+
+  test('국제(worlds/msi/first_stand/ewc) + 한국(lck/kespa) 모두 통과', () => {
+    expect(tournamentController.validateTrophyType('worlds')).toBeNull();
+    expect(tournamentController.validateTrophyType('msi')).toBeNull();
+    expect(tournamentController.validateTrophyType('first_stand')).toBeNull();
+    expect(tournamentController.validateTrophyType('ewc')).toBeNull();
+    expect(tournamentController.validateTrophyType('lck')).toBeNull();
+    expect(tournamentController.validateTrophyType('kespa')).toBeNull();
+  });
+
+  test('알 수 없는 값은 에러', () => {
+    expect(tournamentController.validateTrophyType('unknown')).toMatch(/trophyType은/);
+    expect(tournamentController.validateTrophyType('WORLDS')).toMatch(/trophyType은/);
+    expect(tournamentController.validateTrophyType('')).toMatch(/trophyType은/);
+  });
+
+  test('비문자열 거부', () => {
+    expect(tournamentController.validateTrophyType(123)).toMatch(/trophyType은/);
+    expect(tournamentController.validateTrophyType({})).toMatch(/trophyType은/);
+  });
+});
+
 describe('validateScrimInput', () => {
   const teams = [{ id: 1 }, { id: 2 }, { id: 3 }];
 

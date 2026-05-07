@@ -42,6 +42,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      trophyType: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+      },
     },
     {},
   );
