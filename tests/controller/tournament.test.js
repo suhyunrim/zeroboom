@@ -4,6 +4,7 @@ const mockModels = {
   tournament_team: { findAll: jest.fn() },
   tournament_match: { findAll: jest.fn(), findOne: jest.fn() },
   tournament_scrim: { findAll: jest.fn(), findOne: jest.fn(), create: jest.fn() },
+  tournament_match_prediction: { findAll: jest.fn(), upsert: jest.fn(), destroy: jest.fn() },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
@@ -482,5 +483,165 @@ describe('generateMatchRows', () => {
       expect(r.team1Id).toBeNull();
       expect(r.team2Id).toBeNull();
     });
+  });
+});
+
+describe('isTournamentLocked', () => {
+  test('모든 매치가 시작 전이면 false', () => {
+    const matches = [
+      { team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Score: 0, team2Score: 0, winnerTeamId: null },
+    ];
+    expect(tournamentController.isTournamentLocked(matches)).toBe(false);
+  });
+
+  test('한 매치라도 점수가 있으면 true', () => {
+    const matches = [
+      { team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Score: 1, team2Score: 0, winnerTeamId: null },
+    ];
+    expect(tournamentController.isTournamentLocked(matches)).toBe(true);
+  });
+
+  test('한 매치라도 결과가 있으면 true', () => {
+    const matches = [
+      { team1Score: 0, team2Score: 0, winnerTeamId: null },
+      { team1Score: 2, team2Score: 1, winnerTeamId: 5 },
+    ];
+    expect(tournamentController.isTournamentLocked(matches)).toBe(true);
+  });
+
+  test('빈 배열은 false', () => {
+    expect(tournamentController.isTournamentLocked([])).toBe(false);
+  });
+});
+
+describe('validatePredictionsInput', () => {
+  const teams = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+  const matches = [
+    { id: 10, team1Id: 1, team2Id: 2 },
+    { id: 11, team1Id: 3, team2Id: 4 },
+    { id: 12, team1Id: null, team2Id: null },
+  ];
+
+  test('빈 배열은 통과', () => {
+    expect(tournamentController.validatePredictionsInput({ predictions: [], matches, teams })).toBeNull();
+  });
+
+  test('정상 케이스 통과', () => {
+    const predictions = [
+      { matchId: 10, predictedTeamId: 1 },
+      { matchId: 11, predictedTeamId: 4 },
+      { matchId: 12, predictedTeamId: 2 },
+    ];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+  });
+
+  test('null predictedTeamId는 삭제 의도로 통과', () => {
+    const predictions = [{ matchId: 10, predictedTeamId: null }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+  });
+
+  test('matchId 누락 reject', () => {
+    const predictions = [{ predictedTeamId: 1 }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/matchId/);
+  });
+
+  test('이 토너먼트에 없는 매치 reject', () => {
+    const predictions = [{ matchId: 999, predictedTeamId: 1 }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/속하지 않은 매치/);
+  });
+
+  test('중복 매치 reject', () => {
+    const predictions = [
+      { matchId: 10, predictedTeamId: 1 },
+      { matchId: 10, predictedTeamId: 2 },
+    ];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/중복/);
+  });
+
+  test('이 토너먼트에 없는 팀 reject', () => {
+    const predictions = [{ matchId: 10, predictedTeamId: 99 }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/속하지 않은 팀/);
+  });
+
+  test('두 팀이 정해진 매치에서 다른 팀 선택 reject', () => {
+    const predictions = [{ matchId: 10, predictedTeamId: 3 }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toMatch(/그중 한 팀/);
+  });
+
+  test('미정 매치는 어떤 토너먼트 팀도 허용', () => {
+    const predictions = [{ matchId: 12, predictedTeamId: 4 }];
+    expect(tournamentController.validatePredictionsInput({ predictions, matches, teams })).toBeNull();
+  });
+});
+
+describe('enrichMatchesWithPredictions', () => {
+  test('매치별 카운트와 비율 계산', () => {
+    const matches = [
+      { id: 10, team1Id: 1, team2Id: 2, toJSON() { return { id: 10, team1Id: 1, team2Id: 2 }; } },
+    ];
+    const predictions = [
+      { matchId: 10, userPuuid: 'a', predictedTeamId: 1, summonerName: 'A' },
+      { matchId: 10, userPuuid: 'b', predictedTeamId: 1, summonerName: 'B' },
+      { matchId: 10, userPuuid: 'c', predictedTeamId: 2, summonerName: 'C' },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, predictions);
+    expect(result[0].team1PredictionCount).toBe(2);
+    expect(result[0].team2PredictionCount).toBe(1);
+    expect(result[0].team1PredictionPct).toBeCloseTo(2 / 3);
+    expect(result[0].team2PredictionPct).toBeCloseTo(1 / 3);
+    expect(result[0].predictions).toHaveLength(3);
+  });
+
+  test('예측이 없으면 비율은 null', () => {
+    const matches = [
+      { id: 10, team1Id: 1, team2Id: 2, toJSON() { return { id: 10, team1Id: 1, team2Id: 2 }; } },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, []);
+    expect(result[0].team1PredictionCount).toBe(0);
+    expect(result[0].team1PredictionPct).toBeNull();
+    expect(result[0].team2PredictionPct).toBeNull();
+  });
+
+  test('매치 슬롯에 없는 팀에 대한 예측은 카운트 안함', () => {
+    const matches = [
+      { id: 10, team1Id: 1, team2Id: 2, toJSON() { return { id: 10, team1Id: 1, team2Id: 2 }; } },
+    ];
+    const predictions = [
+      { matchId: 10, userPuuid: 'a', predictedTeamId: 99 },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, predictions);
+    expect(result[0].team1PredictionCount).toBe(0);
+    expect(result[0].team2PredictionCount).toBe(0);
+    expect(result[0].predictions).toHaveLength(1);
+  });
+});
+
+describe('buildLeaderboard', () => {
+  test('정답수로 정렬, 동점은 settledCount 적은 쪽이 위', () => {
+    const matches = [
+      { id: 10, winnerTeamId: 1 },
+      { id: 11, winnerTeamId: 3 },
+      { id: 12, winnerTeamId: null },
+    ];
+    const predictions = [
+      { matchId: 10, userPuuid: 'a', predictedTeamId: 1, summonerName: 'A' },
+      { matchId: 11, userPuuid: 'a', predictedTeamId: 3, summonerName: 'A' },
+      { matchId: 12, userPuuid: 'a', predictedTeamId: 5, summonerName: 'A' },
+      { matchId: 10, userPuuid: 'b', predictedTeamId: 1, summonerName: 'B' },
+      { matchId: 11, userPuuid: 'b', predictedTeamId: 4, summonerName: 'B' },
+      { matchId: 10, userPuuid: 'c', predictedTeamId: 1, summonerName: 'C' },
+    ];
+    const board = tournamentController.buildLeaderboard(matches, predictions);
+    expect(board[0]).toMatchObject({ userPuuid: 'a', correctCount: 2, settledCount: 2 });
+    expect(board[1]).toMatchObject({ userPuuid: 'c', correctCount: 1, settledCount: 1 });
+    expect(board[2]).toMatchObject({ userPuuid: 'b', correctCount: 1, settledCount: 2 });
+  });
+
+  test('미확정 매치는 settledCount에 포함 안 됨', () => {
+    const matches = [{ id: 10, winnerTeamId: null }];
+    const predictions = [{ matchId: 10, userPuuid: 'a', predictedTeamId: 1 }];
+    expect(tournamentController.buildLeaderboard(matches, predictions)).toEqual([]);
   });
 });

@@ -87,9 +87,40 @@ const buildDetail = async (tournament) => {
   teams.forEach((t) => {
     avgRatingByTeamId[t.id] = t.avgRating;
   });
-  const matches = enrichMatchesWithHeadToHead(enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId), scrims);
+  const matchIds = matchesRaw.map((m) => m.id);
+  const predictionsRaw = matchIds.length > 0
+    ? await models.tournament_match_prediction.findAll({
+      where: { matchId: matchIds },
+      order: [['updatedAt', 'ASC']],
+    })
+    : [];
+  const predictionPuuids = [...new Set(predictionsRaw.map((p) => p.userPuuid))];
+  const summonerNameByPuuid = {};
+  if (predictionPuuids.length > 0) {
+    const summoners = await models.summoner.findAll({
+      where: { puuid: predictionPuuids },
+      attributes: ['puuid', 'name'],
+    });
+    summoners.forEach((s) => {
+      summonerNameByPuuid[s.puuid] = s.name;
+    });
+  }
+  const predictions = predictionsRaw.map((p) => ({
+    matchId: p.matchId,
+    userPuuid: p.userPuuid,
+    predictedTeamId: p.predictedTeamId,
+    summonerName: summonerNameByPuuid[p.userPuuid] || null,
+    updatedAt: p.updatedAt,
+  }));
+  const matchesEnriched = enrichMatchesWithHeadToHead(
+    enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId),
+    scrims,
+  );
+  const matches = tournamentController.enrichMatchesWithPredictions(matchesEnriched, predictions);
+  const predictionsLocked = tournamentController.isTournamentLocked(matchesRaw);
+  const leaderboard = tournamentController.buildLeaderboard(matchesRaw, predictions);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
-  return { tournament, teams, matches, scrims, roundLabels };
+  return { tournament, teams, matches, scrims, roundLabels, predictionsLocked, leaderboard };
 };
 
 const loadTournamentForAdmin = async (req, res, { requireStatus, statusError } = {}) => {
@@ -646,6 +677,71 @@ module.exports = (app) => {
 
       return res.status(200).json({ result: '삭제되었습니다.' });
     } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  route.put('/:id/predictions', verifyToken, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ result: 'id가 필요합니다.' });
+    const predictions = req.body && req.body.predictions;
+    if (!Array.isArray(predictions)) {
+      return res.status(400).json({ result: 'predictions 배열이 필요합니다.' });
+    }
+
+    const transaction = await models.sequelize.transaction();
+    try {
+      const tournament = await models.tournament.findByPk(id, { transaction });
+      if (!tournament) {
+        await transaction.rollback();
+        return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
+      }
+      if (tournament.status === STATUS.FINISHED) {
+        await transaction.rollback();
+        return res.status(409).json({ result: '종료된 토너먼트입니다.' });
+      }
+
+      const member = await models.user.findOne({
+        where: { groupId: tournament.groupId, puuid: req.user.puuid },
+        transaction,
+      });
+      if (!member) {
+        await transaction.rollback();
+        return res.status(403).json({ result: '이 토너먼트의 그룹 멤버만 예측할 수 있습니다.' });
+      }
+
+      const [matches, teams] = await Promise.all([
+        models.tournament_match.findAll({ where: { tournamentId: id }, transaction }),
+        models.tournament_team.findAll({ where: { tournamentId: id }, transaction }),
+      ]);
+
+      if (tournamentController.isTournamentLocked(matches)) {
+        await transaction.rollback();
+        return res.status(409).json({ result: '이미 토너먼트가 시작되어 예측을 변경할 수 없습니다.' });
+      }
+
+      const validationError = tournamentController.validatePredictionsInput({
+        predictions,
+        matches,
+        teams,
+      });
+      if (validationError) {
+        await transaction.rollback();
+        return res.status(400).json({ result: validationError });
+      }
+
+      const result = await tournamentController.applyPredictions({
+        tournamentId: id,
+        userPuuid: req.user.puuid,
+        predictions,
+        transaction,
+      });
+
+      await transaction.commit();
+      return res.status(200).json({ result: 'ok', ...result });
+    } catch (e) {
+      await transaction.rollback();
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }

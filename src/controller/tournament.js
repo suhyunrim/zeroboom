@@ -282,6 +282,112 @@ const recordMatchResult = async (match, team1Score, team2Score, options = {}) =>
   return { ok: true, match, tournament };
 };
 
+const isTournamentLocked = (matches) => {
+  return matches.some(
+    (m) => (m.team1Score || 0) > 0 || (m.team2Score || 0) > 0 || m.winnerTeamId != null,
+  );
+};
+
+const validatePredictionsInput = ({ predictions, matches, teams }) => {
+  if (!Array.isArray(predictions)) return 'predictions는 배열이어야 합니다.';
+  if (predictions.length === 0) return null;
+  const matchIds = new Set(matches.map((m) => m.id));
+  const teamIds = new Set(teams.map((t) => t.id));
+  const matchById = new Map(matches.map((m) => [m.id, m]));
+  const seenMatchIds = new Set();
+  for (const p of predictions) {
+    if (!p || !Number.isInteger(p.matchId)) return '각 예측에 matchId가 필요합니다.';
+    if (!matchIds.has(p.matchId)) return '이 토너먼트에 속하지 않은 매치입니다.';
+    if (seenMatchIds.has(p.matchId)) return '같은 매치에 중복된 예측이 있습니다.';
+    seenMatchIds.add(p.matchId);
+    if (p.predictedTeamId !== null) {
+      if (!Number.isInteger(p.predictedTeamId)) return 'predictedTeamId는 정수 또는 null이어야 합니다.';
+      if (!teamIds.has(p.predictedTeamId)) return '이 토너먼트에 속하지 않은 팀입니다.';
+      const match = matchById.get(p.matchId);
+      if (match.team1Id != null && match.team2Id != null) {
+        if (p.predictedTeamId !== match.team1Id && p.predictedTeamId !== match.team2Id) {
+          return '두 팀이 정해진 매치에서는 그중 한 팀만 선택할 수 있습니다.';
+        }
+      }
+    }
+  }
+  return null;
+};
+
+const applyPredictions = async ({ tournamentId, userPuuid, predictions, transaction }) => {
+  const toDelete = predictions.filter((p) => p.predictedTeamId === null).map((p) => p.matchId);
+  const toUpsert = predictions.filter((p) => p.predictedTeamId !== null);
+
+  if (toDelete.length > 0) {
+    await models.tournament_match_prediction.destroy({
+      where: { matchId: toDelete, userPuuid },
+      transaction,
+    });
+  }
+  for (const p of toUpsert) {
+    await models.tournament_match_prediction.upsert(
+      { matchId: p.matchId, userPuuid, predictedTeamId: p.predictedTeamId },
+      { transaction },
+    );
+  }
+  return { deleted: toDelete.length, upserted: toUpsert.length };
+};
+
+const enrichMatchesWithPredictions = (matches, predictions) => {
+  const byMatch = new Map();
+  for (const p of predictions) {
+    if (!byMatch.has(p.matchId)) byMatch.set(p.matchId, []);
+    byMatch.get(p.matchId).push(p);
+  }
+  return matches.map((m) => {
+    const data = m.toJSON ? m.toJSON() : { ...m };
+    const list = byMatch.get(data.id) || [];
+    let c1 = 0;
+    let c2 = 0;
+    for (const p of list) {
+      if (p.predictedTeamId === data.team1Id) c1 += 1;
+      else if (p.predictedTeamId === data.team2Id) c2 += 1;
+    }
+    const total = c1 + c2;
+    data.predictions = list.map((p) => ({
+      userPuuid: p.userPuuid,
+      summonerName: p.summonerName || null,
+      predictedTeamId: p.predictedTeamId,
+      updatedAt: p.updatedAt,
+    }));
+    data.team1PredictionCount = c1;
+    data.team2PredictionCount = c2;
+    data.team1PredictionPct = total > 0 ? c1 / total : null;
+    data.team2PredictionPct = total > 0 ? c2 / total : null;
+    return data;
+  });
+};
+
+const buildLeaderboard = (matches, predictions) => {
+  const matchById = new Map(matches.map((m) => [m.id, m]));
+  const byUser = new Map();
+  for (const p of predictions) {
+    const match = matchById.get(p.matchId);
+    if (match && match.winnerTeamId != null) {
+      if (!byUser.has(p.userPuuid)) {
+        byUser.set(p.userPuuid, {
+          userPuuid: p.userPuuid,
+          summonerName: p.summonerName || null,
+          correctCount: 0,
+          settledCount: 0,
+        });
+      }
+      const entry = byUser.get(p.userPuuid);
+      entry.settledCount += 1;
+      if (p.predictedTeamId === match.winnerTeamId) entry.correctCount += 1;
+    }
+  }
+  return [...byUser.values()].sort((a, b) => {
+    if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+    return a.settledCount - b.settledCount;
+  });
+};
+
 module.exports = {
   TEAM_SIZE,
   VALID_POSITIONS,
@@ -304,4 +410,9 @@ module.exports = {
   computeTeamAvgRating,
   computeTeamScrimRecord,
   computeHeadToHeadScrim,
+  isTournamentLocked,
+  validatePredictionsInput,
+  applyPredictions,
+  enrichMatchesWithPredictions,
+  buildLeaderboard,
 };
