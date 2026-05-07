@@ -505,8 +505,20 @@ module.exports = (app) => {
       if (!match) return res.status(404).json({ result: '매치를 찾을 수 없습니다.' });
       const tournament = await models.tournament.findByPk(match.tournamentId);
       if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
-      if (!(await isGroupAdmin(tournament.groupId, req.user.discordId))) {
-        return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
+
+      const matchTeamIds = [match.team1Id, match.team2Id].filter((v) => v != null);
+      const [matchTeams, isAdmin] = await Promise.all([
+        matchTeamIds.length > 0
+          ? models.tournament_team.findAll({
+            where: { id: matchTeamIds },
+            attributes: ['captainPuuid'],
+          })
+          : Promise.resolve([]),
+        isGroupAdmin(tournament.groupId, req.user.discordId),
+      ]);
+      const isCaptain = matchTeams.some((t) => t.captainPuuid && t.captainPuuid === req.user.puuid);
+      if (!isAdmin && !isCaptain) {
+        return res.status(403).json({ result: '관리자 또는 매치 양 팀장만 결과를 입력할 수 있습니다.' });
       }
       if (tournament.status !== STATUS.IN_PROGRESS) {
         return res.status(409).json({ result: '진행중인 토너먼트만 결과를 입력할 수 있습니다.' });
