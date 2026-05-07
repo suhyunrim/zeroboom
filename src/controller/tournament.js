@@ -1,6 +1,9 @@
 const { Op } = require('sequelize');
 const elo = require('arpad');
 const models = require('../db/models');
+const { incrementStat } = require('../services/achievement/stats');
+const { STAT_TYPES } = require('../services/achievement/definitions');
+const { processAchievements } = require('../services/achievement/engine');
 
 const TEAM_SIZE = 5;
 const VALID_POSITIONS = ['top', 'jungle', 'mid', 'adc', 'support'];
@@ -282,6 +285,64 @@ const recordMatchResult = async (match, team1Score, team2Score, options = {}) =>
   return { ok: true, match, tournament };
 };
 
+const findPerfectPredictors = (matches, predictions) => {
+  // BYE 매치(한쪽 슬롯이 null)는 자동 처리되어 정답 의미가 없으므로 제외.
+  const validMatches = matches.filter(
+    (m) => m.team1Id != null && m.team2Id != null && m.winnerTeamId != null,
+  );
+  if (validMatches.length === 0) return [];
+  const winnerByMatchId = new Map(validMatches.map((m) => [m.id, m.winnerTeamId]));
+
+  const correctByUser = new Map();
+  for (const p of predictions) {
+    const winner = winnerByMatchId.get(p.matchId);
+    if (winner == null) continue;
+    if (p.predictedTeamId !== winner) continue;
+    correctByUser.set(p.userPuuid, (correctByUser.get(p.userPuuid) || 0) + 1);
+  }
+
+  const perfectPuuids = [];
+  for (const [puuid, count] of correctByUser) {
+    if (count === validMatches.length) perfectPuuids.push(puuid);
+  }
+  return perfectPuuids;
+};
+
+const handleTournamentFinishedAchievements = async (tournament) => {
+  const [matches, predictionsRaw] = await Promise.all([
+    models.tournament_match.findAll({ where: { tournamentId: tournament.id } }),
+    models.tournament_match_prediction.findAll({
+      include: [{
+        model: models.tournament_match,
+        where: { tournamentId: tournament.id },
+        attributes: [],
+        required: true,
+      }],
+    }),
+  ]);
+  const predictions = predictionsRaw.map((p) => ({
+    matchId: p.matchId,
+    userPuuid: p.userPuuid,
+    predictedTeamId: p.predictedTeamId,
+  }));
+  const perfectPuuids = findPerfectPredictors(matches, predictions);
+  if (perfectPuuids.length === 0) return [];
+
+  await Promise.all(perfectPuuids.map((puuid) => incrementStat(
+    puuid,
+    tournament.groupId,
+    STAT_TYPES.PREDICTION_PERFECT_COUNT,
+  )));
+
+  const users = await models.user.findAll({
+    where: { groupId: tournament.groupId, puuid: perfectPuuids },
+    raw: true,
+  });
+  const userMap = {};
+  users.forEach((u) => { userMap[u.puuid] = u; });
+  return processAchievements('tournament_end', { groupId: tournament.groupId, userMap });
+};
+
 const isTournamentLocked = (matches) => {
   // BYE/미정 매치(한쪽 또는 양쪽 슬롯이 null)는 winnerTeamId가 자동 설정되거나
   // 다음 라운드 placeholder라서 "매치 시작됨" 판정에서 제외한다.
@@ -420,4 +481,6 @@ module.exports = {
   applyPredictions,
   enrichMatchesWithPredictions,
   buildLeaderboard,
+  findPerfectPredictors,
+  handleTournamentFinishedAchievements,
 };

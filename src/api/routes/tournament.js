@@ -528,6 +528,13 @@ module.exports = (app) => {
       });
 
       await tournament.reload();
+      if (tournament.status === STATUS.FINISHED) {
+        try {
+          await tournamentController.handleTournamentFinishedAchievements(tournament);
+        } catch (e) {
+          logger.error('승부의신 업적 처리 실패:', e);
+        }
+      }
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
     } catch (e) {
