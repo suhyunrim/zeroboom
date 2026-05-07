@@ -505,8 +505,20 @@ module.exports = (app) => {
       if (!match) return res.status(404).json({ result: '매치를 찾을 수 없습니다.' });
       const tournament = await models.tournament.findByPk(match.tournamentId);
       if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
-      if (!(await isGroupAdmin(tournament.groupId, req.user.discordId))) {
-        return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
+
+      const matchTeamIds = [match.team1Id, match.team2Id].filter((v) => v != null);
+      const [matchTeams, isAdmin] = await Promise.all([
+        matchTeamIds.length > 0
+          ? models.tournament_team.findAll({
+            where: { id: matchTeamIds },
+            attributes: ['captainPuuid'],
+          })
+          : Promise.resolve([]),
+        isGroupAdmin(tournament.groupId, req.user.discordId),
+      ]);
+      const isCaptain = matchTeams.some((t) => t.captainPuuid && t.captainPuuid === req.user.puuid);
+      if (!isAdmin && !isCaptain) {
+        return res.status(403).json({ result: '관리자 또는 매치 양 팀장만 결과를 입력할 수 있습니다.' });
       }
       if (tournament.status !== STATUS.IN_PROGRESS) {
         return res.status(409).json({ result: '진행중인 토너먼트만 결과를 입력할 수 있습니다.' });
@@ -533,6 +545,61 @@ module.exports = (app) => {
       }
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  route.patch('/matches/:matchId/schedule', verifyToken, async (req, res) => {
+    const matchId = Number(req.params.matchId);
+    if (!matchId) return res.status(400).json({ result: 'matchId가 필요합니다.' });
+    const { scheduledAt } = req.body || {};
+    if (scheduledAt !== null && scheduledAt !== undefined) {
+      if (typeof scheduledAt !== 'string' || Number.isNaN(new Date(scheduledAt).getTime())) {
+        return res.status(400).json({ result: '유효하지 않은 일정입니다.' });
+      }
+    }
+
+    try {
+      const match = await models.tournament_match.findByPk(matchId);
+      if (!match) return res.status(404).json({ result: '매치를 찾을 수 없습니다.' });
+      const tournament = await models.tournament.findByPk(match.tournamentId);
+      if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
+      if (![STATUS.PREPARING, STATUS.IN_PROGRESS].includes(tournament.status)) {
+        return res.status(409).json({ result: '준비중이거나 진행중인 토너먼트만 일정을 변경할 수 있습니다.' });
+      }
+
+      const matchTeamIds = [match.team1Id, match.team2Id].filter((v) => v != null);
+      const [matchTeams, isAdmin] = await Promise.all([
+        matchTeamIds.length > 0
+          ? models.tournament_team.findAll({
+            where: { id: matchTeamIds },
+            attributes: ['captainPuuid'],
+          })
+          : Promise.resolve([]),
+        isGroupAdmin(tournament.groupId, req.user.discordId),
+      ]);
+      const isCaptain = matchTeams.some((t) => t.captainPuuid && t.captainPuuid === req.user.puuid);
+      if (!isAdmin && !isCaptain) {
+        return res.status(403).json({ result: '관리자 또는 매치 양 팀장만 일정을 변경할 수 있습니다.' });
+      }
+
+      const before = match.scheduledAt;
+      match.scheduledAt = scheduledAt == null ? null : new Date(scheduledAt);
+      await match.save();
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.match_schedule',
+        details: { tournamentId: tournament.id, matchId, before, after: match.scheduledAt },
+        source: 'web',
+      });
+
+      return res.status(200).json({ result: 'ok', match });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });

@@ -45,6 +45,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: false,
       },
+      scheduledAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {},
   );
