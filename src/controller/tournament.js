@@ -15,6 +15,16 @@ const STATUS = {
   FINISHED: 'finished',
 };
 
+const TROPHY_TYPES = ['worlds', 'msi', 'first_stand', 'ewc', 'lck', 'kespa'];
+
+const validateTrophyType = (trophyType) => {
+  if (trophyType === null || trophyType === undefined) return null;
+  if (typeof trophyType !== 'string' || !TROPHY_TYPES.includes(trophyType)) {
+    return `trophyType은 다음 중 하나여야 합니다: ${TROPHY_TYPES.join(', ')}`;
+  }
+  return null;
+};
+
 const ratingCalculator = new elo(16);
 
 const computeBracketSize = (teamCount) => {
@@ -479,6 +489,8 @@ module.exports = {
   TEAM_SIZE,
   VALID_POSITIONS,
   STATUS,
+  TROPHY_TYPES,
+  validateTrophyType,
   computeBracketSize,
   getWinningScore,
   computeRoundLabels,

@@ -222,7 +222,7 @@ module.exports = (app) => {
   });
 
   route.post('/', verifyToken, async (req, res) => {
-    const { groupId, name, defaultBestOf = 3, finalBestOf = 5 } = req.body || {};
+    const { groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
@@ -232,6 +232,8 @@ module.exports = (app) => {
     if (!Number.isInteger(finalBestOf) || finalBestOf < 1 || finalBestOf % 2 === 0) {
       return res.status(400).json({ result: 'finalBestOf는 홀수 양의 정수여야 합니다.' });
     }
+    const trophyError = tournamentController.validateTrophyType(trophyType);
+    if (trophyError) return res.status(400).json({ result: trophyError });
     if (!(await isGroupAdmin(groupId, req.user.discordId))) {
       return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
     }
@@ -245,6 +247,7 @@ module.exports = (app) => {
         teamCount: null,
         defaultBestOf,
         finalBestOf,
+        trophyType,
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -253,7 +256,53 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name },
+        details: { tournamentId: tournament.id, name, trophyType },
+        source: 'web',
+      });
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  route.patch('/:id', verifyToken, async (req, res) => {
+    const { name, trophyType } = req.body || {};
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const updates = {};
+      const before = {};
+      if (name !== undefined) {
+        if (typeof name !== 'string' || name.trim().length === 0) {
+          return res.status(400).json({ result: 'name은 비어있을 수 없습니다.' });
+        }
+        before.name = tournament.name;
+        updates.name = name;
+      }
+      if (trophyType !== undefined) {
+        const trophyError = tournamentController.validateTrophyType(trophyType);
+        if (trophyError) return res.status(400).json({ result: trophyError });
+        before.trophyType = tournament.trophyType;
+        updates.trophyType = trophyType;
+      }
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ result: '수정할 필드가 없습니다.' });
+      }
+
+      Object.assign(tournament, updates);
+      await tournament.save();
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.update',
+        details: { tournamentId: tournament.id, before, after: updates },
         source: 'web',
       });
 

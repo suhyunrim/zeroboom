@@ -348,6 +348,38 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   };
 };
 
+const getTournamentChampionships = async (groupId, puuid) => {
+  const finishedTournaments = await models.tournament.findAll({
+    where: {
+      groupId,
+      status: 'finished',
+      championTeamId: { [Op.ne]: null },
+    },
+    attributes: ['id', 'name', 'championTeamId', 'trophyType', 'updatedAt'],
+    order: [['updatedAt', 'DESC']],
+  });
+  if (finishedTournaments.length === 0) return [];
+
+  const champTeams = await models.tournament_team.findAll({
+    where: { id: finishedTournaments.map((t) => t.championTeamId) },
+    attributes: ['id', 'name', 'members'],
+  });
+  const champTeamById = Object.fromEntries(champTeams.map((t) => [t.id, t]));
+
+  return finishedTournaments
+    .filter((t) => {
+      const team = champTeamById[t.championTeamId];
+      return team && (team.members || []).some((m) => m.puuid === puuid);
+    })
+    .map((t) => ({
+      tournamentId: t.id,
+      tournamentName: t.name,
+      teamName: champTeamById[t.championTeamId].name,
+      trophyType: t.trophyType,
+      wonAt: t.updatedAt,
+    }));
+};
+
 module.exports.getInfo = async (groupId, puuid) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
   if (!puuid) return { result: 'invalid puuid', status: 501 };
@@ -421,8 +453,19 @@ module.exports.getInfo = async (groupId, puuid) => {
       }
       : null;
 
+    // 토너먼트 우승 트로피
+    const tournamentChampionships = await getTournamentChampionships(groupId, puuid);
+
     return {
-      result: { userInfo, summonerInfo, detailedStats, honorStats, subAccount, statusMessage },
+      result: {
+        userInfo,
+        summonerInfo,
+        detailedStats,
+        honorStats,
+        subAccount,
+        statusMessage,
+        tournamentChampionships,
+      },
       status: 200,
     };
   } catch (e) {
