@@ -360,9 +360,8 @@ const isTournamentLocked = (matches, now = new Date()) => {
   });
 };
 
-const validatePredictionsInput = ({ predictions, matches, teams }) => {
+const validatePredictionsInput = ({ predictions, matches, teams, existingPredictions = [] }) => {
   if (!Array.isArray(predictions)) return 'predictions는 배열이어야 합니다.';
-  if (predictions.length === 0) return null;
   const matchIds = new Set(matches.map((m) => m.id));
   const teamIds = new Set(teams.map((t) => t.id));
   const matchById = new Map(matches.map((m) => [m.id, m]));
@@ -383,6 +382,20 @@ const validatePredictionsInput = ({ predictions, matches, teams }) => {
       }
     }
   }
+
+  // BYE(한쪽 슬롯만 채워진 매치)를 제외한 모든 매치에 예측이 있어야 한다.
+  // existingPredictions(DB의 본인 기존 예측) + 이번 변경분을 합친 최종 상태 기준으로 검증.
+  const isBye = (m) => (m.team1Id != null) !== (m.team2Id != null);
+  const requiredMatchIds = matches.filter((m) => !isBye(m)).map((m) => m.id);
+  const finalSet = new Set(existingPredictions.map((p) => p.matchId));
+  for (const p of predictions) {
+    if (p.predictedTeamId === null) finalSet.delete(p.matchId);
+    else finalSet.add(p.matchId);
+  }
+  for (const mid of requiredMatchIds) {
+    if (!finalSet.has(mid)) return 'BYE를 제외한 모든 매치에 예측이 필요합니다.';
+  }
+
   return null;
 };
 
