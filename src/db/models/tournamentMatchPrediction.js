@@ -19,6 +19,8 @@ module.exports = (sequelize, DataTypes) => {
     },
     {},
   );
-  tournamentMatchPrediction.associate = (/* models */) => {};
+  tournamentMatchPrediction.associate = (models) => {
+    tournamentMatchPrediction.belongsTo(models.tournament_match, { foreignKey: 'matchId' });
+  };
   return tournamentMatchPrediction;
 };

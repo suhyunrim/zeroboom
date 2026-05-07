@@ -283,9 +283,7 @@ const recordMatchResult = async (match, team1Score, team2Score, options = {}) =>
 };
 
 const isTournamentLocked = (matches) => {
-  return matches.some(
-    (m) => (m.team1Score || 0) > 0 || (m.team2Score || 0) > 0 || m.winnerTeamId != null,
-  );
+  return matches.some((m) => m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null);
 };
 
 const validatePredictionsInput = ({ predictions, matches, teams }) => {
@@ -314,9 +312,11 @@ const validatePredictionsInput = ({ predictions, matches, teams }) => {
   return null;
 };
 
-const applyPredictions = async ({ tournamentId, userPuuid, predictions, transaction }) => {
+const applyPredictions = async ({ userPuuid, predictions, transaction }) => {
   const toDelete = predictions.filter((p) => p.predictedTeamId === null).map((p) => p.matchId);
-  const toUpsert = predictions.filter((p) => p.predictedTeamId !== null);
+  const toUpsert = predictions
+    .filter((p) => p.predictedTeamId !== null)
+    .map((p) => ({ matchId: p.matchId, userPuuid, predictedTeamId: p.predictedTeamId }));
 
   if (toDelete.length > 0) {
     await models.tournament_match_prediction.destroy({
@@ -324,11 +324,11 @@ const applyPredictions = async ({ tournamentId, userPuuid, predictions, transact
       transaction,
     });
   }
-  for (const p of toUpsert) {
-    await models.tournament_match_prediction.upsert(
-      { matchId: p.matchId, userPuuid, predictedTeamId: p.predictedTeamId },
-      { transaction },
-    );
+  if (toUpsert.length > 0) {
+    await models.tournament_match_prediction.bulkCreate(toUpsert, {
+      updateOnDuplicate: ['predictedTeamId', 'updatedAt'],
+      transaction,
+    });
   }
   return { deleted: toDelete.length, upserted: toUpsert.length };
 };

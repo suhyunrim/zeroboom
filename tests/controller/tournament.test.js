@@ -4,7 +4,7 @@ const mockModels = {
   tournament_team: { findAll: jest.fn() },
   tournament_match: { findAll: jest.fn(), findOne: jest.fn() },
   tournament_scrim: { findAll: jest.fn(), findOne: jest.fn(), create: jest.fn() },
-  tournament_match_prediction: { findAll: jest.fn(), upsert: jest.fn(), destroy: jest.fn() },
+  tournament_match_prediction: { findAll: jest.fn(), bulkCreate: jest.fn(), destroy: jest.fn() },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
