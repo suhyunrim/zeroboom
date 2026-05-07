@@ -528,6 +528,9 @@ module.exports = (app) => {
       });
 
       await tournament.reload();
+      if (tournament.status === STATUS.FINISHED) {
+        setImmediate(() => tournamentController.handleTournamentFinishedAchievements(tournament));
+      }
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
     } catch (e) {

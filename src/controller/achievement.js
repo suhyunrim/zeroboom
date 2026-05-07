@@ -26,6 +26,7 @@ const CATEGORY_TO_STAT = {
   sweep_lose: STAT_TYPES.SWEEP_LOSES,
   night_owl: STAT_TYPES.NIGHT_OWL_SESSIONS,
   channel_creator: STAT_TYPES.TEMP_VOICE_CREATED,
+  prediction_perfect: STAT_TYPES.PREDICTION_PERFECT_COUNT,
 };
 
 async function getActiveMembers(groupId) {

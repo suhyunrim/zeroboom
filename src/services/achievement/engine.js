@@ -116,6 +116,7 @@ const SIMPLE_STAT_CATEGORIES = {
   sweep_lose: 'sweepLoses',
   night_owl: 'nightOwlSessions',
   channel_creator: 'tempVoiceCreated',
+  prediction_perfect: 'predictionPerfectCount',
 };
 
 const CHALLENGE_MEDAL_KEY = {
@@ -199,7 +200,8 @@ async function processAchievements(trigger, context) {
         d.category === 'sweep_win' ||
         d.category === 'sweep_lose' ||
         d.category === 'night_owl' ||
-        d.category === 'channel_creator',
+        d.category === 'channel_creator' ||
+        d.category === 'prediction_perfect',
     );
     const needsHonor = defs.some((d) => d.category === 'honor_received' || d.category === 'honor_voted_count');
 
@@ -237,6 +239,7 @@ async function processAchievements(trigger, context) {
                 STAT_TYPES.SWEEP_LOSES,
                 STAT_TYPES.NIGHT_OWL_SESSIONS,
                 STAT_TYPES.TEMP_VOICE_CREATED,
+                STAT_TYPES.PREDICTION_PERFECT_COUNT,
               ],
             },
             raw: true,
@@ -288,6 +291,7 @@ async function processAchievements(trigger, context) {
         sweepLoses: userStats[STAT_TYPES.SWEEP_LOSES] || 0,
         nightOwlSessions: userStats[STAT_TYPES.NIGHT_OWL_SESSIONS] || 0,
         tempVoiceCreated: userStats[STAT_TYPES.TEMP_VOICE_CREATED] || 0,
+        predictionPerfectCount: userStats[STAT_TYPES.PREDICTION_PERFECT_COUNT] || 0,
       };
 
       for (const def of unchecked) {

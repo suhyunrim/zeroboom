@@ -461,6 +461,17 @@ const channelCreator = makeTieredAchievements({
   goals: { BRONZE: 1, SILVER: 3, GOLD: 5, PLATINUM: 10, EMERALD: 20, DIAMOND: 50, MASTER: 100, GRANDMASTER: 200, CHALLENGER: 500 },
 });
 
+// 승부의신 (토너먼트 모든 정상 매치 적중)
+const predictionPerfect = makeTieredAchievements({
+  idPrefix: 'PREDICTION_PERFECT',
+  nameFn: (g) => `승부의신 ${g}회`,
+  descFn: (g) => `토너먼트 모든 매치를 적중시켜 ${g}회 달성하세요`,
+  emoji: '🔮',
+  category: 'prediction_perfect',
+  trigger: 'tournament_end',
+  goals: { DIAMOND: 1, MASTER: 2, GRANDMASTER: 3, CHALLENGER: 5 },
+});
+
 // 개근 도장 (연속 7일, DIAMOND 단일)
 const attendanceStamp = [
   {
@@ -522,6 +533,7 @@ const definitions = [
   ...sweepLose,
   ...nightOwl,
   ...channelCreator,
+  ...predictionPerfect,
 ];
 
 const STAT_TYPES = {
@@ -547,6 +559,7 @@ const STAT_TYPES = {
   SWEEP_LOSES: 'sweep_loses',
   NIGHT_OWL_SESSIONS: 'night_owl_sessions',
   TEMP_VOICE_CREATED: 'temp_voice_created',
+  PREDICTION_PERFECT_COUNT: 'prediction_perfect_count',
 };
 
 module.exports = { definitions, TIERS, STAT_TYPES, getTierName };

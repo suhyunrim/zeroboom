@@ -663,3 +663,71 @@ describe('buildLeaderboard', () => {
     expect(tournamentController.buildLeaderboard(matches, predictions)).toEqual([]);
   });
 });
+
+describe('findPerfectPredictors', () => {
+  test('모든 정상 매치를 다 맞춘 사용자만 반환', () => {
+    const matches = [
+      { id: 1, team1Id: 1, team2Id: 2, winnerTeamId: 1 },
+      { id: 2, team1Id: 3, team2Id: 4, winnerTeamId: 4 },
+      { id: 3, team1Id: 1, team2Id: 4, winnerTeamId: 4 },
+    ];
+    const predictions = [
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'a', predictedTeamId: 4 },
+      { matchId: 3, userPuuid: 'a', predictedTeamId: 4 },
+      { matchId: 1, userPuuid: 'b', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'b', predictedTeamId: 3 },
+      { matchId: 3, userPuuid: 'b', predictedTeamId: 4 },
+    ];
+    expect(tournamentController.findPerfectPredictors(matches, predictions)).toEqual(['a']);
+  });
+
+  test('미예측 매치가 있으면 perfect 아님', () => {
+    const matches = [
+      { id: 1, team1Id: 1, team2Id: 2, winnerTeamId: 1 },
+      { id: 2, team1Id: 3, team2Id: 4, winnerTeamId: 4 },
+    ];
+    const predictions = [{ matchId: 1, userPuuid: 'a', predictedTeamId: 1 }];
+    expect(tournamentController.findPerfectPredictors(matches, predictions)).toEqual([]);
+  });
+
+  test('BYE 매치는 정답 판정에서 제외', () => {
+    const matches = [
+      { id: 1, team1Id: 1, team2Id: 2, winnerTeamId: 1 },
+      { id: 2, team1Id: 3, team2Id: null, winnerTeamId: 3 },
+      { id: 3, team1Id: 1, team2Id: 3, winnerTeamId: 1 },
+    ];
+    const predictions = [
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 3, userPuuid: 'a', predictedTeamId: 1 },
+    ];
+    expect(tournamentController.findPerfectPredictors(matches, predictions)).toEqual(['a']);
+  });
+
+  test('아직 결과 없는 매치(winnerTeamId null)는 정답 판정에서 제외', () => {
+    const matches = [
+      { id: 1, team1Id: 1, team2Id: 2, winnerTeamId: 1 },
+      { id: 2, team1Id: 3, team2Id: 4, winnerTeamId: null },
+    ];
+    const predictions = [
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'a', predictedTeamId: 3 },
+    ];
+    expect(tournamentController.findPerfectPredictors(matches, predictions)).toEqual(['a']);
+  });
+
+  test('정상 매치가 0개면 빈 배열', () => {
+    expect(tournamentController.findPerfectPredictors([], [])).toEqual([]);
+  });
+
+  test('여러 사용자가 perfect일 수 있음', () => {
+    const matches = [{ id: 1, team1Id: 1, team2Id: 2, winnerTeamId: 1 }];
+    const predictions = [
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 1, userPuuid: 'b', predictedTeamId: 1 },
+      { matchId: 1, userPuuid: 'c', predictedTeamId: 2 },
+    ];
+    const result = tournamentController.findPerfectPredictors(matches, predictions);
+    expect(result.sort()).toEqual(['a', 'b']);
+  });
+});
