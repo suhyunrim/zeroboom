@@ -30,11 +30,14 @@ const enrichTeamsWithRating = (teams, ratingByPuuid) => {
 };
 
 // 멤버가 서버를 나가면 active-members API에서 빠져 프론트에서 puuid로만 표시되는
-// 문제를 막기 위해, summoner 테이블에서 직접 name을 붙여 내려준다.
-const enrichTeamsWithMemberName = (teams, summonerNameByPuuid) => {
+// 문제를 막기 위해, 백엔드에서 표시용 정보(name/profileIconId/rating)를 직접 붙여 내려준다.
+const enrichTeamsWithMemberInfo = (teams, summonerByPuuid, ratingByPuuid) => {
   teams.forEach((t) => {
     (t.members || []).forEach((m) => {
-      m.name = summonerNameByPuuid[m.puuid] || null;
+      const s = summonerByPuuid[m.puuid];
+      m.name = s ? s.name : null;
+      m.profileIconId = s ? s.profileIconId : null;
+      m.rating = ratingByPuuid[m.puuid] != null ? ratingByPuuid[m.puuid] : null;
     });
   });
   return teams;
@@ -107,16 +110,17 @@ const buildDetail = async (tournament) => {
   const [ratingByPuuid, summoners] = await Promise.all([
     fetchRatingMap(tournament.groupId, [...teamMemberPuuids]),
     summonerPuuidList.length > 0
-      ? models.summoner.findAll({ where: { puuid: summonerPuuidList }, attributes: ['puuid', 'name'] })
+      ? models.summoner.findAll({ where: { puuid: summonerPuuidList }, attributes: ['puuid', 'name', 'profileIconId'] })
       : Promise.resolve([]),
   ]);
-  const summonerNameByPuuid = {};
+  const summonerByPuuid = {};
   summoners.forEach((s) => {
-    summonerNameByPuuid[s.puuid] = s.name;
+    summonerByPuuid[s.puuid] = s;
   });
-  const teams = enrichTeamsWithMemberName(
+  const teams = enrichTeamsWithMemberInfo(
     enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrims),
-    summonerNameByPuuid,
+    summonerByPuuid,
+    ratingByPuuid,
   );
   const avgRatingByTeamId = {};
   teams.forEach((t) => {
@@ -126,7 +130,7 @@ const buildDetail = async (tournament) => {
     matchId: p.matchId,
     userPuuid: p.userPuuid,
     predictedTeamId: p.predictedTeamId,
-    summonerName: summonerNameByPuuid[p.userPuuid] || null,
+    summonerName: summonerByPuuid[p.userPuuid] ? summonerByPuuid[p.userPuuid].name : null,
     updatedAt: p.updatedAt,
   }));
   const matchesEnriched = enrichMatchesWithHeadToHead(
@@ -180,16 +184,34 @@ module.exports = (app) => {
       });
 
       const championIds = list.map((t) => t.championTeamId).filter((v) => v != null);
-      const champions = championIds.length
-        ? await models.tournament_team.findAll({
-            where: { id: championIds },
-            attributes: ['id', 'name', 'captainPuuid', 'members'],
-          })
-        : [];
       const champById = {};
-      champions.forEach((c) => {
-        champById[c.id] = c;
-      });
+      if (championIds.length) {
+        const champions = await models.tournament_team.findAll({
+          where: { id: championIds },
+          attributes: ['id', 'name', 'captainPuuid', 'members'],
+        });
+        const champPuuids = new Set();
+        champions.forEach((c) => (c.members || []).forEach((m) => champPuuids.add(m.puuid)));
+        const champPuuidList = [...champPuuids];
+        const [champRatingByPuuid, champSummoners] = await Promise.all([
+          fetchRatingMap(groupId, champPuuidList),
+          champPuuidList.length > 0
+            ? models.summoner.findAll({
+                where: { puuid: champPuuidList },
+                attributes: ['puuid', 'name', 'profileIconId'],
+              })
+            : Promise.resolve([]),
+        ]);
+        const champSummonerByPuuid = {};
+        champSummoners.forEach((s) => {
+          champSummonerByPuuid[s.puuid] = s;
+        });
+        const championsData = champions.map((c) => (c.toJSON ? c.toJSON() : c));
+        enrichTeamsWithMemberInfo(championsData, champSummonerByPuuid, champRatingByPuuid);
+        championsData.forEach((c) => {
+          champById[c.id] = c;
+        });
+      }
 
       const tournaments = list.map((t) => {
         const data = t.toJSON ? t.toJSON() : t;
