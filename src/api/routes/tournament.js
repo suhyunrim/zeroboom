@@ -29,6 +29,17 @@ const enrichTeamsWithRating = (teams, ratingByPuuid) => {
   });
 };
 
+// 멤버가 서버를 나가면 active-members API에서 빠져 프론트에서 puuid로만 표시되는
+// 문제를 막기 위해, summoner 테이블에서 직접 name을 붙여 내려준다.
+const enrichTeamsWithMemberName = (teams, summonerNameByPuuid) => {
+  teams.forEach((t) => {
+    (t.members || []).forEach((m) => {
+      m.name = summonerNameByPuuid[m.puuid] || null;
+    });
+  });
+  return teams;
+};
+
 const enrichMatchesWithWinProb = (matches, avgRatingByTeamId) => {
   return matches.map((m) => {
     const data = m.toJSON ? m.toJSON() : m;
@@ -88,20 +99,25 @@ const buildDetail = async (tournament) => {
     }),
   ]);
 
-  const allPuuids = new Set();
-  teamsRaw.forEach((t) => (t.members || []).forEach((m) => allPuuids.add(m.puuid)));
-  const predictionPuuids = [...new Set(predictionsRaw.map((p) => p.userPuuid))];
+  const teamMemberPuuids = new Set();
+  teamsRaw.forEach((t) => (t.members || []).forEach((m) => teamMemberPuuids.add(m.puuid)));
+  const summonerPuuids = new Set(teamMemberPuuids);
+  predictionsRaw.forEach((p) => summonerPuuids.add(p.userPuuid));
+  const summonerPuuidList = [...summonerPuuids];
   const [ratingByPuuid, summoners] = await Promise.all([
-    fetchRatingMap(tournament.groupId, [...allPuuids]),
-    predictionPuuids.length > 0
-      ? models.summoner.findAll({ where: { puuid: predictionPuuids }, attributes: ['puuid', 'name'] })
+    fetchRatingMap(tournament.groupId, [...teamMemberPuuids]),
+    summonerPuuidList.length > 0
+      ? models.summoner.findAll({ where: { puuid: summonerPuuidList }, attributes: ['puuid', 'name'] })
       : Promise.resolve([]),
   ]);
   const summonerNameByPuuid = {};
   summoners.forEach((s) => {
     summonerNameByPuuid[s.puuid] = s.name;
   });
-  const teams = enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrims);
+  const teams = enrichTeamsWithMemberName(
+    enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrims),
+    summonerNameByPuuid,
+  );
   const avgRatingByTeamId = {};
   teams.forEach((t) => {
     avgRatingByTeamId[t.id] = t.avgRating;
