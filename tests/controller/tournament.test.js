@@ -841,3 +841,127 @@ describe('findPerfectPredictors', () => {
     expect(result.sort()).toEqual(['a', 'b']);
   });
 });
+
+describe('브래킷 일관성(A2) 룰', () => {
+  // 4팀 토너먼트:
+  //   R1: m1(team1=1, team2=2), m2(team1=3, team2=4)
+  //   R2(결승): m3(team1=1, team2=3)  ← m1 winner=1, m2 winner=3 가정
+  // 부모 매핑: m3.team1 ← m1, m3.team2 ← m2
+  const makeMatches = (winnerOverrides = {}) => [
+    {
+      id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2,
+      winnerTeamId: winnerOverrides.m1 ?? 1,
+      toJSON() { return { id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, winnerTeamId: winnerOverrides.m1 ?? 1 }; },
+    },
+    {
+      id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: 4,
+      winnerTeamId: winnerOverrides.m2 ?? 3,
+      toJSON() { return { id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: 4, winnerTeamId: winnerOverrides.m2 ?? 3 }; },
+    },
+    {
+      id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3,
+      winnerTeamId: winnerOverrides.m3 ?? null,
+      toJSON() { return { id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3, winnerTeamId: winnerOverrides.m3 ?? null }; },
+    },
+  ];
+
+  test('enrich: 부모 매치를 틀린 사용자의 결승 예측은 카운트 안 됨', () => {
+    const matches = makeMatches();
+    const predictions = [
+      // a: m1=1(정답), m2=3(정답), m3=1 → 결승 유효 카운트
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'a', predictedTeamId: 3 },
+      { matchId: 3, userPuuid: 'a', predictedTeamId: 1 },
+      // b: m1=2(오답), m2=3(정답), m3=3 → m1 틀려서 결승 무효
+      { matchId: 1, userPuuid: 'b', predictedTeamId: 2 },
+      { matchId: 2, userPuuid: 'b', predictedTeamId: 3 },
+      { matchId: 3, userPuuid: 'b', predictedTeamId: 3 },
+      // c: m1=1(정답), m2=4(오답), m3=3 → m2 틀려서 결승 무효
+      { matchId: 1, userPuuid: 'c', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'c', predictedTeamId: 4 },
+      { matchId: 3, userPuuid: 'c', predictedTeamId: 3 },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, predictions);
+    const final = result.find((m) => m.id === 3);
+    expect(final.predictionsActive).toBe(true);
+    // 유효 카운트: a만 (m3=1)
+    expect(final.team1PredictionCount).toBe(1);
+    expect(final.team2PredictionCount).toBe(0);
+    // 전체 카운트(자세히 보기): a(1), c(3) → t1=1, b(3) → t2=1
+    expect(final.team1PredictionCountTotal).toBe(1);
+    expect(final.team2PredictionCountTotal).toBe(2);
+    // 각 예측에 isValid 플래그
+    const aPred = final.predictions.find((p) => p.userPuuid === 'a');
+    const bPred = final.predictions.find((p) => p.userPuuid === 'b');
+    const cPred = final.predictions.find((p) => p.userPuuid === 'c');
+    expect(aPred.isValid).toBe(true);
+    expect(bPred.isValid).toBe(false);
+    expect(cPred.isValid).toBe(false);
+  });
+
+  test('enrich: 한쪽 미정 매치는 비활성화 — predictionsActive=false, isValid=null', () => {
+    const matches = [
+      {
+        id: 10, round: 2, bracketSlot: 0, team1Id: null, team2Id: 5,
+        toJSON() { return { id: 10, round: 2, bracketSlot: 0, team1Id: null, team2Id: 5 }; },
+      },
+    ];
+    const predictions = [
+      { matchId: 10, userPuuid: 'a', predictedTeamId: 5 },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, predictions);
+    expect(result[0].predictionsActive).toBe(false);
+    expect(result[0].team1PredictionCount).toBe(0);
+    expect(result[0].team2PredictionCount).toBe(0);
+    expect(result[0].team1PredictionCountTotal).toBe(0);
+    expect(result[0].team2PredictionCountTotal).toBe(0);
+    expect(result[0].predictions[0].isValid).toBeNull();
+  });
+
+  test('enrich: BYE 부모는 검증 패스 — 자동 진출이라 사용자 예측 불필요', () => {
+    // R1: m1(team1=1, team2=2) 진짜 매치, m2(team1=3, team2=null) BYE
+    // R2: m3(team1=1, team2=3)
+    const matches = [
+      {
+        id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, winnerTeamId: 1,
+        toJSON() { return { id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, winnerTeamId: 1 }; },
+      },
+      {
+        id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: null, winnerTeamId: 3,
+        toJSON() { return { id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: null, winnerTeamId: 3 }; },
+      },
+      {
+        id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3, winnerTeamId: null,
+        toJSON() { return { id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3, winnerTeamId: null }; },
+      },
+    ];
+    const predictions = [
+      // a: m1만 맞추고 m2(BYE)는 예측 없어도 m3 유효
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 3, userPuuid: 'a', predictedTeamId: 1 },
+    ];
+    const result = tournamentController.enrichMatchesWithPredictions(matches, predictions);
+    const final = result.find((m) => m.id === 3);
+    expect(final.team1PredictionCount).toBe(1);
+    expect(final.predictions[0].isValid).toBe(true);
+  });
+
+  test('buildLeaderboard: 부모 틀린 사용자는 자식 매치 채점에서 제외', () => {
+    const matches = makeMatches({ m3: 1 });
+    const predictions = [
+      // a: 전부 정답 → 3점
+      { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
+      { matchId: 2, userPuuid: 'a', predictedTeamId: 3 },
+      { matchId: 3, userPuuid: 'a', predictedTeamId: 1 },
+      // b: m1 틀림. m2는 정답, m3은 1 찍었지만 m1 틀려서 m3 settledCount 미포함
+      { matchId: 1, userPuuid: 'b', predictedTeamId: 2 },
+      { matchId: 2, userPuuid: 'b', predictedTeamId: 3 },
+      { matchId: 3, userPuuid: 'b', predictedTeamId: 1 },
+    ];
+    const board = tournamentController.buildLeaderboard(matches, predictions);
+    const a = board.find((e) => e.userPuuid === 'a');
+    const b = board.find((e) => e.userPuuid === 'b');
+    expect(a).toMatchObject({ correctCount: 3, settledCount: 3 });
+    expect(b).toMatchObject({ correctCount: 1, settledCount: 2 });
+  });
+});
