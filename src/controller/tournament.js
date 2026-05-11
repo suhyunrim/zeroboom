@@ -430,7 +430,70 @@ const applyPredictions = async ({ userPuuid, predictions, transaction }) => {
   return { deleted: toDelete.length, upserted: toUpsert.length };
 };
 
+// 매치 N의 team1/team2 진출팀이 어느 부모 매치(직전 라운드)에서 왔는지 매핑.
+// 부모 매치의 (round, slot)은 (N.round-1, N.bracketSlot*2) / (N.bracketSlot*2+1).
+const buildParentMap = (matches) => {
+  const byPos = new Map();
+  for (const m of matches) {
+    if (m.round != null && m.bracketSlot != null) {
+      byPos.set(`${m.round}:${m.bracketSlot}`, m);
+    }
+  }
+  const map = new Map();
+  for (const m of matches) {
+    if (m.round == null || m.bracketSlot == null || m.round <= 1) continue;
+    const team1Parent = byPos.get(`${m.round - 1}:${m.bracketSlot * 2}`) || null;
+    const team2Parent = byPos.get(`${m.round - 1}:${m.bracketSlot * 2 + 1}`) || null;
+    map.set(m.id, { team1Parent, team2Parent });
+  }
+  return map;
+};
+
+// 브래킷 일관성(A2): 매치 N의 예측이 유효하려면 N의 양쪽 진출팀이 사용자의
+// 이전 라운드 예측 트리에서 도달 가능해야 한다. 재귀적으로 모든 비BYE 조상 매치를 검증.
+const isPredictionValidUnderTree = (userPuuid, match, parentMap, pickMap, memo) => {
+  const memoKey = `${userPuuid}:${match.id}`;
+  if (memo.has(memoKey)) return memo.get(memoKey);
+  const parents = parentMap.get(match.id);
+  if (!parents) {
+    memo.set(memoKey, true);
+    return true;
+  }
+  const checks = [
+    { parent: parents.team1Parent, expected: match.team1Id },
+    { parent: parents.team2Parent, expected: match.team2Id },
+  ];
+  for (const { parent, expected } of checks) {
+    if (!parent) continue;
+    // BYE 부모(한쪽만 채워진 매치)는 자동 진출이라 검증 패스.
+    if (parent.team1Id == null || parent.team2Id == null) continue;
+    if (expected == null) {
+      memo.set(memoKey, false);
+      return false;
+    }
+    const userPick = pickMap.get(`${userPuuid}:${parent.id}`);
+    if (userPick !== expected) {
+      memo.set(memoKey, false);
+      return false;
+    }
+    if (!isPredictionValidUnderTree(userPuuid, parent, parentMap, pickMap, memo)) {
+      memo.set(memoKey, false);
+      return false;
+    }
+  }
+  memo.set(memoKey, true);
+  return true;
+};
+
 const enrichMatchesWithPredictions = (matches, predictions) => {
+  const matchById = new Map(matches.map((m) => [m.id, m]));
+  const parentMap = buildParentMap(matches);
+  const pickMap = new Map();
+  for (const p of predictions) {
+    pickMap.set(`${p.userPuuid}:${p.matchId}`, p.predictedTeamId);
+  }
+  const memo = new Map();
+
   const byMatch = new Map();
   for (const p of predictions) {
     if (!byMatch.has(p.matchId)) byMatch.set(p.matchId, []);
@@ -439,45 +502,72 @@ const enrichMatchesWithPredictions = (matches, predictions) => {
   return matches.map((m) => {
     const data = m.toJSON ? m.toJSON() : { ...m };
     const list = byMatch.get(data.id) || [];
+    // 양쪽 진출팀이 모두 결정된 매치만 카운트 활성화. 한쪽이 미정인 매치는 결정 대기.
+    const active = data.team1Id != null && data.team2Id != null;
     let c1 = 0;
     let c2 = 0;
-    for (const p of list) {
-      if (p.predictedTeamId === data.team1Id) c1 += 1;
-      else if (p.predictedTeamId === data.team2Id) c2 += 1;
-    }
+    let t1 = 0;
+    let t2 = 0;
+    const enrichedPredictions = list.map((p) => {
+      const valid = active
+        ? isPredictionValidUnderTree(p.userPuuid, matchById.get(p.matchId), parentMap, pickMap, memo)
+        : null;
+      if (active) {
+        if (p.predictedTeamId === data.team1Id) {
+          t1 += 1;
+          if (valid) c1 += 1;
+        } else if (p.predictedTeamId === data.team2Id) {
+          t2 += 1;
+          if (valid) c2 += 1;
+        }
+      }
+      return {
+        userPuuid: p.userPuuid,
+        summonerName: p.summonerName || null,
+        predictedTeamId: p.predictedTeamId,
+        updatedAt: p.updatedAt,
+        isValid: valid,
+      };
+    });
     const total = c1 + c2;
-    data.predictions = list.map((p) => ({
-      userPuuid: p.userPuuid,
-      summonerName: p.summonerName || null,
-      predictedTeamId: p.predictedTeamId,
-      updatedAt: p.updatedAt,
-    }));
+    data.predictions = enrichedPredictions;
+    data.predictionsActive = active;
     data.team1PredictionCount = c1;
     data.team2PredictionCount = c2;
     data.team1PredictionPct = total > 0 ? c1 / total : null;
     data.team2PredictionPct = total > 0 ? c2 / total : null;
+    // 자세히 보기용: 트리 일관성 무관, 진출팀과 일치하는 모든 예측 카운트.
+    data.team1PredictionCountTotal = t1;
+    data.team2PredictionCountTotal = t2;
     return data;
   });
 };
 
 const buildLeaderboard = (matches, predictions) => {
   const matchById = new Map(matches.map((m) => [m.id, m]));
+  const parentMap = buildParentMap(matches);
+  const pickMap = new Map();
+  for (const p of predictions) {
+    pickMap.set(`${p.userPuuid}:${p.matchId}`, p.predictedTeamId);
+  }
+  const memo = new Map();
+
   const byUser = new Map();
   for (const p of predictions) {
     const match = matchById.get(p.matchId);
-    if (match && match.winnerTeamId != null) {
-      if (!byUser.has(p.userPuuid)) {
-        byUser.set(p.userPuuid, {
-          userPuuid: p.userPuuid,
-          summonerName: p.summonerName || null,
-          correctCount: 0,
-          settledCount: 0,
-        });
-      }
-      const entry = byUser.get(p.userPuuid);
-      entry.settledCount += 1;
-      if (p.predictedTeamId === match.winnerTeamId) entry.correctCount += 1;
+    if (!match || match.winnerTeamId == null) continue;
+    if (!isPredictionValidUnderTree(p.userPuuid, match, parentMap, pickMap, memo)) continue;
+    if (!byUser.has(p.userPuuid)) {
+      byUser.set(p.userPuuid, {
+        userPuuid: p.userPuuid,
+        summonerName: p.summonerName || null,
+        correctCount: 0,
+        settledCount: 0,
+      });
     }
+    const entry = byUser.get(p.userPuuid);
+    entry.settledCount += 1;
+    if (p.predictedTeamId === match.winnerTeamId) entry.correctCount += 1;
   }
   return [...byUser.values()].sort((a, b) => {
     if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
