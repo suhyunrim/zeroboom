@@ -560,12 +560,21 @@ module.exports = (app) => {
     }
 
     try {
-      // 본인 프로필 방문은 카운트하지 않음 (본캐 puuid 또는 본인이 등록한 부캐 puuid)
-      const ownerUsers = await models.user.findAll({
-        where: { groupId, discordId },
+      // 본인 프로필 방문은 카운트하지 않음 (본캐 puuid + 본인이 등록한 부캐 puuid).
+      // 부캐는 discordId 가 NULL 이므로 본캐 puuid 를 primaryPuuid 로 갖는 row 도 같이 조회.
+      const main = await models.user.findOne({
+        where: { groupId, discordId, primaryPuuid: null },
         attributes: ['puuid'],
       });
-      const ownPuuids = new Set(ownerUsers.map((u) => u.puuid));
+      const ownPuuids = new Set();
+      if (main) {
+        ownPuuids.add(main.puuid);
+        const subs = await models.user.findAll({
+          where: { groupId, primaryPuuid: main.puuid },
+          attributes: ['puuid'],
+        });
+        subs.forEach((s) => ownPuuids.add(s.puuid));
+      }
       if (ownPuuids.has(puuid)) {
         return res.status(200).json({ result: { counted: false } });
       }

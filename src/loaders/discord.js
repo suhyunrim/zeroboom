@@ -1479,14 +1479,25 @@ module.exports = async (app) => {
     }
   });
 
-  // 디스코드 서버 탈퇴 감지
+  // 디스코드 서버 탈퇴 감지 — 본캐 + 부캐 일괄 처리
   client.on('guildMemberRemove', async (member) => {
     try {
       const group = await models.group.findOne({ where: { discordGuildId: member.guild.id } });
       if (!group) return;
+      const main = await models.user.findOne({
+        where: { groupId: group.id, discordId: member.id, primaryPuuid: null },
+        attributes: ['puuid'],
+      });
+      if (!main) return;
       await models.user.update(
         { leftGuildAt: new Date() },
-        { where: { groupId: group.id, discordId: member.id, leftGuildAt: null } },
+        {
+          where: {
+            groupId: group.id,
+            leftGuildAt: null,
+            [Op.or]: [{ puuid: main.puuid }, { primaryPuuid: main.puuid }],
+          },
+        },
       );
       logger.info(`서버 탈퇴 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
     } catch (e) {
@@ -1500,14 +1511,20 @@ module.exports = async (app) => {
       const group = await models.group.findOne({ where: { discordGuildId: member.guild.id } });
       if (!group) return;
 
-      // 기존 유저면 leftGuildAt 리셋, 온보딩 생략
-      const existingUser = await models.user.findOne({
-        where: { groupId: group.id, discordId: member.id },
+      // 기존 본캐가 있으면 본캐+부캐의 leftGuildAt 리셋, 온보딩 생략
+      const main = await models.user.findOne({
+        where: { groupId: group.id, discordId: member.id, primaryPuuid: null },
+        attributes: ['puuid'],
       });
-      if (existingUser) {
+      if (main) {
         await models.user.update(
           { leftGuildAt: null },
-          { where: { groupId: group.id, discordId: member.id } },
+          {
+            where: {
+              groupId: group.id,
+              [Op.or]: [{ puuid: main.puuid }, { primaryPuuid: main.puuid }],
+            },
+          },
         );
         logger.info(`서버 재가입 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
         return;
@@ -1581,18 +1598,32 @@ module.exports = async (app) => {
 
         const members = await guild.members.fetch();
 
-        // 탈퇴 동기화
+        // 탈퇴 동기화 — 본캐만 검사하고, 탈퇴 시 본캐 + 부캐 일괄 처리
         const guildMemberIds = new Set(members.map((m) => m.id));
-        const users = await models.user.findAll({
-          where: { groupId: group.id, discordId: { [Op.ne]: null }, leftGuildAt: null },
+        const mainUsers = await models.user.findAll({
+          where: {
+            groupId: group.id,
+            discordId: { [Op.ne]: null },
+            leftGuildAt: null,
+            primaryPuuid: null,
+          },
           attributes: ['puuid', 'discordId'],
         });
-        const leftUsers = users.filter((u) => !guildMemberIds.has(u.discordId));
+        const leftUsers = mainUsers.filter((u) => !guildMemberIds.has(u.discordId));
         if (leftUsers.length > 0) {
-          const puuids = leftUsers.map((u) => u.puuid);
+          const mainPuuids = leftUsers.map((u) => u.puuid);
           await models.user.update(
             { leftGuildAt: new Date() },
-            { where: { groupId: group.id, puuid: { [Op.in]: puuids } } },
+            {
+              where: {
+                groupId: group.id,
+                leftGuildAt: null,
+                [Op.or]: [
+                  { puuid: { [Op.in]: mainPuuids } },
+                  { primaryPuuid: { [Op.in]: mainPuuids } },
+                ],
+              },
+            },
           );
           logger.info(`서버 멤버 동기화: 그룹 ${group.id} - ${leftUsers.length}명 탈퇴 반영`);
         }

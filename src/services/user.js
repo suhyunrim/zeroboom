@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { logger } = require('../loaders/logger');
 const models = require('../db/models');
 
@@ -86,6 +87,23 @@ const registerUser = async (groupName, summonerName, tier, discordId = null) => 
     return { result: 'enter the tier explicitly', status: 501 };
 
   try {
+    // (groupId, discordId) UNIQUE 제약과 충돌 방지:
+    // 같은 디스코드 ID 로 이전에 등록된 본캐 row 가 있고 puuid 가 다르면(=계정 갈아탐)
+    // 그 row 의 discordId 를 NULL 로 비워 둔다. 통계/매치 보존을 위해 row 자체는 유지.
+    if (discordId) {
+      await models.user.update(
+        { discordId: null },
+        {
+          where: {
+            groupId: group.id,
+            discordId,
+            primaryPuuid: null,
+            puuid: { [Op.ne]: summoner.puuid },
+          },
+        },
+      );
+    }
+
     await models.user.upsert({
       encryptedAccountId: summoner.encryptedAccountId,
       puuid: summoner.puuid,
