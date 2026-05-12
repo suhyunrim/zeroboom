@@ -506,15 +506,22 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
     const setStat = (puuid, statType, value) => statsRepo.setStat(puuid, gid, statType, value);
     const updateBestStat = (puuid, statType, value) => statsRepo.updateBestStat(puuid, gid, statType, value);
 
-    // 현재 연승/연패 계산 (최근 매치만 조회)
-    const recentMatches = await models.match.findAll({
-      where: {
-        groupId: matchData.groupId,
-        winTeam: { [Op.ne]: null },
-      },
-      order: [['createdAt', 'DESC']],
-      limit: 30,
-    });
+    // 본인 연승/연패 계산용: 유저별 최근 참여 매치만 조회 (그룹 전체에서 자르면 자주 참여 안 하는 유저는 streak 끊는 매치가 윈도 밖으로 밀려남)
+    const streakPuuids = [...team1Data, ...team2Data].map(([p]) => p).filter((p) => userMap[p]);
+    const userRecentMatchesMap = {};
+    await Promise.all(
+      streakPuuids.map(async (puuid) => {
+        const [rows] = await models.sequelize.query(
+          `SELECT gameId, winTeam, team1, team2 FROM matches
+           WHERE groupId = :groupId AND winTeam IS NOT NULL
+             AND (JSON_CONTAINS(JSON_EXTRACT(team1, '$[*][0]'), JSON_QUOTE(:puuid)) = 1
+                  OR JSON_CONTAINS(JSON_EXTRACT(team2, '$[*][0]'), JSON_QUOTE(:puuid)) = 1)
+           ORDER BY createdAt DESC LIMIT 30`,
+          { replacements: { groupId: gid, puuid } },
+        );
+        userRecentMatchesMap[puuid] = rows;
+      }),
+    );
 
     // 뉴비 기준일: 매치 시각 기준 3주 전 (환영위원회 판정에 사용)
     const NEWBIE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
@@ -591,14 +598,13 @@ module.exports.applyMatchResult = async (gameId, previousWinTeam = null) => {
         await updateBestStat(puuid, STAT_TYPES.MAX_GAMES_PER_DAY, gamesToday);
       })());
 
-      // 현재 연승/연패 계산
+      // 현재 연승/연패 계산 (userRecentMatchesMap은 본인 참여 매치만 들어있음)
       let winStreak = 0;
       let loseStreak = 0;
-      for (const m of recentMatches) {
-        const inT1 = m.team1.some((p) => p[0] === puuid);
-        const inT2 = m.team2.some((p) => p[0] === puuid);
-        if (!inT1 && !inT2) continue;
-        const won = (inT1 && m.winTeam === 1) || (inT2 && m.winTeam === 2);
+      for (const m of userRecentMatchesMap[puuid] || []) {
+        const team1 = typeof m.team1 === 'string' ? JSON.parse(m.team1) : m.team1;
+        const inT1 = team1.some((p) => p[0] === puuid);
+        const won = (inT1 && m.winTeam === 1) || (!inT1 && m.winTeam === 2);
         if (winStreak === 0 && loseStreak === 0) {
           if (won) winStreak = 1;
           else loseStreak = 1;
