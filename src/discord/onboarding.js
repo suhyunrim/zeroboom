@@ -433,6 +433,12 @@ async function handleOnboardModalSubmit(interaction, client) {
     if (result.status === 200) {
       onboardingInProgress.delete(interaction.user.id);
 
+      const rawUrl = process.env.FRONTEND_URL;
+      const frontendUrl = rawUrl && !rawUrl.startsWith('http') ? `http://${rawUrl}` : rawUrl;
+      const frontendLine = frontendUrl
+        ? `\n\n🌐 전적·프로필·랭킹은 여기서: ${frontendUrl}`
+        : '';
+
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
         .setTitle('✅ 등록 완료!')
@@ -441,6 +447,7 @@ async function handleOnboardModalSubmit(interaction, client) {
           + `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
           + `티어: ${getTierDisplayEmoji(tierCategory)} **${formatTierForDisplay(tier)}**\n\n`
           + '내전에서 만나요! 🎮'
+          + frontendLine
           + getCustomExtra(group, 'complete'),
         );
 

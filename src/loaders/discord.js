@@ -12,6 +12,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ActivityType,
 } = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
@@ -1575,6 +1576,21 @@ module.exports = async (app) => {
 
   // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
   client.once('ready', async () => {
+    // 봇 status 에 프론트 URL 노출 (사용자가 프론트 존재를 모르는 문제 완화)
+    try {
+      const rawUrl = process.env.FRONTEND_URL;
+      const frontendDisplay = rawUrl
+        ? rawUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+        : null;
+      if (frontendDisplay) {
+        client.user.setActivity(`${frontendDisplay} | 전적·프로필`, {
+          type: ActivityType.Watching,
+        });
+      }
+    } catch (e) {
+      logger.error('봇 status 설정 오류:', e);
+    }
+
     // 커스텀 이모지 초기화
     try {
       await initEmojis(client);

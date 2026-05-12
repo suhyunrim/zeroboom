@@ -113,9 +113,9 @@ exports.run = async (groupName, interaction) => {
     team1WithRating.sort((a, b) => b.rating - a.rating);
     team2WithRating.sort((a, b) => b.rating - a.rating);
 
-    const formatPlayerDisplay = ({ name, rating, position }) => {
+    const formatPlayerDisplay = ({ name, rating, position, puuid }) => {
       const posTag = `[${POSITION_ABBR[position] || position || '??'}]`;
-      return `${formatTierBadge(rating)}${posTag}${name}`;
+      return { display: `${formatTierBadge(rating)}${posTag}${name}`, puuid };
     };
 
     match.team1 = team1WithRating.map(formatPlayerDisplay);
@@ -244,6 +244,7 @@ exports.reactButton = async (interaction, match) => {
       teams[i].push({
         name: `${formatTierBadge(rating)}${posTag}${summonerData.name}`,
         rating,
+        puuid: summonerData.puuid,
       });
       teamsForDB[i].push([summonerData.puuid, summonerData.name]);
       teamDiscordIds[i].push(userData.discordId || null);
