@@ -62,7 +62,15 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
       },
     },
-    {},
+    {
+      indexes: [
+        {
+          name: 'uniq_group_discord',
+          unique: true,
+          fields: ['groupId', 'discordId'],
+        },
+      ],
+    },
   );
   user.associate = (/* models */) => {
     // associations can be defined here

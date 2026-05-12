@@ -68,7 +68,7 @@ module.exports = (app) => {
    */
   route.post('/sub-account', verifyToken, async (req, res) => {
     const { riotId, groupId } = req.body;
-    const { puuid: mainPuuid } = req.user;
+    const { puuid: mainPuuid, discordId, globalName, username } = req.user;
 
     if (!riotId || !groupId) {
       return res.status(400).json({ result: 'riotId와 groupId가 필요합니다.' });
@@ -113,17 +113,28 @@ module.exports = (app) => {
         return res.status(400).json({ result: '이미 부캐가 등록되어 있습니다. 기존 부캐를 해제 후 등록해주세요.' });
       }
 
-      // 부캐 유저 생성
+      // 부캐 유저 생성. discordId 는 NULL — 본/부캐가 같은 (groupId, discordId) 를
+      // 공유해 findOne 시 부캐가 잡히는 사고를 막기 위함. 디스코드 인증은
+      // primaryPuuid → 본캐로 우회한다.
       await models.user.create({
         puuid: subPuuid,
         groupId: Number(groupId),
-        discordId: mainUser.discordId,
+        discordId: null,
         primaryPuuid: mainPuuid,
         win: 0,
         lose: 0,
         defaultRating: mainUser.defaultRating,
         additionalRating: 0,
         role: 'member',
+      });
+
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: discordId,
+        actorName: globalName || username || null,
+        action: 'user.sub_account_create',
+        details: { mainPuuid, subPuuid, riotId },
+        source: 'web',
       });
 
       return res.status(200).json({
@@ -145,7 +156,7 @@ module.exports = (app) => {
    */
   route.delete('/sub-account', verifyToken, async (req, res) => {
     const { groupId } = req.body;
-    const { puuid: mainPuuid } = req.user;
+    const { puuid: mainPuuid, discordId, globalName, username } = req.user;
 
     if (!groupId) {
       return res.status(400).json({ result: 'groupId가 필요합니다.' });
@@ -159,7 +170,24 @@ module.exports = (app) => {
         return res.status(404).json({ result: '등록된 부캐가 없습니다.' });
       }
 
+      const snapshot = {
+        subPuuid: subAccount.puuid,
+        win: subAccount.win,
+        lose: subAccount.lose,
+        defaultRating: subAccount.defaultRating,
+        additionalRating: subAccount.additionalRating,
+      };
+
       await subAccount.destroy();
+
+      auditLog.log({
+        groupId: Number(groupId),
+        actorDiscordId: discordId,
+        actorName: globalName || username || null,
+        action: 'user.sub_account_delete',
+        details: { mainPuuid, ...snapshot },
+        source: 'web',
+      });
 
       return res.status(200).json({ result: '부캐가 해제되었습니다.' });
     } catch (e) {
