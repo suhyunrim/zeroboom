@@ -70,6 +70,7 @@ exports.run = async (groupName, interaction) => {
     components: rows,
     fetchReply: true,
     isToggleMode: true,
+    isTestMode: true,
     memberList,
     excludedIds: [],
     groupName,

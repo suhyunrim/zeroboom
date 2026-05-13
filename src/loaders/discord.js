@@ -208,6 +208,7 @@ module.exports = async (app) => {
             // 토글 모드 데이터 저장
             pickUsersData.set(timeKey, {
               isToggleMode: true,
+              isTestMode: !!output.isTestMode,
               memberList: output.memberList,
               excludedIds: output.excludedIds || [],
               groupName: output.groupName,
@@ -279,6 +280,7 @@ module.exports = async (app) => {
               pickedUsers: output.pickedUsers,
               pickedMembersData: output.pickedMembersData,
               commandStr: output.commandStr,
+              isTestMode: !!data.isTestMode,
             });
           }
           await interaction.update(output);
@@ -345,9 +347,9 @@ module.exports = async (app) => {
                       groupName: group.groupName,
                     });
                   }
-                  // 투표 모드 세션 생성
+                  // 투표 모드 세션 생성 (테스트_인원뽑기에서 온 거면 건너뜀)
                   const conceptVoteMode = getMatchVoteMode(group);
-                  if (conceptVoteMode !== 'off') {
+                  if (conceptVoteMode !== 'off' && !data.isTestMode) {
                     const participantDiscordIds = new Set();
                     if (output.ratingCache) {
                       Object.values(output.ratingCache).forEach((info) => {
@@ -591,9 +593,9 @@ module.exports = async (app) => {
               groupName: group.groupName,
             });
           }
-          // 투표 모드 세션 생성
+          // 투표 모드 세션 생성 (테스트_인원뽑기에서 온 거면 건너뜀)
           const pickVoteMode = getMatchVoteMode(group);
-          if (pickVoteMode !== 'off') {
+          if (pickVoteMode !== 'off' && !data.isTestMode) {
             const participantDiscordIds = new Set();
             if (result.ratingCache) {
               Object.values(result.ratingCache).forEach((info) => {
