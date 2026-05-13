@@ -38,14 +38,16 @@ const frontendFooterField = () => {
 };
 
 // team: 배열, 각 원소는 { display, puuid } 또는 문자열(레거시)
-const format = (label, team, winRate, emoji, avgRating = 0) => {
+// withLink=false면 프로필 링크 생략 (플랜 리스트처럼 줄 수 많아 embed 6000자 초과 우려 시)
+const format = (label, team, winRate, emoji, avgRating = 0, withLink = true) => {
   let message = team
     .map((p) => {
       const display = typeof p === 'string' ? p : p.display;
       const puuid = typeof p === 'string' ? null : p.puuid;
       const content = emoji + display;
       const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
-      return profileLink(content, puuid) + INVISIBLE_SPACE.repeat(padding);
+      const linkOrPlain = withLink ? profileLink(content, puuid) : `\`${content}\``;
+      return linkOrPlain + INVISIBLE_SPACE.repeat(padding);
     })
     .join('\n');
   const avgTierStr = formatAvgTierBadge(avgRating);
@@ -96,8 +98,9 @@ module.exports.formatMatches = (matches) => {
       }
       const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
       const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
-      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating));
-      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating));
+      // 플랜 리스트는 6안 × 2팀 × 10명 = 120줄까지 가능 → 줄당 링크 박으면 embed 6000자 한도 초과 (footer 링크로 대체)
+      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating, false));
+      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating, false));
     },
   );
 
