@@ -15,14 +15,39 @@ const visualWidth = (str) => {
 
 const TARGET_WIDTH = 28;
 // U+2800 (Braille Pattern Blank) — 디스코드에서 공백으로 렌더링되지만 축소되지 않는 문자
-const INVISIBLE_SPACE = '\u2800';
+const INVISIBLE_SPACE = '⠀';
 
-const format = (label, team, winRate, emoji, avgRating = 0) => {
+const rawFrontendUrl = process.env.FRONTEND_URL;
+const FRONTEND_URL = rawFrontendUrl && !rawFrontendUrl.startsWith('http')
+  ? `http://${rawFrontendUrl}`
+  : rawFrontendUrl;
+
+const profileLink = (display, puuid) => {
+  if (!FRONTEND_URL || !puuid) return `\`${display}\``;
+  // [`text`](url) 형태 — backtick 안은 마크다운 처리 안 되지만 전체를 링크로 감싸면 클릭 가능
+  return `[\`${display}\`](${FRONTEND_URL}/userinfo/${puuid})`;
+};
+
+const frontendFooterField = () => {
+  if (!FRONTEND_URL) return null;
+  return {
+    name: '​',
+    value: `🌐 [전적·프로필 더 보기](${FRONTEND_URL})`,
+    inline: false,
+  };
+};
+
+// team: 배열, 각 원소는 { display, puuid } 또는 문자열(레거시)
+// withLink=false면 프로필 링크 생략 (플랜 리스트처럼 줄 수 많아 embed 6000자 초과 우려 시)
+const format = (label, team, winRate, emoji, avgRating = 0, withLink = true) => {
   let message = team
-    .map((name) => {
-      const content = emoji + name;
+    .map((p) => {
+      const display = typeof p === 'string' ? p : p.display;
+      const puuid = typeof p === 'string' ? null : p.puuid;
+      const content = emoji + display;
       const padding = Math.max(0, TARGET_WIDTH - visualWidth(content));
-      return `\`${content}\`` + INVISIBLE_SPACE.repeat(padding);
+      const linkOrPlain = withLink ? profileLink(content, puuid) : `\`${content}\``;
+      return linkOrPlain + INVISIBLE_SPACE.repeat(padding);
     })
     .join('\n');
   const avgTierStr = formatAvgTierBadge(avgRating);
@@ -38,7 +63,7 @@ module.exports.formatMatchWithRating = (label, team1, team1Rating, team2, team2R
   fields.push(
     format(
       label,
-      team1.map((elem) => elem.name),
+      team1.map((elem) => ({ display: elem.name, puuid: elem.puuid })),
       team1WinRate,
       '🐶',
       team1Rating,
@@ -47,12 +72,14 @@ module.exports.formatMatchWithRating = (label, team1, team1Rating, team2, team2R
   fields.push(
     format(
       label,
-      team2.map((elem) => elem.name),
+      team2.map((elem) => ({ display: elem.name, puuid: elem.puuid })),
       1 - team1WinRate,
       '🐱',
       team2Rating,
     ),
   );
+  const footer = frontendFooterField();
+  if (footer) fields.push(footer);
   return new EmbedBuilder().addFields(fields);
 };
 
@@ -63,18 +90,22 @@ module.exports.formatMatches = (matches) => {
     ({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating, conceptLabel, conceptEmoji, conceptDesc }, idx) => {
       if (conceptDesc) {
         if (fields.length !== 0) {
-          fields.push({ name: '\u200B', value: '\u200B' });
+          fields.push({ name: '​', value: '​' });
         }
-        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '\u200B', inline: false });
+        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '​', inline: false });
       } else if (fields.length !== 0) {
-        fields.push({ name: '\u200B', value: '\u200B' });
+        fields.push({ name: '​', value: '​' });
       }
       const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
       const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
-      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating));
-      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating));
+      // 플랜 리스트는 6안 × 2팀 × 10명 = 120줄까지 가능 → 줄당 링크 박으면 embed 6000자 한도 초과 (footer 링크로 대체)
+      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating, false));
+      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating, false));
     },
   );
+
+  const footer = frontendFooterField();
+  if (footer) fields.push(footer);
 
   return new EmbedBuilder().addFields(fields);
 };

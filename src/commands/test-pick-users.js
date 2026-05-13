@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const matchMake = require('./match-make');
 const models = require('../db/models');
 const utils = require('../utils/pick-users-utils');
@@ -24,8 +25,15 @@ const getTestMembers = async (groupName) => {
     return [];
   }
 
+  // 부캐(primaryPuuid != null) 제외, discordId 없는 유저 제외
+  // 같은 discordId가 둘 이상이면 토글 버튼 customId가 중복되어 Discord가 거부함
   const users = await models.user.findAll({
-    where: { groupId: group.id },
+    where: {
+      groupId: group.id,
+      primaryPuuid: null,
+      discordId: { [Op.ne]: null },
+      role: { [Op.ne]: 'outsider' },
+    },
   });
 
   if (users.length === 0) {
@@ -70,6 +78,7 @@ exports.run = async (groupName, interaction) => {
     components: rows,
     fetchReply: true,
     isToggleMode: true,
+    isTestMode: true,
     memberList,
     excludedIds: [],
     groupName,

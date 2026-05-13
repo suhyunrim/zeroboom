@@ -12,6 +12,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ActivityType,
 } = require('discord.js');
 const { Op } = require('sequelize');
 const commandListLoader = require('./command.js');
@@ -207,6 +208,7 @@ module.exports = async (app) => {
             // 토글 모드 데이터 저장
             pickUsersData.set(timeKey, {
               isToggleMode: true,
+              isTestMode: !!output.isTestMode,
               memberList: output.memberList,
               excludedIds: output.excludedIds || [],
               groupName: output.groupName,
@@ -278,6 +280,7 @@ module.exports = async (app) => {
               pickedUsers: output.pickedUsers,
               pickedMembersData: output.pickedMembersData,
               commandStr: output.commandStr,
+              isTestMode: !!data.isTestMode,
             });
           }
           await interaction.update(output);
@@ -344,9 +347,9 @@ module.exports = async (app) => {
                       groupName: group.groupName,
                     });
                   }
-                  // 투표 모드 세션 생성
+                  // 투표 모드 세션 생성 (테스트_인원뽑기에서 온 거면 건너뜀)
                   const conceptVoteMode = getMatchVoteMode(group);
-                  if (conceptVoteMode !== 'off') {
+                  if (conceptVoteMode !== 'off' && !data.isTestMode) {
                     const participantDiscordIds = new Set();
                     if (output.ratingCache) {
                       Object.values(output.ratingCache).forEach((info) => {
@@ -590,9 +593,9 @@ module.exports = async (app) => {
               groupName: group.groupName,
             });
           }
-          // 투표 모드 세션 생성
+          // 투표 모드 세션 생성 (테스트_인원뽑기에서 온 거면 건너뜀)
           const pickVoteMode = getMatchVoteMode(group);
-          if (pickVoteMode !== 'off') {
+          if (pickVoteMode !== 'off' && !data.isTestMode) {
             const participantDiscordIds = new Set();
             if (result.ratingCache) {
               Object.values(result.ratingCache).forEach((info) => {
@@ -1575,6 +1578,21 @@ module.exports = async (app) => {
 
   // 봇 시작 시 DB와 실제 Discord 채널 정합성 확인
   client.once('ready', async () => {
+    // 봇 status 에 프론트 URL 노출 (사용자가 프론트 존재를 모르는 문제 완화)
+    try {
+      const rawUrl = process.env.FRONTEND_URL;
+      const frontendDisplay = rawUrl
+        ? rawUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+        : null;
+      if (frontendDisplay) {
+        client.user.setActivity(`${frontendDisplay} | 전적·프로필`, {
+          type: ActivityType.Watching,
+        });
+      }
+    } catch (e) {
+      logger.error('봇 status 설정 오류:', e);
+    }
+
     // 커스텀 이모지 초기화
     try {
       await initEmojis(client);
