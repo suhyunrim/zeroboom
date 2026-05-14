@@ -946,14 +946,15 @@ describe('브래킷 일관성(A2) 룰', () => {
     expect(final.predictions[0].isValid).toBe(true);
   });
 
-  test('buildLeaderboard: 부모 틀린 사용자는 자식 매치 채점에서 제외', () => {
+  test('성립 불가 예측은 분모(settled)에는 포함, 정답으론 인정 X', () => {
     const matches = makeMatches({ m3: 1 });
     const predictions = [
-      // a: 전부 정답 → 3점
+      // a: 전부 정답 → 3/3
       { matchId: 1, userPuuid: 'a', predictedTeamId: 1 },
       { matchId: 2, userPuuid: 'a', predictedTeamId: 3 },
       { matchId: 3, userPuuid: 'a', predictedTeamId: 1 },
-      // b: m1 틀림. m2는 정답, m3은 1 찍었지만 m1 틀려서 m3 settledCount 미포함
+      // b: m1 틀림, m2 정답, m3은 winner=1 과 같은 1 찍었지만 m1 틀려서 invalid → 정답 미인정
+      //   settledCount 는 m3 포함해서 3, correctCount 는 m2 만 → 1
       { matchId: 1, userPuuid: 'b', predictedTeamId: 2 },
       { matchId: 2, userPuuid: 'b', predictedTeamId: 3 },
       { matchId: 3, userPuuid: 'b', predictedTeamId: 1 },
@@ -962,6 +963,6 @@ describe('브래킷 일관성(A2) 룰', () => {
     const a = board.find((e) => e.userPuuid === 'a');
     const b = board.find((e) => e.userPuuid === 'b');
     expect(a).toMatchObject({ correctCount: 3, settledCount: 3 });
-    expect(b).toMatchObject({ correctCount: 1, settledCount: 2 });
+    expect(b).toMatchObject({ correctCount: 1, settledCount: 3 });
   });
 });

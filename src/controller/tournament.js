@@ -556,7 +556,7 @@ const buildLeaderboard = (matches, predictions) => {
   for (const p of predictions) {
     const match = matchById.get(p.matchId);
     if (!match || match.winnerTeamId == null) continue;
-    if (!isPredictionValidUnderTree(p.userPuuid, match, parentMap, pickMap, memo)) continue;
+    const valid = isPredictionValidUnderTree(p.userPuuid, match, parentMap, pickMap, memo);
     if (!byUser.has(p.userPuuid)) {
       byUser.set(p.userPuuid, {
         userPuuid: p.userPuuid,
@@ -567,7 +567,9 @@ const buildLeaderboard = (matches, predictions) => {
     }
     const entry = byUser.get(p.userPuuid);
     entry.settledCount += 1;
-    if (p.predictedTeamId === match.winnerTeamId) entry.correctCount += 1;
+    if (valid && p.predictedTeamId === match.winnerTeamId) {
+      entry.correctCount += 1;
+    }
   }
   return [...byUser.values()].sort((a, b) => {
     if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
