@@ -7,6 +7,7 @@ const models = require('../../db/models');
 const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
 
 const { getGuildIconUrl } = require('../../utils/discordUtils');
+const { kstDayStart, kstDayEnd } = require('../../utils/timeUtils');
 const auditLog = require('../../controller/audit-log');
 const groupController = require('../../controller/group');
 const seasonController = require('../../controller/season');
@@ -136,7 +137,7 @@ module.exports = (app) => {
     }
 
     try {
-      const result = await groupController.getRankingByPeriod(Number(groupId), new Date(startDate), new Date(endDate));
+      const result = await groupController.getRankingByPeriod(Number(groupId), kstDayStart(startDate), kstDayEnd(endDate));
       const response = { result: result.result };
 
       // 요청자의 기간 랭킹 정보 추가 (puuid 헤더로 식별)

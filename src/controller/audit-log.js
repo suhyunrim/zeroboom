@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const models = require('../db/models');
+const { kstDayStart, kstDayEnd } = require('../utils/timeUtils');
 
 /**
  * 감사 로그 기록
@@ -30,8 +31,8 @@ module.exports.getByGroupId = async (groupId, { page = 1, limit = 50, action, st
   if (action) where.action = action;
   if (startDate || endDate) {
     where.createdAt = {};
-    if (startDate) where.createdAt[Op.gte] = new Date(startDate);
-    if (endDate) where.createdAt[Op.lte] = new Date(endDate);
+    if (startDate) where.createdAt[Op.gte] = kstDayStart(startDate);
+    if (endDate) where.createdAt[Op.lte] = kstDayEnd(endDate);
   }
 
   const offset = (page - 1) * limit;
