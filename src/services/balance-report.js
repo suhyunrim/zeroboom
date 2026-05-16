@@ -1,6 +1,7 @@
 const models = require('../db/models');
 const { Op } = require('sequelize');
 const { getTierName, getTierStep } = require('../utils/tierUtils');
+const { kstDayStart, kstDayEnd } = require('../utils/timeUtils');
 
 /**
  * 내전 티어를 수치 단계로 변환 (비교용)
@@ -124,8 +125,8 @@ const generateReport = async (groupId, startDate, endDate) => {
   const where = { groupId, winTeam: { [Op.ne]: null } };
   if (startDate || endDate) {
     where.createdAt = {};
-    if (startDate) where.createdAt[Op.gte] = new Date(startDate);
-    if (endDate) where.createdAt[Op.lte] = new Date(endDate);
+    if (startDate) where.createdAt[Op.gte] = kstDayStart(startDate);
+    if (endDate) where.createdAt[Op.lte] = kstDayEnd(endDate);
   }
 
   const matches = await models.match.findAll({
