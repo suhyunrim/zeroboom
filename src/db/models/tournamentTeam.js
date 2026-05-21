@@ -23,6 +23,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.JSON,
         allowNull: false,
       },
+      remainingBudget: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {},
   );
