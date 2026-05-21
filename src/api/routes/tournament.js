@@ -5,6 +5,7 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const tournamentController = require('../../controller/tournament');
 const honorController = require('../../controller/honor');
+const { extractTopAchievementsPerCategory } = require('../../services/achievement/topPerCategory');
 
 const { STATUS } = tournamentController;
 const route = Router();
@@ -111,7 +112,7 @@ const buildCandidateDetail = async (tournament, puuid) => {
     internalRating: user ? (user.defaultRating || 0) + (user.additionalRating || 0) : null,
     win: user ? user.win : null,
     lose: user ? user.lose : null,
-    achievements: achievementsRaw.map((a) => ({ id: a.achievementId, unlockedAt: a.unlockedAt })),
+    achievements: extractTopAchievementsPerCategory(achievementsRaw),
     honor: honorStats,
   };
 };
