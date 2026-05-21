@@ -749,15 +749,14 @@ module.exports = (app) => {
     }
   });
 
-  // 입찰 시작: 현재 매물에 대해 deadline 세팅
+  // 입찰 시작: 현재 매물에 대해 auctionConfig.bidDurationSeconds로 deadline 세팅
   route.post('/:id/auction/start-bid', verifyToken, async (req, res) => {
-    const { durationSeconds } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res);
       if (!tournament) return undefined;
 
       const result = await models.sequelize.transaction(async (transaction) => {
-        return tournamentController.startBidTimer(tournament, durationSeconds, { transaction });
+        return tournamentController.startBidTimer(tournament, { transaction });
       });
       if (!result.ok) return res.status(400).json({ result: result.error });
 
@@ -789,15 +788,14 @@ module.exports = (app) => {
     }
   });
 
-  // 시간 갱신: 현재 시각 기준 durationSeconds 후로 deadline 재설정
+  // 시간 갱신: 현재 시각 기준 auctionConfig.bidDurationSeconds 후로 deadline 재설정
   route.post('/:id/auction/extend-time', verifyToken, async (req, res) => {
-    const { durationSeconds } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res);
       if (!tournament) return undefined;
 
       const result = await models.sequelize.transaction(async (transaction) => {
-        return tournamentController.extendBidTimer(tournament, durationSeconds, { transaction });
+        return tournamentController.extendBidTimer(tournament, { transaction });
       });
       if (!result.ok) return res.status(400).json({ result: result.error });
 

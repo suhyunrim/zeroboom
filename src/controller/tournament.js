@@ -808,46 +808,38 @@ const setCurrentAuction = async (tournament, puuid, options = {}) => {
   return { ok: true };
 };
 
-// durationSeconds가 null/undefined면 tournament.auctionConfig.bidDurationSeconds로 폴백.
-const resolveBidDuration = (tournament, durationSeconds) => {
-  if (durationSeconds == null) {
-    return tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
-  }
-  return durationSeconds;
-};
-
-const startBidTimer = async (tournament, durationSeconds, options = {}) => {
+const startBidTimer = async (tournament, options = {}) => {
   if (tournament.status !== STATUS.AUCTION) {
     return { ok: false, error: '경매 단계가 아닙니다.' };
   }
   if (!tournament.currentAuctionPuuid) {
     return { ok: false, error: '현재 매물이 없습니다.' };
   }
-  const resolved = resolveBidDuration(tournament, durationSeconds);
-  if (!Number.isInteger(resolved) || resolved <= 0) {
-    return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
+  const duration = tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
+  if (!Number.isInteger(duration) || duration <= 0) {
+    return { ok: false, error: 'auctionConfig.bidDurationSeconds가 설정되어 있지 않습니다.' };
   }
-  const deadline = new Date(Date.now() + resolved * 1000);
+  const deadline = new Date(Date.now() + duration * 1000);
   tournament.currentAuctionDeadline = deadline;
   await tournament.save({ transaction: options.transaction });
-  return { ok: true, deadline, durationSeconds: resolved };
+  return { ok: true, deadline, durationSeconds: duration };
 };
 
-const extendBidTimer = async (tournament, durationSeconds, options = {}) => {
+const extendBidTimer = async (tournament, options = {}) => {
   if (tournament.status !== STATUS.AUCTION) {
     return { ok: false, error: '경매 단계가 아닙니다.' };
   }
   if (!tournament.currentAuctionDeadline) {
     return { ok: false, error: '진행 중인 입찰이 없습니다.' };
   }
-  const resolved = resolveBidDuration(tournament, durationSeconds);
-  if (!Number.isInteger(resolved) || resolved <= 0) {
-    return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
+  const duration = tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
+  if (!Number.isInteger(duration) || duration <= 0) {
+    return { ok: false, error: 'auctionConfig.bidDurationSeconds가 설정되어 있지 않습니다.' };
   }
-  const deadline = new Date(Date.now() + resolved * 1000);
+  const deadline = new Date(Date.now() + duration * 1000);
   tournament.currentAuctionDeadline = deadline;
   await tournament.save({ transaction: options.transaction });
-  return { ok: true, deadline, durationSeconds: resolved };
+  return { ok: true, deadline, durationSeconds: duration };
 };
 
 const clearCurrentAuction = async (tournament, options = {}) => {
