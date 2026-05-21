@@ -46,6 +46,23 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(50),
         allowNull: true,
       },
+      type: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'normal',
+      },
+      auctionConfig: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      currentAuctionPuuid: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      currentAuctionDeadline: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {},
   );

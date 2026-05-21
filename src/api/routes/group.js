@@ -79,7 +79,7 @@ module.exports = (app) => {
       const summoners = puuids.length
         ? await models.summoner.findAll({
             where: { puuid: puuids },
-            attributes: ['puuid', 'name', 'profileIconId'],
+            attributes: ['puuid', 'name', 'profileIconId', 'rankTier'],
           })
         : [];
       const summonerByPuuid = {};
@@ -94,6 +94,7 @@ module.exports = (app) => {
             puuid: u.puuid,
             name: s ? s.name : null,
             profileIconId: s ? s.profileIconId : null,
+            rankTier: s ? s.rankTier : null,
             rating: (u.defaultRating || 0) + (u.additionalRating || 0),
           };
         })

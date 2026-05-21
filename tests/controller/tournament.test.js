@@ -966,3 +966,579 @@ describe('브래킷 일관성(A2) 룰', () => {
     expect(b).toMatchObject({ correctCount: 1, settledCount: 3 });
   });
 });
+
+describe('validateTournamentType', () => {
+  test('null/undefined 허용 (기본값 normal)', () => {
+    expect(tournamentController.validateTournamentType(null)).toBeNull();
+    expect(tournamentController.validateTournamentType(undefined)).toBeNull();
+  });
+  test('normal/auction 허용', () => {
+    expect(tournamentController.validateTournamentType('normal')).toBeNull();
+    expect(tournamentController.validateTournamentType('auction')).toBeNull();
+  });
+  test('그 외는 거부', () => {
+    expect(tournamentController.validateTournamentType('hybrid')).toContain('type');
+  });
+});
+
+describe('validateAuctionConfig', () => {
+  const makeCandidates = (count) => ({
+    top: Array.from({ length: count }, (_, i) => `top${i}`),
+    jungle: Array.from({ length: count }, (_, i) => `jng${i}`),
+    mid: Array.from({ length: count }, (_, i) => `mid${i}`),
+    adc: Array.from({ length: count }, (_, i) => `adc${i}`),
+    support: Array.from({ length: count }, (_, i) => `sup${i}`),
+  });
+  const validConfig = () => ({
+    minBid: 5,
+    bidDurationSeconds: 30,
+    allowNegative: false,
+    candidates: makeCandidates(5),
+  });
+
+  test('정상 config', () => {
+    expect(tournamentController.validateAuctionConfig(validConfig())).toBeNull();
+  });
+  test('null/undefined 거부', () => {
+    expect(tournamentController.validateAuctionConfig(null)).toContain('auctionConfig');
+    expect(tournamentController.validateAuctionConfig(undefined)).toContain('auctionConfig');
+  });
+  test('minBid 0/음수 거부', () => {
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), minBid: 0 })).toContain('minBid');
+  });
+  test('bidDurationSeconds 누락/음수 거부', () => {
+    const c = validConfig();
+    delete c.bidDurationSeconds;
+    expect(tournamentController.validateAuctionConfig(c)).toContain('bidDurationSeconds');
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), bidDurationSeconds: 0 }))
+      .toContain('bidDurationSeconds');
+  });
+  test('allowNegative 불리언 아니면 거부', () => {
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), allowNegative: 'yes' }))
+      .toContain('allowNegative');
+  });
+  test('candidates 없으면 거부', () => {
+    const config = validConfig();
+    delete config.candidates;
+    expect(tournamentController.validateAuctionConfig(config)).toContain('candidates');
+  });
+  test('포지션 누락 시 거부', () => {
+    const candidates = makeCandidates(5);
+    delete candidates.support;
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), candidates })).toContain('support');
+  });
+  test('포지션별 인원 불일치 거부', () => {
+    const candidates = makeCandidates(5);
+    candidates.top = ['top0', 'top1', 'top2', 'top3'];
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), candidates }))
+      .toContain('동일');
+  });
+  test('빈 포지션 거부', () => {
+    const candidates = makeCandidates(5);
+    candidates.top = [];
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), candidates }))
+      .toContain('top');
+  });
+  test('한 사람이 여러 포지션에 등록되면 거부', () => {
+    const candidates = makeCandidates(5);
+    candidates.top[0] = candidates.mid[0];
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), candidates }))
+      .toContain('여러 포지션');
+  });
+});
+
+describe('findCandidatePosition', () => {
+  const candidates = {
+    top: ['t1', 't2'],
+    jungle: ['j1'],
+    mid: ['m1'],
+    adc: ['a1'],
+    support: ['s1'],
+  };
+  test('puuid의 포지션 반환', () => {
+    expect(tournamentController.findCandidatePosition(candidates, 't2')).toBe('top');
+    expect(tournamentController.findCandidatePosition(candidates, 'j1')).toBe('jungle');
+  });
+  test('없는 puuid는 null', () => {
+    expect(tournamentController.findCandidatePosition(candidates, 'x99')).toBeNull();
+  });
+  test('candidates가 null이면 null', () => {
+    expect(tournamentController.findCandidatePosition(null, 't1')).toBeNull();
+  });
+});
+
+describe('validateAuctionTeamInput', () => {
+  test('정상 입력: 팀장 1명만', () => {
+    expect(
+      tournamentController.validateAuctionTeamInput({
+        name: '경매팀',
+        captainPuuid: 'p1',
+        members: [{ puuid: 'p1', position: 'top' }],
+      }),
+    ).toBeNull();
+  });
+  test('멤버가 2명이면 거부', () => {
+    expect(
+      tournamentController.validateAuctionTeamInput({
+        name: '경매팀',
+        captainPuuid: 'p1',
+        members: [
+          { puuid: 'p1', position: 'top' },
+          { puuid: 'p2', position: 'mid' },
+        ],
+      }),
+    ).toContain('팀장 1명');
+  });
+  test('팀장 puuid와 멤버 puuid가 다르면 거부', () => {
+    expect(
+      tournamentController.validateAuctionTeamInput({
+        name: '경매팀',
+        captainPuuid: 'p1',
+        members: [{ puuid: 'p2', position: 'top' }],
+      }),
+    ).toContain('팀장');
+  });
+  test('포지션 무효면 거부', () => {
+    expect(
+      tournamentController.validateAuctionTeamInput({
+        name: '경매팀',
+        captainPuuid: 'p1',
+        members: [{ puuid: 'p1', position: 'midlaner' }],
+      }),
+    ).toContain('포지션');
+  });
+  test('팀명 빈 문자열 거부', () => {
+    expect(
+      tournamentController.validateAuctionTeamInput({
+        name: '   ',
+        captainPuuid: 'p1',
+        members: [{ puuid: 'p1', position: 'top' }],
+      }),
+    ).toContain('팀명');
+  });
+});
+
+describe('recordAuctionBid', () => {
+  const defaultCandidates = () => ({
+    top: ['cap1', 'cap2'],
+    jungle: ['j1', 'j2'],
+    mid: ['m1', 'm2'],
+    adc: ['a1', 'a2'],
+    support: ['s1', 's2'],
+  });
+  const makeTournament = (overrides = {}) => ({
+    status: 'auction',
+    auctionConfig: {
+      minBid: 5,
+      allowNegative: false,
+      candidates: defaultCandidates(),
+    },
+    save: jest.fn(),
+    ...overrides,
+  });
+  const makeTeam = (overrides = {}) => ({
+    id: 1,
+    captainPuuid: 'cap1',
+    members: [{ puuid: 'cap1', position: 'top' }],
+    remainingBudget: 1000,
+    save: jest.fn(),
+    ...overrides,
+  });
+
+  test('정상 입찰: 후보 풀에서 포지션 자동 추출 + 멤버 추가 + 예산 차감', async () => {
+    const tournament = makeTournament();
+    const team = makeTeam();
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.position).toBe('mid');
+    expect(team.members).toHaveLength(2);
+    expect(team.members[1]).toEqual({ puuid: 'm1', position: 'mid', bidAmount: 200 });
+    expect(team.remainingBudget).toBe(800);
+  });
+
+  test('경매 단계 아니면 거부', async () => {
+    const tournament = makeTournament({ status: 'preparing' });
+    const team = makeTeam();
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('경매 단계');
+  });
+
+  test('최소 입찰 미달 거부', async () => {
+    const tournament = makeTournament();
+    const team = makeTeam();
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm1', amount: 3 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('입찰가');
+  });
+
+  test('후보 풀에 없는 puuid 거부', async () => {
+    const tournament = makeTournament();
+    const team = makeTeam();
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'unknown', amount: 100 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('후보 풀');
+  });
+
+  test('이미 다른 팀 낙찰자 거부', async () => {
+    const tournament = makeTournament();
+    const teamA = makeTeam({ id: 1 });
+    const teamB = makeTeam({ id: 2, captainPuuid: 'cap2', members: [
+      { puuid: 'cap2', position: 'top' },
+      { puuid: 'm1', position: 'mid', bidAmount: 100 },
+    ] });
+    const result = await tournamentController.recordAuctionBid(
+      tournament, teamA, [teamA, teamB],
+      { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('다른 팀');
+  });
+
+  test('자기 팀에 이미 있는 포지션이면 거부', async () => {
+    const tournament = makeTournament();
+    const team = makeTeam({
+      members: [
+        { puuid: 'cap1', position: 'top' },
+        { puuid: 'm1', position: 'mid', bidAmount: 100 },
+      ],
+      remainingBudget: 900,
+    });
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm2', amount: 50 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('mid');
+  });
+
+  test('잔여 예산 초과 거부 (allowNegative=false)', async () => {
+    const tournament = makeTournament();
+    const team = makeTeam({ remainingBudget: 100 });
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('예산');
+  });
+
+  test('allowNegative=true면 마이너스 허용', async () => {
+    const tournament = makeTournament({
+      auctionConfig: {
+        minBid: 5, allowNegative: true,
+        candidates: defaultCandidates(),
+      },
+    });
+    const team = makeTeam({ remainingBudget: 100 });
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(true);
+    expect(team.remainingBudget).toBe(-100);
+  });
+
+  test('팀 정원(5명) 가득찼으면 거부 — 6번째 입찰 시도', async () => {
+    // candidates에 후보를 더 추가해서 6번째 입찰 가능한 상태 만들기
+    const candidates = {
+      top: ['cap1', 'cap2'],
+      jungle: ['j1'],
+      mid: ['m1'],
+      adc: ['a1'],
+      support: ['s1', 's2'],
+    };
+    const tournament = makeTournament({
+      auctionConfig: { minBid: 5, allowNegative: false, candidates },
+    });
+    const team = makeTeam({
+      members: [
+        { puuid: 'cap1', position: 'top' },
+        { puuid: 'j1', position: 'jungle' },
+        { puuid: 'm1', position: 'mid' },
+        { puuid: 'a1', position: 'adc' },
+        { puuid: 's1', position: 'support' },
+      ],
+    });
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team],
+      { puuid: 's2', amount: 50 },
+    );
+    expect(result.ok).toBe(false);
+    // 이미 support 포지션이 있어서 그 검증이 먼저 걸림 (정원 검증 전에 포지션 중복으로 차단)
+    expect(result.error).toContain('support');
+  });
+});
+
+describe('pickRandomCandidate', () => {
+  const candidates = {
+    top: ['t1', 't2'],
+    jungle: ['j1', 'j2'],
+    mid: ['m1', 'm2'],
+    adc: ['a1', 'a2'],
+    support: ['s1', 's2'],
+  };
+  const makeTournament = () => ({ auctionConfig: { candidates } });
+
+  test('이미 낙찰된 사람은 제외', () => {
+    const teams = [
+      { members: [{ puuid: 't1' }, { puuid: 'j1' }] },
+      { members: [{ puuid: 'm1' }] },
+    ];
+    const picked = tournamentController.pickRandomCandidate(makeTournament(), teams);
+    expect(picked).not.toBeNull();
+    expect(['t1', 'j1', 'm1']).not.toContain(picked.puuid);
+    expect(picked.position).toBe(tournamentController.findCandidatePosition(candidates, picked.puuid));
+  });
+
+  test('모두 낙찰됐으면 null', () => {
+    const teams = [
+      { members: [{ puuid: 't1' }, { puuid: 't2' }, { puuid: 'j1' }, { puuid: 'j2' }, { puuid: 'm1' }] },
+      { members: [{ puuid: 'm2' }, { puuid: 'a1' }, { puuid: 'a2' }, { puuid: 's1' }, { puuid: 's2' }] },
+    ];
+    expect(tournamentController.pickRandomCandidate(makeTournament(), teams)).toBeNull();
+  });
+
+  test('auctionConfig 없으면 null', () => {
+    expect(tournamentController.pickRandomCandidate({}, [])).toBeNull();
+  });
+});
+
+describe('setCurrentAuction', () => {
+  test('정상 세팅', async () => {
+    const tournament = {
+      status: 'auction',
+      currentAuctionPuuid: null,
+      currentAuctionDeadline: null,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.setCurrentAuction(tournament, 'm1');
+    expect(result.ok).toBe(true);
+    expect(tournament.currentAuctionPuuid).toBe('m1');
+    expect(tournament.currentAuctionDeadline).toBeNull();
+  });
+
+  test('입찰 진행 중이면 거부 (deadline 미래)', async () => {
+    const tournament = {
+      status: 'auction',
+      currentAuctionPuuid: 'm1',
+      currentAuctionDeadline: new Date(Date.now() + 60000),
+      save: jest.fn(),
+    };
+    const result = await tournamentController.setCurrentAuction(tournament, 'm2');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('입찰');
+  });
+
+  test('deadline 과거면 교체 허용', async () => {
+    const tournament = {
+      status: 'auction',
+      currentAuctionPuuid: 'm1',
+      currentAuctionDeadline: new Date(Date.now() - 1000),
+      save: jest.fn(),
+    };
+    const result = await tournamentController.setCurrentAuction(tournament, 'm2');
+    expect(result.ok).toBe(true);
+    expect(tournament.currentAuctionPuuid).toBe('m2');
+    expect(tournament.currentAuctionDeadline).toBeNull();
+  });
+});
+
+describe('startBidTimer', () => {
+  const baseTournament = () => ({
+    status: 'auction',
+    currentAuctionPuuid: 'm1',
+    currentAuctionDeadline: null,
+    auctionConfig: { bidDurationSeconds: 30 },
+    save: jest.fn(),
+  });
+
+  test('정상 시작: auctionConfig.bidDurationSeconds 사용', async () => {
+    const tournament = baseTournament();
+    const before = Date.now();
+    const result = await tournamentController.startBidTimer(tournament);
+    expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(30);
+    expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 30000);
+  });
+
+  test('매물 없으면 거부', async () => {
+    const tournament = { ...baseTournament(), currentAuctionPuuid: null };
+    const result = await tournamentController.startBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('매물');
+  });
+
+  test('config의 bidDurationSeconds가 없으면 거부', async () => {
+    const tournament = { ...baseTournament(), auctionConfig: {} };
+    const result = await tournamentController.startBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('bidDurationSeconds');
+  });
+});
+
+describe('extendBidTimer', () => {
+  const baseTournament = () => ({
+    status: 'auction',
+    currentAuctionPuuid: 'm1',
+    currentAuctionDeadline: new Date(Date.now() + 5000),
+    auctionConfig: { bidDurationSeconds: 30 },
+    save: jest.fn(),
+  });
+
+  test('정상 갱신: auctionConfig.bidDurationSeconds 사용', async () => {
+    const tournament = baseTournament();
+    const before = Date.now();
+    const result = await tournamentController.extendBidTimer(tournament);
+    expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(30);
+    expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 30000);
+  });
+
+  test('deadline 없으면 거부', async () => {
+    const tournament = { ...baseTournament(), currentAuctionDeadline: null };
+    const result = await tournamentController.extendBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('진행 중');
+  });
+
+  test('config의 bidDurationSeconds가 없으면 거부', async () => {
+    const tournament = { ...baseTournament(), auctionConfig: {} };
+    const result = await tournamentController.extendBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('bidDurationSeconds');
+  });
+});
+
+describe('recordAuctionBid currentAuction 자동 클리어', () => {
+  test('낙찰 puuid가 currentAuctionPuuid와 같으면 클리어', async () => {
+    const tournament = {
+      status: 'auction',
+      currentAuctionPuuid: 'm1',
+      currentAuctionDeadline: new Date(Date.now() + 30000),
+      auctionConfig: {
+        minBid: 5,
+        allowNegative: false,
+        candidates: {
+          top: ['cap1'], jungle: ['j1'], mid: ['m1'], adc: ['a1'], support: ['s1'],
+        },
+      },
+      save: jest.fn(),
+    };
+    const team = {
+      id: 1,
+      captainPuuid: 'cap1',
+      members: [{ puuid: 'cap1', position: 'top' }],
+      remainingBudget: 1000,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team], { puuid: 'm1', amount: 200 },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.currentAuctionCleared).toBe(true);
+    expect(tournament.currentAuctionPuuid).toBeNull();
+    expect(tournament.currentAuctionDeadline).toBeNull();
+  });
+
+  test('낙찰 puuid가 currentAuctionPuuid와 다르면 클리어 안 함', async () => {
+    const tournament = {
+      status: 'auction',
+      currentAuctionPuuid: 'm1',
+      currentAuctionDeadline: new Date(Date.now() + 30000),
+      auctionConfig: {
+        minBid: 5,
+        allowNegative: false,
+        candidates: {
+          top: ['cap1'], jungle: ['j1'], mid: ['m1'], adc: ['a1'], support: ['s1'],
+        },
+      },
+      save: jest.fn(),
+    };
+    const team = {
+      id: 1,
+      captainPuuid: 'cap1',
+      members: [{ puuid: 'cap1', position: 'top' }],
+      remainingBudget: 1000,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.recordAuctionBid(
+      tournament, team, [team], { puuid: 'a1', amount: 200 },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.currentAuctionCleared).toBe(false);
+    expect(tournament.currentAuctionPuuid).toBe('m1');
+  });
+});
+
+describe('validateAuctionTeamBudget', () => {
+  test('양의 정수 통과', () => {
+    expect(tournamentController.validateAuctionTeamBudget(1000)).toBeNull();
+    expect(tournamentController.validateAuctionTeamBudget(1)).toBeNull();
+  });
+  test('0/음수/소수/비정수 거부', () => {
+    expect(tournamentController.validateAuctionTeamBudget(0)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(-1)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(10.5)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget('1000')).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(null)).toContain('budget');
+  });
+});
+
+describe('undoAuctionBid', () => {
+  test('정상 취소: 멤버 제거 + 예산 환불', async () => {
+    const tournament = { status: 'auction', save: jest.fn() };
+    const team = {
+      captainPuuid: 'cap1',
+      members: [
+        { puuid: 'cap1', position: 'top' },
+        { puuid: 'p2', position: 'mid', bidAmount: 200 },
+      ],
+      remainingBudget: 800,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.undoAuctionBid(tournament, team, 'p2');
+    expect(result.ok).toBe(true);
+    expect(result.refund).toBe(200);
+    expect(team.members).toHaveLength(1);
+    expect(team.remainingBudget).toBe(1000);
+  });
+
+  test('팀장은 취소 불가', async () => {
+    const tournament = { status: 'auction', save: jest.fn() };
+    const team = {
+      captainPuuid: 'cap1',
+      members: [{ puuid: 'cap1', position: 'top' }],
+      remainingBudget: 1000,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.undoAuctionBid(tournament, team, 'cap1');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('팀장');
+  });
+
+  test('없는 멤버 취소 거부', async () => {
+    const tournament = { status: 'auction', save: jest.fn() };
+    const team = {
+      captainPuuid: 'cap1',
+      members: [{ puuid: 'cap1', position: 'top' }],
+      remainingBudget: 1000,
+      save: jest.fn(),
+    };
+    const result = await tournamentController.undoAuctionBid(tournament, team, 'p99');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('후보');
+  });
+});

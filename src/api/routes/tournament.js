@@ -4,6 +4,8 @@ const { verifyToken, isGroupAdmin } = require('../middlewares/auth');
 const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const tournamentController = require('../../controller/tournament');
+const honorController = require('../../controller/honor');
+const { extractTopAchievementsPerCategory } = require('../../services/achievement/topPerCategory');
 
 const { STATUS } = tournamentController;
 const route = Router();
@@ -77,6 +79,44 @@ const enrichMatchesWithHeadToHead = (matches, scrims) => {
   });
 };
 
+// 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예)를 모아 반환.
+const buildCandidateDetail = async (tournament, puuid) => {
+  if (!puuid) return null;
+  const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
+  const position = tournamentController.findCandidatePosition(candidates, puuid);
+  const [summoner, user, achievementsRaw, honorStats] = await Promise.all([
+    models.summoner.findOne({
+      where: { puuid },
+      attributes: ['puuid', 'name', 'profileIconId', 'rankTier', 'rankWin', 'rankLose', 'mainPosition'],
+    }),
+    models.user.findOne({
+      where: { puuid, groupId: tournament.groupId },
+      attributes: ['puuid', 'win', 'lose', 'defaultRating', 'additionalRating'],
+    }),
+    models.user_achievement.findAll({
+      where: { puuid, groupId: tournament.groupId },
+      attributes: ['achievementId', 'unlockedAt'],
+      raw: true,
+    }),
+    honorController.getHonorStats(tournament.groupId, puuid),
+  ]);
+  return {
+    puuid,
+    position,
+    name: summoner ? summoner.name : null,
+    profileIconId: summoner ? summoner.profileIconId : null,
+    rankTier: summoner ? summoner.rankTier : null,
+    rankWin: summoner ? summoner.rankWin : null,
+    rankLose: summoner ? summoner.rankLose : null,
+    mainPosition: summoner ? summoner.mainPosition : null,
+    internalRating: user ? (user.defaultRating || 0) + (user.additionalRating || 0) : null,
+    win: user ? user.win : null,
+    lose: user ? user.lose : null,
+    achievements: extractTopAchievementsPerCategory(achievementsRaw),
+    honor: honorStats,
+  };
+};
+
 const buildDetail = async (tournament) => {
   const [teamsRaw, matchesRaw, scrims, predictionsRaw] = await Promise.all([
     models.tournament_team.findAll({
@@ -141,7 +181,8 @@ const buildDetail = async (tournament) => {
   const predictionsLocked = tournamentController.isTournamentLocked(matchesRaw);
   const leaderboard = tournamentController.buildLeaderboard(matchesRaw, predictions);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
-  return { tournament, teams, matches, scrims, roundLabels, predictionsLocked, leaderboard };
+  const currentCandidate = await buildCandidateDetail(tournament, tournament.currentAuctionPuuid);
+  return { tournament, teams, matches, scrims, roundLabels, predictionsLocked, leaderboard, currentCandidate };
 };
 
 const loadTournamentForAdmin = async (req, res, { requireStatus, statusError } = {}) => {
@@ -260,7 +301,10 @@ module.exports = (app) => {
   });
 
   route.post('/', verifyToken, async (req, res) => {
-    const { groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null } = req.body || {};
+    const {
+      groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null,
+      type = tournamentController.TYPES.NORMAL, auctionConfig = null,
+    } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
@@ -272,8 +316,21 @@ module.exports = (app) => {
     }
     const trophyError = tournamentController.validateTrophyType(trophyType);
     if (trophyError) return res.status(400).json({ result: trophyError });
+    const typeError = tournamentController.validateTournamentType(type);
+    if (typeError) return res.status(400).json({ result: typeError });
+    if (type === tournamentController.TYPES.AUCTION) {
+      const auctionError = tournamentController.validateAuctionConfig(auctionConfig);
+      if (auctionError) return res.status(400).json({ result: auctionError });
+    }
     if (!(await isGroupAdmin(groupId, req.user.discordId))) {
       return res.status(403).json({ result: '관리자 권한이 필요합니다.' });
+    }
+
+    if (type === tournamentController.TYPES.AUCTION) {
+      const allCandidatePuuids = tournamentController.collectCandidatePuuids(auctionConfig.candidates);
+      if (!(await tournamentController.verifyMembersInGroup(groupId, allCandidatePuuids))) {
+        return res.status(400).json({ result: '후보 풀에 그룹에 속하지 않은 puuid가 있습니다.' });
+      }
     }
 
     try {
@@ -286,6 +343,8 @@ module.exports = (app) => {
         defaultBestOf,
         finalBestOf,
         trophyType,
+        type,
+        auctionConfig: type === tournamentController.TYPES.AUCTION ? auctionConfig : null,
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -294,7 +353,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, trophyType },
+        details: { tournamentId: tournament.id, name, trophyType, type, auctionConfig: tournament.auctionConfig },
         source: 'web',
       });
 
@@ -381,7 +440,7 @@ module.exports = (app) => {
   });
 
   route.post('/:id/teams', verifyToken, async (req, res) => {
-    const { name, captainPuuid, members } = req.body || {};
+    const { name, captainPuuid, members, budget } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res, {
         requireStatus: STATUS.PREPARING,
@@ -389,8 +448,28 @@ module.exports = (app) => {
       });
       if (!tournament) return undefined;
 
-      const validationError = tournamentController.validateTeamInput({ name, captainPuuid, members });
+      const isAuction = tournament.type === tournamentController.TYPES.AUCTION;
+      const validator = isAuction
+        ? tournamentController.validateAuctionTeamInput
+        : tournamentController.validateTeamInput;
+      const validationError = validator({ name, captainPuuid, members });
       if (validationError) return res.status(400).json({ result: validationError });
+
+      let auctionBudget = null;
+      if (isAuction) {
+        const budgetError = tournamentController.validateAuctionTeamBudget(budget);
+        if (budgetError) return res.status(400).json({ result: budgetError });
+        auctionBudget = budget;
+
+        const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
+        const candidatePos = tournamentController.findCandidatePosition(candidates, captainPuuid);
+        if (!candidatePos) {
+          return res.status(400).json({ result: '팀장이 후보 풀에 등록되어 있지 않습니다.' });
+        }
+        if (candidatePos !== members[0].position) {
+          return res.status(400).json({ result: `팀장 포지션이 후보 풀(${candidatePos})과 다릅니다.` });
+        }
+      }
 
       const puuids = members.map((m) => m.puuid);
       if (!(await tournamentController.verifyMembersInGroup(tournament.groupId, puuids))) {
@@ -407,6 +486,7 @@ module.exports = (app) => {
         name,
         captainPuuid,
         members,
+        auctionBudget,
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -415,7 +495,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.team_create',
-        details: { tournamentId: tournament.id, teamId: team.id, name },
+        details: { tournamentId: tournament.id, teamId: team.id, name, auctionBudget },
         source: 'web',
       });
 
@@ -449,6 +529,12 @@ module.exports = (app) => {
       const isAdmin = await isGroupAdmin(tournament.groupId, req.user.discordId);
       if (!isCaptain && !isAdmin) {
         return res.status(403).json({ result: '관리자 또는 팀장만 수정할 수 있습니다.' });
+      }
+
+      // 경매 토너먼트는 경매 단계에서 멤버가 입찰로 결정되므로 일반 팀 PATCH 경로로
+      // 멤버를 통째로 갈아끼우지 못하게 막는다. (팀명/팀장 변경 등은 경매 전용 API로 별도 처리)
+      if (tournament.type === tournamentController.TYPES.AUCTION) {
+        return res.status(409).json({ result: '경매 토너먼트의 팀은 경매 API로만 수정할 수 있습니다.' });
       }
 
       const validationError = tournamentController.validateTeamInput({ name, captainPuuid, members });
@@ -514,6 +600,311 @@ module.exports = (app) => {
       });
 
       return res.status(200).json({ result: '삭제되었습니다.' });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 경매 단계 진입: preparing(팀장만 등록) → auction
+  route.post('/:id/start-auction', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+      if (tournament.type !== tournamentController.TYPES.AUCTION) {
+        return res.status(409).json({ result: '경매 타입 토너먼트가 아닙니다.' });
+      }
+
+      const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.startAuction(tournament, teams, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_start',
+        details: { tournamentId: tournament.id, teamCount: teams.length, auctionConfig: tournament.auctionConfig },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) io.to(`tournament:${tournament.id}`).emit('auction:status', { tournamentId: tournament.id, status: tournament.status });
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 경매 입찰: 어드민이 한 명을 한 팀에 낙찰. position은 후보 풀에서 자동 추출.
+  route.post('/:id/auction/bid', verifyToken, async (req, res) => {
+    const { teamId, puuid, amount } = req.body || {};
+    if (!Number.isInteger(teamId)) return res.status(400).json({ result: 'teamId가 필요합니다.' });
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+      if (tournament.status !== STATUS.AUCTION) {
+        return res.status(409).json({ result: '경매 단계가 아닙니다.' });
+      }
+
+      const allTeams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
+      const team = allTeams.find((t) => t.id === teamId);
+      if (!team) return res.status(404).json({ result: '팀을 찾을 수 없습니다.' });
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.recordAuctionBid(
+          tournament,
+          team,
+          allTeams,
+          { puuid, amount },
+          { transaction },
+        );
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_bid',
+        details: { tournamentId: tournament.id, teamId, puuid, position: result.position, amount },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:bid', {
+          tournamentId: tournament.id,
+          teamId,
+          puuid,
+          position: result.position,
+          amount,
+          remainingBudget: team.remainingBudget,
+          currentAuctionCleared: result.currentAuctionCleared,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 다음 매물 선정 (백엔드가 후보 풀에서 랜덤 픽)
+  route.post('/:id/auction/next-candidate', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+      if (tournament.status !== STATUS.AUCTION) {
+        return res.status(409).json({ result: '경매 단계가 아닙니다.' });
+      }
+
+      const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
+      const picked = tournamentController.pickRandomCandidate(tournament, teams);
+      if (!picked) {
+        return res.status(400).json({ result: '남은 후보가 없습니다.' });
+      }
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.setCurrentAuction(tournament, picked.puuid, { transaction });
+      });
+      if (!result.ok) return res.status(409).json({ result: result.error });
+
+      const currentCandidate = await buildCandidateDetail(tournament, picked.puuid);
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_next_candidate',
+        details: { tournamentId: tournament.id, puuid: picked.puuid, position: picked.position },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:candidate', {
+          tournamentId: tournament.id,
+          puuid: picked.puuid,
+          position: picked.position,
+          candidate: currentCandidate,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 입찰 시작: 현재 매물에 대해 auctionConfig.bidDurationSeconds로 deadline 세팅
+  route.post('/:id/auction/start-bid', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.startBidTimer(tournament, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_start_bid',
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds: result.durationSeconds, deadline: result.deadline },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:bid-start', {
+          tournamentId: tournament.id,
+          puuid: tournament.currentAuctionPuuid,
+          deadline: result.deadline,
+          durationSeconds: result.durationSeconds,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 시간 갱신: 현재 시각 기준 auctionConfig.bidDurationSeconds 후로 deadline 재설정
+  route.post('/:id/auction/extend-time', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.extendBidTimer(tournament, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_extend_time',
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds: result.durationSeconds, deadline: result.deadline },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:bid-extend', {
+          tournamentId: tournament.id,
+          puuid: tournament.currentAuctionPuuid,
+          deadline: result.deadline,
+          durationSeconds: result.durationSeconds,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 경매 입찰 취소: 잘못 낙찰한 경우 되돌리기
+  route.delete('/:id/auction/bid', verifyToken, async (req, res) => {
+    const { teamId, puuid } = req.body || {};
+    if (!Number.isInteger(teamId)) return res.status(400).json({ result: 'teamId가 필요합니다.' });
+    if (!puuid) return res.status(400).json({ result: 'puuid가 필요합니다.' });
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+      if (tournament.status !== STATUS.AUCTION) {
+        return res.status(409).json({ result: '경매 단계가 아닙니다.' });
+      }
+
+      const team = await models.tournament_team.findOne({
+        where: { id: teamId, tournamentId: tournament.id },
+      });
+      if (!team) return res.status(404).json({ result: '팀을 찾을 수 없습니다.' });
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.undoAuctionBid(tournament, team, puuid, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_undo',
+        details: { tournamentId: tournament.id, teamId, puuid, refund: result.refund },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:undo', {
+          tournamentId: tournament.id,
+          teamId,
+          puuid,
+          refund: result.refund,
+          remainingBudget: team.remainingBudget,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 경매 완료: auction → preparing (이후 /start로 본선 시작)
+  route.post('/:id/auction/complete', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.completeAuction(tournament, teams, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_complete',
+        details: { tournamentId: tournament.id },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) io.to(`tournament:${tournament.id}`).emit('auction:status', { tournamentId: tournament.id, status: tournament.status });
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });

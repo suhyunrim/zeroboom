@@ -11,11 +11,82 @@ const VALID_POSITIONS = ['top', 'jungle', 'mid', 'adc', 'support'];
 
 const STATUS = {
   PREPARING: 'preparing',
+  AUCTION: 'auction',
   IN_PROGRESS: 'in_progress',
   FINISHED: 'finished',
 };
 
+const TYPES = {
+  NORMAL: 'normal',
+  AUCTION: 'auction',
+};
+
 const TROPHY_TYPES = ['worlds', 'msi', 'first_stand', 'ewc', 'lck', 'kespa'];
+
+const validateTournamentType = (type) => {
+  if (type === undefined || type === null) return null;
+  if (!Object.values(TYPES).includes(type)) {
+    return `type은 다음 중 하나여야 합니다: ${Object.values(TYPES).join(', ')}`;
+  }
+  return null;
+};
+
+const validateAuctionConfig = (config) => {
+  if (config === null || config === undefined) return 'auction 타입은 auctionConfig가 필요합니다.';
+  if (typeof config !== 'object' || Array.isArray(config)) return 'auctionConfig는 객체여야 합니다.';
+  const { minBid, allowNegative, candidates, bidDurationSeconds } = config;
+  if (!Number.isInteger(minBid) || minBid <= 0) return 'auctionConfig.minBid는 양의 정수여야 합니다.';
+  if (!Number.isInteger(bidDurationSeconds) || bidDurationSeconds <= 0) {
+    return 'auctionConfig.bidDurationSeconds는 양의 정수여야 합니다.';
+  }
+  if (allowNegative !== undefined && typeof allowNegative !== 'boolean') {
+    return 'auctionConfig.allowNegative는 boolean이어야 합니다.';
+  }
+  if (!candidates || typeof candidates !== 'object' || Array.isArray(candidates)) {
+    return 'auctionConfig.candidates 객체가 필요합니다.';
+  }
+  const seen = new Set();
+  let countPerPosition = null;
+  for (const pos of VALID_POSITIONS) {
+    const list = candidates[pos];
+    if (!Array.isArray(list)) return `auctionConfig.candidates.${pos} 배열이 필요합니다.`;
+    if (list.length === 0) return `auctionConfig.candidates.${pos}에 후보가 없습니다.`;
+    if (countPerPosition === null) countPerPosition = list.length;
+    else if (list.length !== countPerPosition) {
+      return '모든 포지션의 후보 인원이 동일해야 합니다.';
+    }
+    for (const puuid of list) {
+      if (!puuid || typeof puuid !== 'string') return `auctionConfig.candidates.${pos}에 유효하지 않은 puuid가 있습니다.`;
+      if (seen.has(puuid)) return '한 사람이 여러 포지션에 등록될 수 없습니다.';
+      seen.add(puuid);
+    }
+  }
+  return null;
+};
+
+const validateAuctionTeamBudget = (budget) => {
+  if (!Number.isInteger(budget) || budget <= 0) {
+    return 'budget은 양의 정수여야 합니다.';
+  }
+  return null;
+};
+
+const findCandidatePosition = (candidates, puuid) => {
+  if (!candidates) return null;
+  for (const pos of VALID_POSITIONS) {
+    if ((candidates[pos] || []).includes(puuid)) return pos;
+  }
+  return null;
+};
+
+const collectCandidatePuuids = (candidates) => {
+  const out = [];
+  if (!candidates) return out;
+  for (const pos of VALID_POSITIONS) {
+    (candidates[pos] || []).forEach((p) => out.push(p));
+  }
+  return out;
+};
 
 const validateTrophyType = (trophyType) => {
   if (trophyType === null || trophyType === undefined) return null;
@@ -577,12 +648,242 @@ const buildLeaderboard = (matches, predictions) => {
   });
 };
 
+const validateAuctionTeamInput = ({ name, captainPuuid, members }) => {
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    return '팀명이 필요합니다.';
+  }
+  if (!captainPuuid || typeof captainPuuid !== 'string') {
+    return '팀장 puuid가 필요합니다.';
+  }
+  if (!Array.isArray(members) || members.length !== 1) {
+    return '경매 토너먼트의 팀은 팀장 1명만으로 시작해야 합니다.';
+  }
+  const captain = members[0];
+  if (!captain || captain.puuid !== captainPuuid) {
+    return '팀의 유일한 멤버는 팀장이어야 합니다.';
+  }
+  if (!VALID_POSITIONS.includes(captain.position)) {
+    return '유효하지 않은 포지션입니다.';
+  }
+  return null;
+};
+
+const startAuction = async (tournament, teams, options = {}) => {
+  if (tournament.type !== TYPES.AUCTION) {
+    return { ok: false, error: '경매 타입 토너먼트만 경매를 시작할 수 있습니다.' };
+  }
+  if (tournament.status !== STATUS.PREPARING) {
+    return { ok: false, error: '준비중인 토너먼트만 경매를 시작할 수 있습니다.' };
+  }
+  if (!tournament.auctionConfig) {
+    return { ok: false, error: 'auctionConfig가 설정되어 있지 않습니다.' };
+  }
+  if (teams.length < 2) {
+    return { ok: false, error: '최소 2팀이 등록되어야 경매를 시작할 수 있습니다.' };
+  }
+  const { candidates } = tournament.auctionConfig;
+  const captainSet = new Set();
+  for (const team of teams) {
+    const members = team.members || [];
+    if (members.length !== 1) {
+      return { ok: false, error: `${team.name} 팀이 팀장 1명만으로 구성되어야 합니다.` };
+    }
+    const captain = members[0];
+    if (captain.puuid !== team.captainPuuid) {
+      return { ok: false, error: `${team.name} 팀의 멤버와 captainPuuid가 일치하지 않습니다.` };
+    }
+    const candidatePos = findCandidatePosition(candidates, captain.puuid);
+    if (!candidatePos) {
+      return { ok: false, error: `${team.name} 팀의 팀장이 후보 풀에 없습니다.` };
+    }
+    if (candidatePos !== captain.position) {
+      return { ok: false, error: `${team.name} 팀의 팀장 포지션이 후보 풀과 일치하지 않습니다.` };
+    }
+    if (captainSet.has(captain.puuid)) {
+      return { ok: false, error: '여러 팀이 같은 팀장을 가질 수 없습니다.' };
+    }
+    captainSet.add(captain.puuid);
+    if (!Number.isInteger(team.auctionBudget) || team.auctionBudget <= 0) {
+      return { ok: false, error: `${team.name} 팀에 경매 예산(auctionBudget)이 설정되어 있지 않습니다.` };
+    }
+  }
+  for (const team of teams) {
+    team.remainingBudget = team.auctionBudget;
+    await team.save({ transaction: options.transaction });
+  }
+  tournament.status = STATUS.AUCTION;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true };
+};
+
+const recordAuctionBid = async (tournament, team, allTeams, { puuid, amount }, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  const config = tournament.auctionConfig || {};
+  if (!puuid || typeof puuid !== 'string') {
+    return { ok: false, error: 'puuid가 필요합니다.' };
+  }
+  if (!Number.isInteger(amount) || amount < config.minBid) {
+    return { ok: false, error: `입찰가는 ${config.minBid} 이상의 정수여야 합니다.` };
+  }
+  const position = findCandidatePosition(config.candidates, puuid);
+  if (!position) {
+    return { ok: false, error: '후보 풀에 없는 puuid입니다.' };
+  }
+  for (const t of allTeams) {
+    if ((t.members || []).some((m) => m.puuid === puuid)) {
+      return { ok: false, error: '이미 다른 팀에 낙찰된 후보입니다.' };
+    }
+  }
+  if ((team.members || []).some((m) => m.position === position)) {
+    return { ok: false, error: `해당 팀에 ${position} 포지션이 이미 있습니다.` };
+  }
+  if ((team.members || []).length >= TEAM_SIZE) {
+    return { ok: false, error: '팀 정원이 가득 찼습니다.' };
+  }
+  const newBudget = (team.remainingBudget == null ? 0 : team.remainingBudget) - amount;
+  if (newBudget < 0 && !config.allowNegative) {
+    return { ok: false, error: '잔여 예산을 초과합니다.' };
+  }
+  team.members = [...(team.members || []), { puuid, position, bidAmount: amount }];
+  team.remainingBudget = newBudget;
+  await team.save({ transaction: options.transaction });
+
+  // 낙찰된 puuid가 현재 매물이라면 현재 매물 정보 클리어
+  let cleared = false;
+  if (tournament.currentAuctionPuuid === puuid) {
+    tournament.currentAuctionPuuid = null;
+    tournament.currentAuctionDeadline = null;
+    await tournament.save({ transaction: options.transaction });
+    cleared = true;
+  }
+  return { ok: true, position, currentAuctionCleared: cleared };
+};
+
+const undoAuctionBid = async (tournament, team, puuid, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  const members = team.members || [];
+  const target = members.find((m) => m.puuid === puuid);
+  if (!target) {
+    return { ok: false, error: '해당 팀에 그 후보가 없습니다.' };
+  }
+  if (target.puuid === team.captainPuuid) {
+    return { ok: false, error: '팀장은 입찰 취소할 수 없습니다.' };
+  }
+  const refund = target.bidAmount || 0;
+  team.members = members.filter((m) => m.puuid !== puuid);
+  team.remainingBudget = (team.remainingBudget || 0) + refund;
+  await team.save({ transaction: options.transaction });
+  return { ok: true, refund };
+};
+
+const pickRandomCandidate = (tournament, teams) => {
+  const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
+  if (!candidates) return null;
+  const allPuuids = collectCandidatePuuids(candidates);
+  const taken = new Set();
+  for (const team of teams) {
+    (team.members || []).forEach((m) => taken.add(m.puuid));
+  }
+  const remaining = allPuuids.filter((p) => !taken.has(p));
+  if (remaining.length === 0) return null;
+  const picked = remaining[Math.floor(Math.random() * remaining.length)];
+  return { puuid: picked, position: findCandidatePosition(candidates, picked) };
+};
+
+const setCurrentAuction = async (tournament, puuid, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  // 입찰 진행 중(deadline이 미래)이면 매물 교체 불가
+  if (tournament.currentAuctionDeadline && new Date(tournament.currentAuctionDeadline) > new Date()) {
+    return { ok: false, error: '입찰이 진행 중입니다.' };
+  }
+  tournament.currentAuctionPuuid = puuid;
+  tournament.currentAuctionDeadline = null;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true };
+};
+
+const startBidTimer = async (tournament, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if (!tournament.currentAuctionPuuid) {
+    return { ok: false, error: '현재 매물이 없습니다.' };
+  }
+  const duration = tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
+  if (!Number.isInteger(duration) || duration <= 0) {
+    return { ok: false, error: 'auctionConfig.bidDurationSeconds가 설정되어 있지 않습니다.' };
+  }
+  const deadline = new Date(Date.now() + duration * 1000);
+  tournament.currentAuctionDeadline = deadline;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true, deadline, durationSeconds: duration };
+};
+
+const extendBidTimer = async (tournament, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if (!tournament.currentAuctionDeadline) {
+    return { ok: false, error: '진행 중인 입찰이 없습니다.' };
+  }
+  const duration = tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
+  if (!Number.isInteger(duration) || duration <= 0) {
+    return { ok: false, error: 'auctionConfig.bidDurationSeconds가 설정되어 있지 않습니다.' };
+  }
+  const deadline = new Date(Date.now() + duration * 1000);
+  tournament.currentAuctionDeadline = deadline;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true, deadline, durationSeconds: duration };
+};
+
+const clearCurrentAuction = async (tournament, options = {}) => {
+  tournament.currentAuctionPuuid = null;
+  tournament.currentAuctionDeadline = null;
+  await tournament.save({ transaction: options.transaction });
+};
+
+const completeAuction = async (tournament, teams, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  for (const team of teams) {
+    if ((team.members || []).length !== TEAM_SIZE) {
+      return { ok: false, error: `${team.name} 팀이 아직 ${TEAM_SIZE}명을 채우지 못했습니다.` };
+    }
+  }
+  tournament.status = STATUS.PREPARING;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true };
+};
+
 module.exports = {
   TEAM_SIZE,
   VALID_POSITIONS,
   STATUS,
+  TYPES,
   TROPHY_TYPES,
   validateTrophyType,
+  validateTournamentType,
+  validateAuctionConfig,
+  validateAuctionTeamInput,
+  validateAuctionTeamBudget,
+  findCandidatePosition,
+  collectCandidatePuuids,
+  startAuction,
+  recordAuctionBid,
+  undoAuctionBid,
+  completeAuction,
+  pickRandomCandidate,
+  setCurrentAuction,
+  startBidTimer,
+  extendBidTimer,
+  clearCurrentAuction,
   computeBracketSize,
   getWinningScore,
   computeRoundLabels,
