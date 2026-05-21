@@ -211,21 +211,24 @@ module.exports.getDashboardStats = async (groupId, month) => {
     }
 
     // 1. 최다 판수 유저
-    const mostGamesUser = Object.entries(userStats).reduce(
-      (max, [puuid, stats]) => (stats.games > (max?.games || 0) ? { puuid, ...stats } : max),
-      null
-    );
+    const mostGamesSorted = Object.entries(userStats)
+      .map(([puuid, stats]) => ({ puuid, ...stats }))
+      .sort((a, b) => b.games - a.games);
+    const mostGamesUser = mostGamesSorted[0] || null;
+    const mostGamesRunner = mostGamesSorted[1] || null;
 
     // 2. N판 이상 최고 승률 (전체 판수의 10%, 최소 3판, 최대 15판)
     const MIN_GAMES_FOR_WINRATE = Math.max(3, Math.min(15, Math.round(matches.length * 0.1)));
-    const bestWinRateUser = Object.entries(userStats)
+    const bestWinRateSorted = Object.entries(userStats)
       .filter(([, stats]) => stats.games >= MIN_GAMES_FOR_WINRATE)
       .map(([puuid, stats]) => ({
         puuid,
         ...stats,
         winRate: (stats.wins / stats.games) * 100,
       }))
-      .sort((a, b) => b.winRate - a.winRate || b.games - a.games)[0] || null;
+      .sort((a, b) => b.winRate - a.winRate || b.games - a.games);
+    const bestWinRateUser = bestWinRateSorted[0] || null;
+    const bestWinRateRunner = bestWinRateSorted[1] || null;
 
     // 3. 최다 연승
     const calculateMaxStreak = (matchHistory) => {
@@ -246,26 +249,32 @@ module.exports.getDashboardStats = async (groupId, month) => {
       return maxStreak;
     };
 
-    const longestStreakUser = Object.entries(userStats)
+    const longestStreakSorted = Object.entries(userStats)
       .map(([puuid, stats]) => ({
         puuid,
         streak: calculateMaxStreak(stats.matchHistory),
       }))
-      .sort((a, b) => b.streak - a.streak)[0] || null;
+      .sort((a, b) => b.streak - a.streak);
+    const longestStreakUser = longestStreakSorted[0] || null;
+    const longestStreakRunner = longestStreakSorted[1] || null;
 
     // 4. N판 이상 2인 조합 최고 승률 (전체 판수의 5%, 최소 2판, 최대 8판)
     const MIN_GAMES_FOR_DUO = Math.max(2, Math.min(8, Math.round(matches.length * 0.05)));
-    const bestDuo = Object.values(duoStats)
+    const bestDuoSorted = Object.values(duoStats)
       .filter((duo) => duo.games >= MIN_GAMES_FOR_DUO)
       .map((duo) => ({
         ...duo,
         losses: duo.games - duo.wins,
         winRate: (duo.wins / duo.games) * 100,
       }))
-      .sort((a, b) => b.winRate - a.winRate || b.games - a.games)[0] || null;
+      .sort((a, b) => b.winRate - a.winRate || b.games - a.games);
+    const bestDuo = bestDuoSorted[0] || null;
+    const bestDuoRunner = bestDuoSorted[1] || null;
 
     // 5. 상대 전적 최다 판수
-    const mostRivalry = Object.values(rivalryStats).sort((a, b) => b.games - a.games)[0] || null;
+    const mostRivalrySorted = Object.values(rivalryStats).sort((a, b) => b.games - a.games);
+    const mostRivalry = mostRivalrySorted[0] || null;
+    const mostRivalryRunner = mostRivalrySorted[1] || null;
 
     // 6. 신규 참가자 최다 판수 (해당 월 말 기준 3주 이내에 첫 매치한 유저)
     const threeWeeksAgo = new Date(monthEnd.getTime() - 21 * 24 * 60 * 60 * 1000);
@@ -286,17 +295,19 @@ module.exports.getDashboardStats = async (groupId, month) => {
       newcomerMap[u.puuid] = u.firstMatchDate;
     }
 
-    const topNewcomer = Object.entries(userStats)
+    const topNewcomerSorted = Object.entries(userStats)
       .filter(([puuid]) => newcomerMap[puuid])
       .map(([puuid, stats]) => ({
         puuid,
         games: stats.games,
         firstMatchDate: newcomerMap[puuid],
       }))
-      .sort((a, b) => b.games - a.games)[0] || null;
+      .sort((a, b) => b.games - a.games);
+    const topNewcomer = topNewcomerSorted[0] || null;
+    const topNewcomerRunner = topNewcomerSorted[1] || null;
 
     // 7. 이달의 레이팅 상승왕 (firstRating → lastRating 변화량이 가장 큰 유저)
-    const topRatingRiser = Object.entries(userStats)
+    const topRatingRiserSorted = Object.entries(userStats)
       .filter(([, stats]) => stats.firstRating !== null && stats.lastRating !== null)
       .map(([puuid, stats]) => ({
         puuid,
@@ -305,11 +316,13 @@ module.exports.getDashboardStats = async (groupId, month) => {
         endRating: stats.lastRating,
         games: stats.games,
       }))
-      .sort((a, b) => b.ratingChange - a.ratingChange)[0] || null;
+      .sort((a, b) => b.ratingChange - a.ratingChange);
+    const topRatingRiser = topRatingRiserSorted[0] || null;
+    const topRatingRiserRunner = topRatingRiserSorted[1] || null;
 
     // 8. 새벽 전사 (새벽 0~6시 경기 비율이 가장 높은 유저, 전체 판수의 10% 이상만)
     const MIN_GAMES_FOR_LATE_NIGHT = Math.max(2, Math.round(matches.length * 0.1));
-    const nightOwl = Object.entries(userStats)
+    const nightOwlSorted = Object.entries(userStats)
       .filter(([, stats]) => stats.lateNightGames > 0 && stats.games >= MIN_GAMES_FOR_LATE_NIGHT)
       .map(([puuid, stats]) => ({
         puuid,
@@ -317,10 +330,12 @@ module.exports.getDashboardStats = async (groupId, month) => {
         games: stats.games,
         lateNightRate: (stats.lateNightGames / stats.games) * 100,
       }))
-      .sort((a, b) => b.lateNightRate - a.lateNightRate || b.lateNightGames - a.lateNightGames)[0] || null;
+      .sort((a, b) => b.lateNightRate - a.lateNightRate || b.lateNightGames - a.lateNightGames);
+    const nightOwl = nightOwlSorted[0] || null;
+    const nightOwlRunner = nightOwlSorted[1] || null;
 
     // 9. 다크호스 (팀 내 최저 레이팅이었는데 팀이 이긴 횟수가 가장 많은 유저)
-    const darkHorse = Object.entries(userStats)
+    const darkHorseSorted = Object.entries(userStats)
       .filter(([, stats]) => stats.darkHorseGames > 0 && stats.darkHorseWins > stats.darkHorseGames / 2)
       .map(([puuid, stats]) => ({
         puuid,
@@ -329,7 +344,9 @@ module.exports.getDashboardStats = async (groupId, month) => {
         darkHorseWinRate: (stats.darkHorseWins / stats.darkHorseGames) * 100,
         games: stats.games,
       }))
-      .sort((a, b) => b.darkHorseWins - a.darkHorseWins || b.darkHorseWinRate - a.darkHorseWinRate)[0] || null;
+      .sort((a, b) => b.darkHorseWins - a.darkHorseWins || b.darkHorseWinRate - a.darkHorseWinRate);
+    const darkHorse = darkHorseSorted[0] || null;
+    const darkHorseRunner = darkHorseSorted[1] || null;
 
     // 10. 명예왕 (해당 월 가장 많이 MVP 투표를 받은 유저)
     const honorVotes = await models.honor_vote.findAll({
@@ -353,29 +370,35 @@ module.exports.getDashboardStats = async (groupId, month) => {
       delete honorCounts[puuid];
     });
 
-    const honorKingEntry = Object.entries(honorCounts)
-      .sort((a, b) => b[1] - a[1])[0] || null;
+    const honorSorted = Object.entries(honorCounts).sort((a, b) => b[1] - a[1]);
+    const honorKingEntry = honorSorted[0] || null;
+    const honorKingRunner = honorSorted[1] || null;
 
     // 명예왕의 누적 투표 수 조회 (칭호용)
     let honorKingTotalVotes = 0;
+    let honorRunnerTotalVotes = 0;
     if (honorKingEntry) {
       honorKingTotalVotes = await models.honor_vote.count({
         where: { groupId, targetPuuid: honorKingEntry[0] },
       });
     }
+    if (honorKingRunner) {
+      honorRunnerTotalVotes = await models.honor_vote.count({
+        where: { groupId, targetPuuid: honorKingRunner[0] },
+      });
+    }
 
-    // 필요한 puuid를 모아서 이름을 한 번에 조회
+    // 필요한 puuid를 모아서 이름을 한 번에 조회 (1등 + 2등)
     const puuidsToResolve = new Set();
-    if (mostGamesUser) puuidsToResolve.add(mostGamesUser.puuid);
-    if (bestWinRateUser) puuidsToResolve.add(bestWinRateUser.puuid);
-    if (longestStreakUser) puuidsToResolve.add(longestStreakUser.puuid);
-    if (bestDuo) { puuidsToResolve.add(bestDuo.puuid1); puuidsToResolve.add(bestDuo.puuid2); }
-    if (mostRivalry) { puuidsToResolve.add(mostRivalry.puuid1); puuidsToResolve.add(mostRivalry.puuid2); }
-    if (topNewcomer) puuidsToResolve.add(topNewcomer.puuid);
-    if (topRatingRiser) puuidsToResolve.add(topRatingRiser.puuid);
-    if (nightOwl) puuidsToResolve.add(nightOwl.puuid);
-    if (darkHorse) puuidsToResolve.add(darkHorse.puuid);
+    const addUserPuuid = (u) => { if (u) puuidsToResolve.add(u.puuid); };
+    const addDuoPuuids = (d) => { if (d) { puuidsToResolve.add(d.puuid1); puuidsToResolve.add(d.puuid2); } };
+    [mostGamesUser, mostGamesRunner, bestWinRateUser, bestWinRateRunner,
+      longestStreakUser, longestStreakRunner, topNewcomer, topNewcomerRunner,
+      topRatingRiser, topRatingRiserRunner, nightOwl, nightOwlRunner,
+      darkHorse, darkHorseRunner].forEach(addUserPuuid);
+    [bestDuo, bestDuoRunner, mostRivalry, mostRivalryRunner].forEach(addDuoPuuids);
     if (honorKingEntry) puuidsToResolve.add(honorKingEntry[0]);
+    if (honorKingRunner) puuidsToResolve.add(honorKingRunner[0]);
 
     const summonerRows = puuidsToResolve.size > 0
       ? await models.summoner.findAll({
@@ -390,116 +413,142 @@ module.exports.getDashboardStats = async (groupId, month) => {
     }
     const getName = (puuid) => nameMap[puuid] || 'Unknown';
 
+    // 카드별 매핑 함수 (1등/2등에 동일하게 적용)
+    const toMostGames = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      games: u.games,
+      wins: u.wins,
+      losses: u.losses,
+      winRate: Number(((u.wins / u.games) * 100).toFixed(1)),
+    });
+    const toBestWinRate = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      games: u.games,
+      wins: u.wins,
+      losses: u.losses,
+      winRate: Number(u.winRate.toFixed(1)),
+    });
+    const toLongestStreak = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      streak: u.streak,
+    });
+    const toBestDuo = (d) => ({
+      puuid1: d.puuid1,
+      name1: getName(d.puuid1),
+      puuid2: d.puuid2,
+      name2: getName(d.puuid2),
+      games: d.games,
+      wins: d.wins,
+      losses: d.losses,
+      winRate: Number(d.winRate.toFixed(1)),
+    });
+    const toMostRivalry = (r) => ({
+      puuid1: r.puuid1,
+      name1: getName(r.puuid1),
+      puuid2: r.puuid2,
+      name2: getName(r.puuid2),
+      games: r.games,
+      player1Wins: r.p1Wins,
+      player2Wins: r.p2Wins,
+    });
+    const toTopNewcomer = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      games: u.games,
+      firstMatchDate: u.firstMatchDate,
+    });
+    const toTopRatingRiser = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      ratingChange: u.ratingChange,
+      startRating: u.startRating,
+      endRating: u.endRating,
+      games: u.games,
+    });
+    const toNightOwl = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      lateNightGames: u.lateNightGames,
+      games: u.games,
+      lateNightRate: Number(u.lateNightRate.toFixed(1)),
+    });
+    const toDarkHorse = (u) => ({
+      puuid: u.puuid,
+      name: getName(u.puuid),
+      darkHorseWins: u.darkHorseWins,
+      darkHorseGames: u.darkHorseGames,
+      darkHorseWinRate: Number(u.darkHorseWinRate.toFixed(1)),
+      games: u.games,
+    });
+    const toHonorKing = (entry, totalVotes) => ({
+      puuid: entry[0],
+      name: getName(entry[0]),
+      votes: entry[1],
+      title: getHonorTitle(totalVotes),
+    });
+
+    // 1등 카드에 runnerUp을 조건부로 합치는 헬퍼
+    const withRunner = (extra, runner, toCard) =>
+      runner ? { ...extra, runnerUp: toCard(runner) } : extra;
+
     // 결과 조합
     const result = {
       month: `${year}-${String(mon + 1).padStart(2, '0')}`,
       totalMatches: matches.length,
       mostGames: mostGamesUser
-        ? {
-            type: 'most_games',
-            puuid: mostGamesUser.puuid,
-            name: getName(mostGamesUser.puuid),
-            games: mostGamesUser.games,
-            wins: mostGamesUser.wins,
-            losses: mostGamesUser.losses,
-            winRate: Number(((mostGamesUser.wins / mostGamesUser.games) * 100).toFixed(1)),
-          }
+        ? { type: 'most_games', ...withRunner(toMostGames(mostGamesUser), mostGamesRunner, toMostGames) }
         : null,
       bestWinRate: bestWinRateUser
         ? {
             type: 'best_win_rate',
             minGames: MIN_GAMES_FOR_WINRATE,
-            puuid: bestWinRateUser.puuid,
-            name: getName(bestWinRateUser.puuid),
-            games: bestWinRateUser.games,
-            wins: bestWinRateUser.wins,
-            losses: bestWinRateUser.losses,
-            winRate: Number(bestWinRateUser.winRate.toFixed(1)),
+            ...withRunner(toBestWinRate(bestWinRateUser), bestWinRateRunner, toBestWinRate),
           }
         : null,
       longestWinStreak:
         longestStreakUser && longestStreakUser.streak > 0
           ? {
               type: 'longest_win_streak',
-              puuid: longestStreakUser.puuid,
-              name: getName(longestStreakUser.puuid),
-              streak: longestStreakUser.streak,
+              ...withRunner(
+                toLongestStreak(longestStreakUser),
+                longestStreakRunner && longestStreakRunner.streak > 0 ? longestStreakRunner : null,
+                toLongestStreak,
+              ),
             }
           : null,
       bestDuo: bestDuo
         ? {
             type: 'best_duo',
             minGames: MIN_GAMES_FOR_DUO,
-            puuid1: bestDuo.puuid1,
-            name1: getName(bestDuo.puuid1),
-            puuid2: bestDuo.puuid2,
-            name2: getName(bestDuo.puuid2),
-            games: bestDuo.games,
-            wins: bestDuo.wins,
-            losses: bestDuo.losses,
-            winRate: Number(bestDuo.winRate.toFixed(1)),
+            ...withRunner(toBestDuo(bestDuo), bestDuoRunner, toBestDuo),
           }
         : null,
       mostRivalry: mostRivalry
-        ? {
-            type: 'most_rivalry',
-            puuid1: mostRivalry.puuid1,
-            name1: getName(mostRivalry.puuid1),
-            puuid2: mostRivalry.puuid2,
-            name2: getName(mostRivalry.puuid2),
-            games: mostRivalry.games,
-            player1Wins: mostRivalry.p1Wins,
-            player2Wins: mostRivalry.p2Wins,
-          }
+        ? { type: 'most_rivalry', ...withRunner(toMostRivalry(mostRivalry), mostRivalryRunner, toMostRivalry) }
         : null,
       topNewcomer: topNewcomer
-        ? {
-            type: 'top_newcomer',
-            puuid: topNewcomer.puuid,
-            name: getName(topNewcomer.puuid),
-            games: topNewcomer.games,
-            firstMatchDate: topNewcomer.firstMatchDate,
-          }
+        ? { type: 'top_newcomer', ...withRunner(toTopNewcomer(topNewcomer), topNewcomerRunner, toTopNewcomer) }
         : null,
       topRatingRiser: topRatingRiser
         ? {
             type: 'top_rating_riser',
-            puuid: topRatingRiser.puuid,
-            name: getName(topRatingRiser.puuid),
-            ratingChange: topRatingRiser.ratingChange,
-            startRating: topRatingRiser.startRating,
-            endRating: topRatingRiser.endRating,
-            games: topRatingRiser.games,
+            ...withRunner(toTopRatingRiser(topRatingRiser), topRatingRiserRunner, toTopRatingRiser),
           }
         : null,
       nightOwl: nightOwl
-        ? {
-            type: 'night_owl',
-            puuid: nightOwl.puuid,
-            name: getName(nightOwl.puuid),
-            lateNightGames: nightOwl.lateNightGames,
-            games: nightOwl.games,
-            lateNightRate: Number(nightOwl.lateNightRate.toFixed(1)),
-          }
+        ? { type: 'night_owl', ...withRunner(toNightOwl(nightOwl), nightOwlRunner, toNightOwl) }
         : null,
       darkHorse: darkHorse
-        ? {
-            type: 'dark_horse',
-            puuid: darkHorse.puuid,
-            name: getName(darkHorse.puuid),
-            darkHorseWins: darkHorse.darkHorseWins,
-            darkHorseGames: darkHorse.darkHorseGames,
-            darkHorseWinRate: Number(darkHorse.darkHorseWinRate.toFixed(1)),
-            games: darkHorse.games,
-          }
+        ? { type: 'dark_horse', ...withRunner(toDarkHorse(darkHorse), darkHorseRunner, toDarkHorse) }
         : null,
       honorKing: honorKingEntry
         ? {
             type: 'honor_king',
-            puuid: honorKingEntry[0],
-            name: getName(honorKingEntry[0]),
-            votes: honorKingEntry[1],
-            title: getHonorTitle(honorKingTotalVotes),
+            ...toHonorKing(honorKingEntry, honorKingTotalVotes),
+            ...(honorKingRunner && { runnerUp: toHonorKing(honorKingRunner, honorRunnerTotalVotes) }),
           }
         : null,
     };
