@@ -34,10 +34,8 @@ const validateTournamentType = (type) => {
 const validateAuctionConfig = (config) => {
   if (config === null || config === undefined) return 'auction 타입은 auctionConfig가 필요합니다.';
   if (typeof config !== 'object' || Array.isArray(config)) return 'auctionConfig는 객체여야 합니다.';
-  const { budget, minBid, teamSize, allowNegative, candidates } = config;
-  if (!Number.isInteger(budget) || budget <= 0) return 'auctionConfig.budget은 양의 정수여야 합니다.';
+  const { minBid, allowNegative, candidates } = config;
   if (!Number.isInteger(minBid) || minBid <= 0) return 'auctionConfig.minBid는 양의 정수여야 합니다.';
-  if (!Number.isInteger(teamSize) || teamSize < 2) return 'auctionConfig.teamSize는 2 이상의 정수여야 합니다.';
   if (allowNegative !== undefined && typeof allowNegative !== 'boolean') {
     return 'auctionConfig.allowNegative는 boolean이어야 합니다.';
   }
@@ -59,6 +57,13 @@ const validateAuctionConfig = (config) => {
       if (seen.has(puuid)) return '한 사람이 여러 포지션에 등록될 수 없습니다.';
       seen.add(puuid);
     }
+  }
+  return null;
+};
+
+const validateAuctionTeamBudget = (budget) => {
+  if (!Number.isInteger(budget) || budget <= 0) {
+    return 'budget은 양의 정수여야 합니다.';
   }
   return null;
 };
@@ -673,7 +678,7 @@ const startAuction = async (tournament, teams, options = {}) => {
   if (teams.length < 2) {
     return { ok: false, error: '최소 2팀이 등록되어야 경매를 시작할 수 있습니다.' };
   }
-  const { candidates, budget } = tournament.auctionConfig;
+  const { candidates } = tournament.auctionConfig;
   const captainSet = new Set();
   for (const team of teams) {
     const members = team.members || [];
@@ -695,9 +700,12 @@ const startAuction = async (tournament, teams, options = {}) => {
       return { ok: false, error: '여러 팀이 같은 팀장을 가질 수 없습니다.' };
     }
     captainSet.add(captain.puuid);
+    if (!Number.isInteger(team.auctionBudget) || team.auctionBudget <= 0) {
+      return { ok: false, error: `${team.name} 팀에 경매 예산(auctionBudget)이 설정되어 있지 않습니다.` };
+    }
   }
   for (const team of teams) {
-    team.remainingBudget = budget;
+    team.remainingBudget = team.auctionBudget;
     await team.save({ transaction: options.transaction });
   }
   tournament.status = STATUS.AUCTION;
@@ -728,10 +736,10 @@ const recordAuctionBid = async (tournament, team, allTeams, { puuid, amount }, o
   if ((team.members || []).some((m) => m.position === position)) {
     return { ok: false, error: `해당 팀에 ${position} 포지션이 이미 있습니다.` };
   }
-  if ((team.members || []).length >= config.teamSize) {
+  if ((team.members || []).length >= TEAM_SIZE) {
     return { ok: false, error: '팀 정원이 가득 찼습니다.' };
   }
-  const newBudget = (team.remainingBudget == null ? config.budget : team.remainingBudget) - amount;
+  const newBudget = (team.remainingBudget == null ? 0 : team.remainingBudget) - amount;
   if (newBudget < 0 && !config.allowNegative) {
     return { ok: false, error: '잔여 예산을 초과합니다.' };
   }
@@ -764,10 +772,9 @@ const completeAuction = async (tournament, teams, options = {}) => {
   if (tournament.status !== STATUS.AUCTION) {
     return { ok: false, error: '경매 단계가 아닙니다.' };
   }
-  const targetSize = tournament.auctionConfig && tournament.auctionConfig.teamSize;
   for (const team of teams) {
-    if ((team.members || []).length !== targetSize) {
-      return { ok: false, error: `${team.name} 팀이 아직 ${targetSize}명을 채우지 못했습니다.` };
+    if ((team.members || []).length !== TEAM_SIZE) {
+      return { ok: false, error: `${team.name} 팀이 아직 ${TEAM_SIZE}명을 채우지 못했습니다.` };
     }
   }
   tournament.status = STATUS.PREPARING;
@@ -785,6 +792,7 @@ module.exports = {
   validateTournamentType,
   validateAuctionConfig,
   validateAuctionTeamInput,
+  validateAuctionTeamBudget,
   findCandidatePosition,
   collectCandidatePuuids,
   startAuction,

@@ -27,6 +27,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      auctionBudget: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {},
   );

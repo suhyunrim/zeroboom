@@ -399,7 +399,7 @@ module.exports = (app) => {
   });
 
   route.post('/:id/teams', verifyToken, async (req, res) => {
-    const { name, captainPuuid, members } = req.body || {};
+    const { name, captainPuuid, members, budget } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res, {
         requireStatus: STATUS.PREPARING,
@@ -407,13 +407,19 @@ module.exports = (app) => {
       });
       if (!tournament) return undefined;
 
-      const validator = tournament.type === tournamentController.TYPES.AUCTION
+      const isAuction = tournament.type === tournamentController.TYPES.AUCTION;
+      const validator = isAuction
         ? tournamentController.validateAuctionTeamInput
         : tournamentController.validateTeamInput;
       const validationError = validator({ name, captainPuuid, members });
       if (validationError) return res.status(400).json({ result: validationError });
 
-      if (tournament.type === tournamentController.TYPES.AUCTION) {
+      let auctionBudget = null;
+      if (isAuction) {
+        const budgetError = tournamentController.validateAuctionTeamBudget(budget);
+        if (budgetError) return res.status(400).json({ result: budgetError });
+        auctionBudget = budget;
+
         const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
         const candidatePos = tournamentController.findCandidatePosition(candidates, captainPuuid);
         if (!candidatePos) {
@@ -439,6 +445,7 @@ module.exports = (app) => {
         name,
         captainPuuid,
         members,
+        auctionBudget,
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -447,7 +454,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.team_create',
-        details: { tournamentId: tournament.id, teamId: team.id, name },
+        details: { tournamentId: tournament.id, teamId: team.id, name, auctionBudget },
         source: 'web',
       });
 

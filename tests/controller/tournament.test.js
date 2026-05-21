@@ -990,9 +990,7 @@ describe('validateAuctionConfig', () => {
     support: Array.from({ length: count }, (_, i) => `sup${i}`),
   });
   const validConfig = () => ({
-    budget: 1000,
     minBid: 5,
-    teamSize: 5,
     allowNegative: false,
     candidates: makeCandidates(5),
   });
@@ -1004,15 +1002,8 @@ describe('validateAuctionConfig', () => {
     expect(tournamentController.validateAuctionConfig(null)).toContain('auctionConfig');
     expect(tournamentController.validateAuctionConfig(undefined)).toContain('auctionConfig');
   });
-  test('budget 0/음수 거부', () => {
-    expect(tournamentController.validateAuctionConfig({ ...validConfig(), budget: 0 })).toContain('budget');
-    expect(tournamentController.validateAuctionConfig({ ...validConfig(), budget: -10 })).toContain('budget');
-  });
   test('minBid 0/음수 거부', () => {
     expect(tournamentController.validateAuctionConfig({ ...validConfig(), minBid: 0 })).toContain('minBid');
-  });
-  test('teamSize 1 이하 거부', () => {
-    expect(tournamentController.validateAuctionConfig({ ...validConfig(), teamSize: 1 })).toContain('teamSize');
   });
   test('allowNegative 불리언 아니면 거부', () => {
     expect(tournamentController.validateAuctionConfig({ ...validConfig(), allowNegative: 'yes' }))
@@ -1130,9 +1121,7 @@ describe('recordAuctionBid', () => {
   const makeTournament = (overrides = {}) => ({
     status: 'auction',
     auctionConfig: {
-      budget: 1000,
       minBid: 5,
-      teamSize: 5,
       allowNegative: false,
       candidates: defaultCandidates(),
     },
@@ -1241,7 +1230,7 @@ describe('recordAuctionBid', () => {
   test('allowNegative=true면 마이너스 허용', async () => {
     const tournament = makeTournament({
       auctionConfig: {
-        budget: 1000, minBid: 5, teamSize: 5, allowNegative: true,
+        minBid: 5, allowNegative: true,
         candidates: defaultCandidates(),
       },
     });
@@ -1254,13 +1243,17 @@ describe('recordAuctionBid', () => {
     expect(team.remainingBudget).toBe(-100);
   });
 
-  test('팀 정원 가득찼으면 거부', async () => {
-    // teamSize 4로 줄여서 정원 검증 (포지션 중복 회피)
+  test('팀 정원(5명) 가득찼으면 거부 — 6번째 입찰 시도', async () => {
+    // candidates에 후보를 더 추가해서 6번째 입찰 가능한 상태 만들기
+    const candidates = {
+      top: ['cap1', 'cap2'],
+      jungle: ['j1'],
+      mid: ['m1'],
+      adc: ['a1'],
+      support: ['s1', 's2'],
+    };
     const tournament = makeTournament({
-      auctionConfig: {
-        budget: 1000, minBid: 5, teamSize: 4, allowNegative: false,
-        candidates: defaultCandidates(),
-      },
+      auctionConfig: { minBid: 5, allowNegative: false, candidates },
     });
     const team = makeTeam({
       members: [
@@ -1268,14 +1261,30 @@ describe('recordAuctionBid', () => {
         { puuid: 'j1', position: 'jungle' },
         { puuid: 'm1', position: 'mid' },
         { puuid: 'a1', position: 'adc' },
+        { puuid: 's1', position: 'support' },
       ],
     });
     const result = await tournamentController.recordAuctionBid(
       tournament, team, [team],
-      { puuid: 's1', amount: 50 },
+      { puuid: 's2', amount: 50 },
     );
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('정원');
+    // 이미 support 포지션이 있어서 그 검증이 먼저 걸림 (정원 검증 전에 포지션 중복으로 차단)
+    expect(result.error).toContain('support');
+  });
+});
+
+describe('validateAuctionTeamBudget', () => {
+  test('양의 정수 통과', () => {
+    expect(tournamentController.validateAuctionTeamBudget(1000)).toBeNull();
+    expect(tournamentController.validateAuctionTeamBudget(1)).toBeNull();
+  });
+  test('0/음수/소수/비정수 거부', () => {
+    expect(tournamentController.validateAuctionTeamBudget(0)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(-1)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(10.5)).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget('1000')).toContain('budget');
+    expect(tournamentController.validateAuctionTeamBudget(null)).toContain('budget');
   });
 });
 
