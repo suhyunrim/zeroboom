@@ -746,7 +746,16 @@ const recordAuctionBid = async (tournament, team, allTeams, { puuid, amount }, o
   team.members = [...(team.members || []), { puuid, position, bidAmount: amount }];
   team.remainingBudget = newBudget;
   await team.save({ transaction: options.transaction });
-  return { ok: true, position };
+
+  // 낙찰된 puuid가 현재 매물이라면 현재 매물 정보 클리어
+  let cleared = false;
+  if (tournament.currentAuctionPuuid === puuid) {
+    tournament.currentAuctionPuuid = null;
+    tournament.currentAuctionDeadline = null;
+    await tournament.save({ transaction: options.transaction });
+    cleared = true;
+  }
+  return { ok: true, position, currentAuctionCleared: cleared };
 };
 
 const undoAuctionBid = async (tournament, team, puuid, options = {}) => {
@@ -766,6 +775,72 @@ const undoAuctionBid = async (tournament, team, puuid, options = {}) => {
   team.remainingBudget = (team.remainingBudget || 0) + refund;
   await team.save({ transaction: options.transaction });
   return { ok: true, refund };
+};
+
+const pickRandomCandidate = (tournament, teams) => {
+  const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
+  if (!candidates) return null;
+  const allPuuids = collectCandidatePuuids(candidates);
+  const taken = new Set();
+  for (const team of teams) {
+    (team.members || []).forEach((m) => taken.add(m.puuid));
+  }
+  const remaining = allPuuids.filter((p) => !taken.has(p));
+  if (remaining.length === 0) return null;
+  const picked = remaining[Math.floor(Math.random() * remaining.length)];
+  return { puuid: picked, position: findCandidatePosition(candidates, picked) };
+};
+
+const setCurrentAuction = async (tournament, puuid, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  // 입찰 진행 중(deadline이 미래)이면 매물 교체 불가
+  if (tournament.currentAuctionDeadline && new Date(tournament.currentAuctionDeadline) > new Date()) {
+    return { ok: false, error: '입찰이 진행 중입니다.' };
+  }
+  tournament.currentAuctionPuuid = puuid;
+  tournament.currentAuctionDeadline = null;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true };
+};
+
+const startBidTimer = async (tournament, durationSeconds, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if (!tournament.currentAuctionPuuid) {
+    return { ok: false, error: '현재 매물이 없습니다.' };
+  }
+  if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+    return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
+  }
+  const deadline = new Date(Date.now() + durationSeconds * 1000);
+  tournament.currentAuctionDeadline = deadline;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true, deadline };
+};
+
+const extendBidTimer = async (tournament, durationSeconds, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if (!tournament.currentAuctionDeadline) {
+    return { ok: false, error: '진행 중인 입찰이 없습니다.' };
+  }
+  if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+    return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
+  }
+  const deadline = new Date(Date.now() + durationSeconds * 1000);
+  tournament.currentAuctionDeadline = deadline;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true, deadline };
+};
+
+const clearCurrentAuction = async (tournament, options = {}) => {
+  tournament.currentAuctionPuuid = null;
+  tournament.currentAuctionDeadline = null;
+  await tournament.save({ transaction: options.transaction });
 };
 
 const completeAuction = async (tournament, teams, options = {}) => {
@@ -799,6 +874,11 @@ module.exports = {
   recordAuctionBid,
   undoAuctionBid,
   completeAuction,
+  pickRandomCandidate,
+  setCurrentAuction,
+  startBidTimer,
+  extendBidTimer,
+  clearCurrentAuction,
   computeBracketSize,
   getWinningScore,
   computeRoundLabels,

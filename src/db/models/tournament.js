@@ -55,6 +55,14 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.JSON,
         allowNull: true,
       },
+      currentAuctionPuuid: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      currentAuctionDeadline: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {},
   );
