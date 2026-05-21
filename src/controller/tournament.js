@@ -34,8 +34,11 @@ const validateTournamentType = (type) => {
 const validateAuctionConfig = (config) => {
   if (config === null || config === undefined) return 'auction 타입은 auctionConfig가 필요합니다.';
   if (typeof config !== 'object' || Array.isArray(config)) return 'auctionConfig는 객체여야 합니다.';
-  const { minBid, allowNegative, candidates } = config;
+  const { minBid, allowNegative, candidates, bidDurationSeconds } = config;
   if (!Number.isInteger(minBid) || minBid <= 0) return 'auctionConfig.minBid는 양의 정수여야 합니다.';
+  if (!Number.isInteger(bidDurationSeconds) || bidDurationSeconds <= 0) {
+    return 'auctionConfig.bidDurationSeconds는 양의 정수여야 합니다.';
+  }
   if (allowNegative !== undefined && typeof allowNegative !== 'boolean') {
     return 'auctionConfig.allowNegative는 boolean이어야 합니다.';
   }
@@ -805,6 +808,14 @@ const setCurrentAuction = async (tournament, puuid, options = {}) => {
   return { ok: true };
 };
 
+// durationSeconds가 null/undefined면 tournament.auctionConfig.bidDurationSeconds로 폴백.
+const resolveBidDuration = (tournament, durationSeconds) => {
+  if (durationSeconds == null) {
+    return tournament.auctionConfig && tournament.auctionConfig.bidDurationSeconds;
+  }
+  return durationSeconds;
+};
+
 const startBidTimer = async (tournament, durationSeconds, options = {}) => {
   if (tournament.status !== STATUS.AUCTION) {
     return { ok: false, error: '경매 단계가 아닙니다.' };
@@ -812,13 +823,14 @@ const startBidTimer = async (tournament, durationSeconds, options = {}) => {
   if (!tournament.currentAuctionPuuid) {
     return { ok: false, error: '현재 매물이 없습니다.' };
   }
-  if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+  const resolved = resolveBidDuration(tournament, durationSeconds);
+  if (!Number.isInteger(resolved) || resolved <= 0) {
     return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
   }
-  const deadline = new Date(Date.now() + durationSeconds * 1000);
+  const deadline = new Date(Date.now() + resolved * 1000);
   tournament.currentAuctionDeadline = deadline;
   await tournament.save({ transaction: options.transaction });
-  return { ok: true, deadline };
+  return { ok: true, deadline, durationSeconds: resolved };
 };
 
 const extendBidTimer = async (tournament, durationSeconds, options = {}) => {
@@ -828,13 +840,14 @@ const extendBidTimer = async (tournament, durationSeconds, options = {}) => {
   if (!tournament.currentAuctionDeadline) {
     return { ok: false, error: '진행 중인 입찰이 없습니다.' };
   }
-  if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+  const resolved = resolveBidDuration(tournament, durationSeconds);
+  if (!Number.isInteger(resolved) || resolved <= 0) {
     return { ok: false, error: 'durationSeconds는 양의 정수여야 합니다.' };
   }
-  const deadline = new Date(Date.now() + durationSeconds * 1000);
+  const deadline = new Date(Date.now() + resolved * 1000);
   tournament.currentAuctionDeadline = deadline;
   await tournament.save({ transaction: options.transaction });
-  return { ok: true, deadline };
+  return { ok: true, deadline, durationSeconds: resolved };
 };
 
 const clearCurrentAuction = async (tournament, options = {}) => {

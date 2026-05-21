@@ -767,7 +767,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.auction_start_bid',
-        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds, deadline: result.deadline },
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds: result.durationSeconds, deadline: result.deadline },
         source: 'web',
       });
 
@@ -777,7 +777,7 @@ module.exports = (app) => {
           tournamentId: tournament.id,
           puuid: tournament.currentAuctionPuuid,
           deadline: result.deadline,
-          durationSeconds,
+          durationSeconds: result.durationSeconds,
         });
       }
 
@@ -807,7 +807,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.auction_extend_time',
-        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds, deadline: result.deadline },
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, durationSeconds: result.durationSeconds, deadline: result.deadline },
         source: 'web',
       });
 
@@ -817,7 +817,7 @@ module.exports = (app) => {
           tournamentId: tournament.id,
           puuid: tournament.currentAuctionPuuid,
           deadline: result.deadline,
-          durationSeconds,
+          durationSeconds: result.durationSeconds,
         });
       }
 

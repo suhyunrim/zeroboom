@@ -991,6 +991,7 @@ describe('validateAuctionConfig', () => {
   });
   const validConfig = () => ({
     minBid: 5,
+    bidDurationSeconds: 30,
     allowNegative: false,
     candidates: makeCandidates(5),
   });
@@ -1004,6 +1005,13 @@ describe('validateAuctionConfig', () => {
   });
   test('minBid 0/음수 거부', () => {
     expect(tournamentController.validateAuctionConfig({ ...validConfig(), minBid: 0 })).toContain('minBid');
+  });
+  test('bidDurationSeconds 누락/음수 거부', () => {
+    const c = validConfig();
+    delete c.bidDurationSeconds;
+    expect(tournamentController.validateAuctionConfig(c)).toContain('bidDurationSeconds');
+    expect(tournamentController.validateAuctionConfig({ ...validConfig(), bidDurationSeconds: 0 }))
+      .toContain('bidDurationSeconds');
   });
   test('allowNegative 불리언 아니면 거부', () => {
     expect(tournamentController.validateAuctionConfig({ ...validConfig(), allowNegative: 'yes' }))
@@ -1349,64 +1357,75 @@ describe('setCurrentAuction', () => {
 });
 
 describe('startBidTimer', () => {
-  test('정상 시작', async () => {
-    const tournament = {
-      status: 'auction',
-      currentAuctionPuuid: 'm1',
-      currentAuctionDeadline: null,
-      save: jest.fn(),
-    };
+  const baseTournament = () => ({
+    status: 'auction',
+    currentAuctionPuuid: 'm1',
+    currentAuctionDeadline: null,
+    auctionConfig: { bidDurationSeconds: 30 },
+    save: jest.fn(),
+  });
+
+  test('정상 시작 (명시 durationSeconds)', async () => {
+    const tournament = baseTournament();
     const before = Date.now();
-    const result = await tournamentController.startBidTimer(tournament, 30);
+    const result = await tournamentController.startBidTimer(tournament, 60);
     expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(60);
+    expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 60000);
+  });
+
+  test('durationSeconds 생략 시 auctionConfig.bidDurationSeconds로 폴백', async () => {
+    const tournament = baseTournament();
+    const before = Date.now();
+    const result = await tournamentController.startBidTimer(tournament);
+    expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(30);
     expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 30000);
   });
 
   test('매물 없으면 거부', async () => {
-    const tournament = {
-      status: 'auction',
-      currentAuctionPuuid: null,
-      currentAuctionDeadline: null,
-      save: jest.fn(),
-    };
+    const tournament = { ...baseTournament(), currentAuctionPuuid: null };
     const result = await tournamentController.startBidTimer(tournament, 30);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('매물');
   });
 
   test('durationSeconds 0/음수 거부', async () => {
-    const tournament = {
-      status: 'auction',
-      currentAuctionPuuid: 'm1',
-      currentAuctionDeadline: null,
-      save: jest.fn(),
-    };
+    const tournament = baseTournament();
     expect((await tournamentController.startBidTimer(tournament, 0)).ok).toBe(false);
     expect((await tournamentController.startBidTimer(tournament, -10)).ok).toBe(false);
   });
 });
 
 describe('extendBidTimer', () => {
+  const baseTournament = () => ({
+    status: 'auction',
+    currentAuctionPuuid: 'm1',
+    currentAuctionDeadline: new Date(Date.now() + 5000),
+    auctionConfig: { bidDurationSeconds: 30 },
+    save: jest.fn(),
+  });
+
   test('정상 갱신: 현재 시각 + duration', async () => {
-    const tournament = {
-      status: 'auction',
-      currentAuctionPuuid: 'm1',
-      currentAuctionDeadline: new Date(Date.now() + 5000),
-      save: jest.fn(),
-    };
+    const tournament = baseTournament();
     const before = Date.now();
     const result = await tournamentController.extendBidTimer(tournament, 60);
     expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(60);
     expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 60000);
   });
 
+  test('durationSeconds 생략 시 auctionConfig.bidDurationSeconds로 폴백', async () => {
+    const tournament = baseTournament();
+    const before = Date.now();
+    const result = await tournamentController.extendBidTimer(tournament);
+    expect(result.ok).toBe(true);
+    expect(result.durationSeconds).toBe(30);
+    expect(tournament.currentAuctionDeadline.getTime()).toBeGreaterThanOrEqual(before + 30000);
+  });
+
   test('deadline 없으면 거부', async () => {
-    const tournament = {
-      status: 'auction',
-      currentAuctionPuuid: 'm1',
-      currentAuctionDeadline: null,
-      save: jest.fn(),
-    };
+    const tournament = { ...baseTournament(), currentAuctionDeadline: null };
     const result = await tournamentController.extendBidTimer(tournament, 30);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('진행 중');
