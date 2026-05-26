@@ -924,6 +924,7 @@ module.exports = (app) => {
 
   route.post('/:id/start', verifyToken, async (req, res) => {
     const { slotMapping } = req.body || {};
+    const allowSingleTeam = (req.body || {}).allowSingleTeam === true;
     try {
       const tournament = await loadTournamentForAdmin(req, res, {
         requireStatus: STATUS.PREPARING,
@@ -940,12 +941,20 @@ module.exports = (app) => {
 
       const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
       const teamCount = teams.length;
-      if (teamCount < 2) {
+      if (teamCount < 1) {
+        return res.status(400).json({ result: '최소 1팀이 등록되어야 시작할 수 있습니다.' });
+      }
+      if (teamCount < 2 && !allowSingleTeam) {
         return res.status(400).json({ result: '최소 2팀이 등록되어야 시작할 수 있습니다.' });
       }
       const bracketSize = tournamentController.computeBracketSize(teamCount);
 
-      const slotError = tournamentController.validateSlotMapping(slotMapping, teams, bracketSize, teamCount);
+      // 단일팀(레거시 임포트)은 slotMapping을 자동 구성한다: [팀, BYE]로 즉시 우승 처리됨.
+      const effectiveSlotMapping = (allowSingleTeam && teamCount === 1)
+        ? [teams[0].id, null]
+        : slotMapping;
+
+      const slotError = tournamentController.validateSlotMapping(effectiveSlotMapping, teams, bracketSize, teamCount);
       if (slotError) return res.status(400).json({ result: slotError });
 
       await models.sequelize.transaction(async (transaction) => {
@@ -962,7 +971,7 @@ module.exports = (app) => {
         );
         await models.tournament_match.bulkCreate(matchRows, { transaction });
 
-        await tournamentController.placeTeamsAndResolveByes(tournament, slotMapping, { transaction });
+        await tournamentController.placeTeamsAndResolveByes(tournament, effectiveSlotMapping, { transaction });
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -971,7 +980,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.start',
-        details: { tournamentId: tournament.id, teamCount, bracketSize, slotMapping },
+        details: { tournamentId: tournament.id, teamCount, bracketSize, slotMapping: effectiveSlotMapping, allowSingleTeam },
         source: 'web',
       });
 

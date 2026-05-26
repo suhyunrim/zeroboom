@@ -433,6 +433,12 @@ describe('validateSlotMapping', () => {
       tournamentController.validateSlotMapping([10, 11, null, null], teams.slice(0, 2), 4, 2),
     ).toBe('한 매치에 두 BYE가 들어갈 수 없습니다.');
   });
+
+  test('단일팀 자동 BYE (레거시 임포트) 정상', () => {
+    expect(
+      tournamentController.validateSlotMapping([10, null], teams.slice(0, 1), 2, 1),
+    ).toBeNull();
+  });
 });
 
 describe('computeWinProbability', () => {
