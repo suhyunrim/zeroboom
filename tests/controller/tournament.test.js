@@ -230,6 +230,25 @@ describe('validateTrophyType', () => {
   });
 });
 
+describe('validateHeldAt', () => {
+  test('유효한 날짜 통과', () => {
+    expect(tournamentController.validateHeldAt('2026-05-10')).toBeNull();
+    expect(tournamentController.validateHeldAt('2026-05-10T00:00:00+09:00')).toBeNull();
+    expect(tournamentController.validateHeldAt(new Date())).toBeNull();
+  });
+
+  test('null/undefined/빈문자열은 필수 에러', () => {
+    expect(tournamentController.validateHeldAt(null)).toMatch(/필요합니다/);
+    expect(tournamentController.validateHeldAt(undefined)).toMatch(/필요합니다/);
+    expect(tournamentController.validateHeldAt('')).toMatch(/필요합니다/);
+  });
+
+  test('유효하지 않은 날짜 거부', () => {
+    expect(tournamentController.validateHeldAt('not-a-date')).toMatch(/유효한 날짜/);
+    expect(tournamentController.validateHeldAt('2026-13-99')).toMatch(/유효한 날짜/);
+  });
+});
+
 describe('validateScrimInput', () => {
   const teams = [{ id: 1 }, { id: 2 }, { id: 3 }];
 

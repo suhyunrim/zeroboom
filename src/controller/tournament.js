@@ -102,6 +102,16 @@ const validateTrophyType = (trophyType) => {
   return null;
 };
 
+const validateHeldAt = (heldAt) => {
+  if (heldAt === null || heldAt === undefined || heldAt === '') {
+    return 'heldAt(개최일)이 필요합니다.';
+  }
+  if (Number.isNaN(new Date(heldAt).getTime())) {
+    return 'heldAt이 유효한 날짜가 아닙니다.';
+  }
+  return null;
+};
+
 const ratingCalculator = new elo(16);
 
 const computeBracketSize = (teamCount) => {
@@ -882,6 +892,7 @@ module.exports = {
   TYPES,
   TROPHY_TYPES,
   validateTrophyType,
+  validateHeldAt,
   validateTournamentType,
   validateAuctionConfig,
   validateAuctionTeamInput,

@@ -221,7 +221,7 @@ module.exports = (app) => {
     try {
       const list = await models.tournament.findAll({
         where: { groupId },
-        order: [['createdAt', 'DESC']],
+        order: [['heldAt', 'DESC'], ['id', 'DESC']],
       });
 
       const championIds = list.map((t) => t.championTeamId).filter((v) => v != null);
@@ -303,11 +303,13 @@ module.exports = (app) => {
   route.post('/', verifyToken, async (req, res) => {
     const {
       groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null,
-      type = tournamentController.TYPES.NORMAL, auctionConfig = null,
+      type = tournamentController.TYPES.NORMAL, auctionConfig = null, heldAt = null,
     } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
+    const heldAtError = tournamentController.validateHeldAt(heldAt);
+    if (heldAtError) return res.status(400).json({ result: heldAtError });
     if (!Number.isInteger(defaultBestOf) || defaultBestOf < 1 || defaultBestOf % 2 === 0) {
       return res.status(400).json({ result: 'defaultBestOf는 홀수 양의 정수여야 합니다.' });
     }
@@ -343,6 +345,7 @@ module.exports = (app) => {
         defaultBestOf,
         finalBestOf,
         trophyType,
+        heldAt,
         type,
         auctionConfig: type === tournamentController.TYPES.AUCTION ? auctionConfig : null,
       });
@@ -353,7 +356,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, trophyType, type, auctionConfig: tournament.auctionConfig },
+        details: { tournamentId: tournament.id, name, trophyType, heldAt, type, auctionConfig: tournament.auctionConfig },
         source: 'web',
       });
 
