@@ -88,6 +88,12 @@ const collectCandidatePuuids = (candidates) => {
   return out;
 };
 
+// 포지션별 후보 수 (validateAuctionConfig가 모든 포지션 동일 길이를 보장하므로 top 기준)
+const getCandidatesPerPosition = (candidates) => {
+  if (!candidates || !Array.isArray(candidates.top)) return 0;
+  return candidates.top.length;
+};
+
 const validateTrophyType = (trophyType) => {
   if (trophyType === null || trophyType === undefined) return null;
   if (typeof trophyType !== 'string' || !TROPHY_TYPES.includes(trophyType)) {
@@ -682,6 +688,13 @@ const startAuction = async (tournament, teams, options = {}) => {
     return { ok: false, error: '최소 2팀이 등록되어야 경매를 시작할 수 있습니다.' };
   }
   const { candidates } = tournament.auctionConfig;
+  const candidatesPerPosition = getCandidatesPerPosition(candidates);
+  if (teams.length !== candidatesPerPosition) {
+    return {
+      ok: false,
+      error: `팀 수(${teams.length})와 포지션별 후보 수(${candidatesPerPosition})가 일치해야 합니다.`,
+    };
+  }
   const captainSet = new Set();
   for (const team of teams) {
     const members = team.members || [];
@@ -875,6 +888,7 @@ module.exports = {
   validateAuctionTeamBudget,
   findCandidatePosition,
   collectCandidatePuuids,
+  getCandidatesPerPosition,
   startAuction,
   recordAuctionBid,
   undoAuctionBid,

@@ -1118,6 +1118,84 @@ describe('validateAuctionTeamInput', () => {
   });
 });
 
+describe('startAuction', () => {
+  const defaultCandidates = () => ({
+    top: ['cap1', 'cap2'],
+    jungle: ['j1', 'j2'],
+    mid: ['m1', 'm2'],
+    adc: ['a1', 'a2'],
+    support: ['s1', 's2'],
+  });
+  const makeTournament = (overrides = {}) => ({
+    type: 'auction',
+    status: 'preparing',
+    auctionConfig: {
+      minBid: 5,
+      bidDurationSeconds: 30,
+      allowNegative: false,
+      candidates: defaultCandidates(),
+    },
+    save: jest.fn(),
+    ...overrides,
+  });
+  const makeTeam = (overrides) => ({
+    name: 'A',
+    captainPuuid: 'cap1',
+    members: [{ puuid: 'cap1', position: 'top' }],
+    auctionBudget: 1000,
+    save: jest.fn(),
+    ...overrides,
+  });
+
+  test('팀 수 == 포지션별 후보 수와 일치하면 정상 시작', async () => {
+    const tournament = makeTournament();
+    const teams = [
+      makeTeam(),
+      makeTeam({ name: 'B', captainPuuid: 'cap2', members: [{ puuid: 'cap2', position: 'top' }] }),
+    ];
+    const result = await tournamentController.startAuction(tournament, teams);
+    expect(result.ok).toBe(true);
+    expect(tournament.status).toBe('auction');
+  });
+
+  test('팀 수가 포지션별 후보 수보다 많으면 거부', async () => {
+    const tournament = makeTournament();
+    const teams = [
+      makeTeam(),
+      makeTeam({ name: 'B', captainPuuid: 'cap2', members: [{ puuid: 'cap2', position: 'top' }] }),
+      // 3번째 팀: 후보 풀에 없는 팀장 — 팀 수 검증이 captain 검증보다 먼저 실패해야 함
+      makeTeam({ name: 'C', captainPuuid: 'cap3', members: [{ puuid: 'cap3', position: 'top' }] }),
+    ];
+    const result = await tournamentController.startAuction(tournament, teams);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('포지션별 후보 수');
+  });
+
+  test('팀 수가 포지션별 후보 수보다 적으면 거부 (후보 3, 팀 2)', async () => {
+    const tournament = makeTournament({
+      auctionConfig: {
+        minBid: 5,
+        bidDurationSeconds: 30,
+        allowNegative: false,
+        candidates: {
+          top: ['cap1', 'cap2', 'cap3'],
+          jungle: ['j1', 'j2', 'j3'],
+          mid: ['m1', 'm2', 'm3'],
+          adc: ['a1', 'a2', 'a3'],
+          support: ['s1', 's2', 's3'],
+        },
+      },
+    });
+    const teams = [
+      makeTeam(),
+      makeTeam({ name: 'B', captainPuuid: 'cap2', members: [{ puuid: 'cap2', position: 'top' }] }),
+    ];
+    const result = await tournamentController.startAuction(tournament, teams);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('포지션별 후보 수');
+  });
+});
+
 describe('recordAuctionBid', () => {
   const defaultCandidates = () => ({
     top: ['cap1', 'cap2'],

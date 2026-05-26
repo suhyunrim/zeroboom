@@ -469,6 +469,14 @@ module.exports = (app) => {
         if (candidatePos !== members[0].position) {
           return res.status(400).json({ result: `팀장 포지션이 후보 풀(${candidatePos})과 다릅니다.` });
         }
+
+        const candidatesPerPosition = tournamentController.getCandidatesPerPosition(candidates);
+        const existingCount = await models.tournament_team.count({ where: { tournamentId: tournament.id } });
+        if (existingCount >= candidatesPerPosition) {
+          return res.status(409).json({
+            result: `이미 포지션별 후보 수(${candidatesPerPosition})만큼 팀이 등록되어 있습니다.`,
+          });
+        }
       }
 
       const puuids = members.map((m) => m.puuid);
