@@ -7,6 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 
+// 접속 정보는 scripts/.env에서 읽는다 (커맨드라인 inline env가 우선).
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const DUMP_PATH = process.env.DUMP_PATH || path.join(__dirname, '..', 'live_dump.sql');
 const HOST = process.env.DEST_HOST || '127.0.0.1';
 const PORT = Number(process.env.DEST_PORT || 3307);

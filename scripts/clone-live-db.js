@@ -7,6 +7,9 @@ const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
 
+// 접속 정보는 scripts/.env에서 읽는다 (커맨드라인 inline env가 우선).
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 // 데이터 복사 스킵 (스키마는 유지). 라이브/테섭 봇이 같은 디코 서버에 상주 → 임시 보이스 테이블 복사하면 중복 생성됨
 const SKIP_DATA_TABLES = new Set(['temp_voice_generators', 'temp_voice_channels']);
 
