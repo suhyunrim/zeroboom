@@ -67,7 +67,7 @@ const getRating = (tier) => {
   return rating + tierMultiplier * 25;
 };
 
-const registerUser = async (groupName, summonerName, tier, discordId = null) => {
+const registerUser = async (groupName, summonerName, tier, discordId = null, { asOutsider = false } = {}) => {
   if (!groupName) return { result: 'invalid group name', status: 501 };
 
   if (!summonerName) return { result: 'invalid summoner name', status: 501 };
@@ -104,6 +104,15 @@ const registerUser = async (groupName, summonerName, tier, discordId = null) => 
       );
     }
 
+    // 외부인 등록(asOutsider)은 신규 생성된 경우에만 role을 outsider로 지정한다.
+    // 이미 존재하는 row의 role은 건드리지 않아 활동 멤버가 실수로 강등되지 않게 한다.
+    const existing = asOutsider
+      ? await models.user.findOne({
+          where: { groupId: group.id, puuid: summoner.puuid },
+          attributes: ['puuid'],
+        })
+      : null;
+
     await models.user.upsert({
       encryptedAccountId: summoner.encryptedAccountId,
       puuid: summoner.puuid,
@@ -111,6 +120,13 @@ const registerUser = async (groupName, summonerName, tier, discordId = null) => 
       defaultRating: getRating(tier ? tier : summoner.rankTier),
       discordId: discordId,
     });
+
+    if (asOutsider && !existing) {
+      await models.user.update(
+        { role: 'outsider' },
+        { where: { groupId: group.id, puuid: summoner.puuid } },
+      );
+    }
 
     // 포지션 정보 수집 (비동기로 처리, 실패해도 등록은 완료)
     summonerController.getPositions(summonerName).catch((e) => {
