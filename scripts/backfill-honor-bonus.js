@@ -10,17 +10,32 @@
  * 참가자는 honor_votes의 실제 voterPuuid로 추출 (10표 달성 게임이므로
  * 참가자 10명 = 투표자 10명이 보장됨).
  */
+const path = require('path');
 const mysql = require('mysql2/promise');
+
+// 접속 정보는 scripts/.env에서 읽는다 (커맨드라인 inline env가 우선). SRC_PASSWORD 필수.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const TARGET_GAME_IDS = [1495, 1546, 1565];
 
+const HOST = process.env.SRC_HOST || '127.0.0.1';
+const PORT = Number(process.env.SRC_PORT || 3307);
+const USER = process.env.SRC_USER || 'root';
+const PASSWORD = process.env.SRC_PASSWORD;
+const DATABASE = process.env.SRC_DATABASE || 'zeroboom_bot';
+
+if (!PASSWORD) {
+  console.error('SRC_PASSWORD 환경변수가 필요합니다.');
+  process.exit(1);
+}
+
 (async () => {
   const conn = await mysql.createConnection({
-    host: '127.0.0.1',
-    port: 3307,
-    user: 'root',
-    password: 'Eroboom!23',
-    database: 'zeroboom_bot',
+    host: HOST,
+    port: PORT,
+    user: USER,
+    password: PASSWORD,
+    database: DATABASE,
   });
 
   for (const gameId of TARGET_GAME_IDS) {

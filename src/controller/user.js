@@ -355,8 +355,8 @@ const getTournamentChampionships = async (groupId, puuid) => {
       status: 'finished',
       championTeamId: { [Op.ne]: null },
     },
-    attributes: ['id', 'name', 'championTeamId', 'trophyType', 'updatedAt'],
-    order: [['updatedAt', 'DESC']],
+    attributes: ['id', 'name', 'championTeamId', 'trophyType', 'heldAt', 'updatedAt'],
+    order: [['heldAt', 'DESC'], ['id', 'DESC']],
   });
   if (finishedTournaments.length === 0) return [];
 
@@ -376,7 +376,7 @@ const getTournamentChampionships = async (groupId, puuid) => {
       tournamentName: t.name,
       teamName: champTeamById[t.championTeamId].name,
       trophyType: t.trophyType,
-      wonAt: t.updatedAt,
+      wonAt: t.heldAt || t.updatedAt,
     }));
 };
 

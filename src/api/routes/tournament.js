@@ -221,7 +221,7 @@ module.exports = (app) => {
     try {
       const list = await models.tournament.findAll({
         where: { groupId },
-        order: [['createdAt', 'DESC']],
+        order: [['heldAt', 'DESC'], ['id', 'DESC']],
       });
 
       const championIds = list.map((t) => t.championTeamId).filter((v) => v != null);
@@ -303,11 +303,14 @@ module.exports = (app) => {
   route.post('/', verifyToken, async (req, res) => {
     const {
       groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null,
-      type = tournamentController.TYPES.NORMAL, auctionConfig = null,
+      type = tournamentController.TYPES.NORMAL, auctionConfig = null, heldAt = null,
+      allowSingleTeam = false,
     } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
+    const heldAtError = tournamentController.validateHeldAt(heldAt);
+    if (heldAtError) return res.status(400).json({ result: heldAtError });
     if (!Number.isInteger(defaultBestOf) || defaultBestOf < 1 || defaultBestOf % 2 === 0) {
       return res.status(400).json({ result: 'defaultBestOf는 홀수 양의 정수여야 합니다.' });
     }
@@ -343,6 +346,9 @@ module.exports = (app) => {
         defaultBestOf,
         finalBestOf,
         trophyType,
+        heldAt,
+        // 단일팀 즉시우승은 일반 토너먼트에만 의미가 있어 경매 타입은 항상 false로 저장.
+        allowSingleTeam: type === tournamentController.TYPES.NORMAL && allowSingleTeam === true,
         type,
         auctionConfig: type === tournamentController.TYPES.AUCTION ? auctionConfig : null,
       });
@@ -353,7 +359,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, trophyType, type, auctionConfig: tournament.auctionConfig },
+        details: { tournamentId: tournament.id, name, trophyType, heldAt, allowSingleTeam: tournament.allowSingleTeam, type, auctionConfig: tournament.auctionConfig },
         source: 'web',
       });
 
@@ -468,6 +474,14 @@ module.exports = (app) => {
         }
         if (candidatePos !== members[0].position) {
           return res.status(400).json({ result: `팀장 포지션이 후보 풀(${candidatePos})과 다릅니다.` });
+        }
+
+        const candidatesPerPosition = tournamentController.getCandidatesPerPosition(candidates);
+        const existingCount = await models.tournament_team.count({ where: { tournamentId: tournament.id } });
+        if (existingCount >= candidatesPerPosition) {
+          return res.status(409).json({
+            result: `이미 포지션별 후보 수(${candidatesPerPosition})만큼 팀이 등록되어 있습니다.`,
+          });
         }
       }
 
@@ -920,6 +934,9 @@ module.exports = (app) => {
       });
       if (!tournament) return undefined;
 
+      // 생성 시 영속화된 값이 우선. (구버전 호환을 위해 body 플래그도 허용)
+      const allowSingleTeam = tournament.allowSingleTeam === true || (req.body || {}).allowSingleTeam === true;
+
       const otherActive = await models.tournament.findOne({
         where: { groupId: tournament.groupId, status: STATUS.IN_PROGRESS },
       });
@@ -929,12 +946,20 @@ module.exports = (app) => {
 
       const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
       const teamCount = teams.length;
-      if (teamCount < 2) {
+      if (teamCount < 1) {
+        return res.status(400).json({ result: '최소 1팀이 등록되어야 시작할 수 있습니다.' });
+      }
+      if (teamCount < 2 && !allowSingleTeam) {
         return res.status(400).json({ result: '최소 2팀이 등록되어야 시작할 수 있습니다.' });
       }
       const bracketSize = tournamentController.computeBracketSize(teamCount);
 
-      const slotError = tournamentController.validateSlotMapping(slotMapping, teams, bracketSize, teamCount);
+      // 단일팀(레거시 임포트)은 slotMapping을 자동 구성한다: [팀, BYE]로 즉시 우승 처리됨.
+      const effectiveSlotMapping = (allowSingleTeam && teamCount === 1)
+        ? [teams[0].id, null]
+        : slotMapping;
+
+      const slotError = tournamentController.validateSlotMapping(effectiveSlotMapping, teams, bracketSize, teamCount);
       if (slotError) return res.status(400).json({ result: slotError });
 
       await models.sequelize.transaction(async (transaction) => {
@@ -951,7 +976,7 @@ module.exports = (app) => {
         );
         await models.tournament_match.bulkCreate(matchRows, { transaction });
 
-        await tournamentController.placeTeamsAndResolveByes(tournament, slotMapping, { transaction });
+        await tournamentController.placeTeamsAndResolveByes(tournament, effectiveSlotMapping, { transaction });
       });
 
       const { discordId, actorName } = auditUser(req);
@@ -960,7 +985,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.start',
-        details: { tournamentId: tournament.id, teamCount, bracketSize, slotMapping },
+        details: { tournamentId: tournament.id, teamCount, bracketSize, slotMapping: effectiveSlotMapping, allowSingleTeam },
         source: 'web',
       });
 

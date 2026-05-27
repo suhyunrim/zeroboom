@@ -72,6 +72,10 @@ web_modules/
 .env
 .env.test
 
+# DB 덤프 및 SSH 키 (시크릿/실데이터 — 커밋 금지)
+live_dump.sql
+*.pem
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

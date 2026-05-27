@@ -107,6 +107,57 @@ module.exports = (app) => {
     }
   });
 
+  /**
+   * GET /api/group/:groupId/all-members
+   * 현역 + outsider(외부인 등록) 전원. 본캐(primaryPuuid: null)만.
+   * 레거시 토너먼트 팀원 선택처럼 외부 우승자까지 골라야 할 때 사용.
+   * 응답 형식은 active-members와 동일: [{ puuid, name, profileIconId, rankTier, rating }]
+   */
+  route.get('/:groupId/all-members', async (req, res) => {
+    const groupId = Number(req.params.groupId);
+    if (!groupId) return res.status(400).json({ result: 'groupId가 필요합니다.' });
+
+    try {
+      const users = await models.user.findAll({
+        where: {
+          groupId,
+          primaryPuuid: null,
+        },
+        attributes: ['puuid', 'discordId', 'defaultRating', 'additionalRating'],
+      });
+
+      const puuids = users.map((u) => u.puuid);
+      const summoners = puuids.length
+        ? await models.summoner.findAll({
+            where: { puuid: puuids },
+            attributes: ['puuid', 'name', 'profileIconId', 'rankTier'],
+          })
+        : [];
+      const summonerByPuuid = {};
+      summoners.forEach((s) => {
+        summonerByPuuid[s.puuid] = s;
+      });
+
+      const result = users
+        .map((u) => {
+          const s = summonerByPuuid[u.puuid];
+          return {
+            puuid: u.puuid,
+            name: s ? s.name : null,
+            profileIconId: s ? s.profileIconId : null,
+            rankTier: s ? s.rankTier : null,
+            rating: (u.defaultRating || 0) + (u.additionalRating || 0),
+          };
+        })
+        .filter((m) => m.name);
+
+      return res.status(200).json({ result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
   // 방 이름 변경
   route.patch('/:groupId/name', verifyToken, requireGroupAdmin, async (req, res) => {
     const { groupName } = req.body;

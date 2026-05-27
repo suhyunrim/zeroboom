@@ -46,6 +46,15 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(50),
         allowNull: true,
       },
+      heldAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      allowSingleTeam: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       type: {
         type: DataTypes.STRING(20),
         allowNull: false,
