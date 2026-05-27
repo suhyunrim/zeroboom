@@ -304,6 +304,7 @@ module.exports = (app) => {
     const {
       groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null,
       type = tournamentController.TYPES.NORMAL, auctionConfig = null, heldAt = null,
+      allowSingleTeam = false,
     } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
@@ -346,6 +347,8 @@ module.exports = (app) => {
         finalBestOf,
         trophyType,
         heldAt,
+        // 단일팀 즉시우승은 일반 토너먼트에만 의미가 있어 경매 타입은 항상 false로 저장.
+        allowSingleTeam: type === tournamentController.TYPES.NORMAL && allowSingleTeam === true,
         type,
         auctionConfig: type === tournamentController.TYPES.AUCTION ? auctionConfig : null,
       });
@@ -356,7 +359,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, trophyType, heldAt, type, auctionConfig: tournament.auctionConfig },
+        details: { tournamentId: tournament.id, name, trophyType, heldAt, allowSingleTeam: tournament.allowSingleTeam, type, auctionConfig: tournament.auctionConfig },
         source: 'web',
       });
 
@@ -924,13 +927,15 @@ module.exports = (app) => {
 
   route.post('/:id/start', verifyToken, async (req, res) => {
     const { slotMapping } = req.body || {};
-    const allowSingleTeam = (req.body || {}).allowSingleTeam === true;
     try {
       const tournament = await loadTournamentForAdmin(req, res, {
         requireStatus: STATUS.PREPARING,
         statusError: '준비중인 토너먼트만 시작할 수 있습니다.',
       });
       if (!tournament) return undefined;
+
+      // 생성 시 영속화된 값이 우선. (구버전 호환을 위해 body 플래그도 허용)
+      const allowSingleTeam = tournament.allowSingleTeam === true || (req.body || {}).allowSingleTeam === true;
 
       const otherActive = await models.tournament.findOne({
         where: { groupId: tournament.groupId, status: STATUS.IN_PROGRESS },
