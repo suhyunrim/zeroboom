@@ -5,6 +5,8 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const tournamentController = require('../../controller/tournament');
 const honorController = require('../../controller/honor');
+const userController = require('../../controller/user');
+const auctionScout = require('../../services/auction-scout');
 const { extractTopAchievementsPerCategory } = require('../../services/achievement/topPerCategory');
 
 const { STATUS } = tournamentController;
@@ -79,12 +81,15 @@ const enrichMatchesWithHeadToHead = (matches, scrims) => {
   });
 };
 
-// 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예)를 모아 반환.
+// 매물 카드에 보여줄 천생연분/톰과제리 인원 수
+const SCOUT_TOP_N = 3;
+
+// 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예/트로피/스카우팅)를 모아 반환.
 const buildCandidateDetail = async (tournament, puuid) => {
   if (!puuid) return null;
   const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
   const position = tournamentController.findCandidatePosition(candidates, puuid);
-  const [summoner, user, achievementsRaw, honorStats] = await Promise.all([
+  const [summoner, user, achievementsRaw, honorStats, championships, scoutMap] = await Promise.all([
     models.summoner.findOne({
       where: { puuid },
       attributes: ['puuid', 'name', 'profileIconId', 'rankTier', 'rankWin', 'rankLose', 'mainPosition'],
@@ -99,7 +104,31 @@ const buildCandidateDetail = async (tournament, puuid) => {
       raw: true,
     }),
     honorController.getHonorStats(tournament.groupId, puuid),
+    userController.getTournamentChampionships(tournament.groupId, puuid),
+    // 스카우트(천생연분/톰과제리)는 그룹 전체 매치 스캔이라 실패/지연 위험이 커서 격리한다.
+    // 실패해도 매물 상세 전체가 깨지지 않도록 빈 맵으로 폴백.
+    auctionScout.getScoutMap(tournament.groupId).catch(() => ({})),
   ]);
+
+  // 천생연분/톰과제리 상위 N명 추출 + 상대 puuid 이름 보강
+  const scout = scoutMap[puuid] || { soulmates: [], nemeses: [] };
+  const soulmates = scout.soulmates.slice(0, SCOUT_TOP_N);
+  const nemeses = scout.nemeses.slice(0, SCOUT_TOP_N);
+  const partnerPuuids = [...new Set([...soulmates, ...nemeses].map((s) => s.puuid))];
+  const partnerSummoners = partnerPuuids.length
+    ? await models.summoner.findAll({
+        where: { puuid: partnerPuuids },
+        attributes: ['puuid', 'name', 'profileIconId'],
+      })
+    : [];
+  const partnerInfo = {};
+  partnerSummoners.forEach((s) => { partnerInfo[s.puuid] = { name: s.name, profileIconId: s.profileIconId }; });
+  const withName = (arr) => arr.map((x) => ({
+    ...x,
+    name: partnerInfo[x.puuid] ? partnerInfo[x.puuid].name : null,
+    profileIconId: partnerInfo[x.puuid] ? partnerInfo[x.puuid].profileIconId : null,
+  }));
+
   return {
     puuid,
     position,
@@ -114,6 +143,9 @@ const buildCandidateDetail = async (tournament, puuid) => {
     lose: user ? user.lose : null,
     achievements: extractTopAchievementsPerCategory(achievementsRaw),
     honor: honorStats,
+    tournamentChampionships: championships,
+    soulmates: withName(soulmates),
+    nemeses: withName(nemeses),
   };
 };
 
@@ -635,6 +667,9 @@ module.exports = (app) => {
       });
       if (!result.ok) return res.status(400).json({ result: result.error });
 
+      // 매물 스카우팅(천생연분/톰과제리) 캐시를 백그라운드로 미리 데운다. 응답을 막지 않음.
+      auctionScout.warmScoutMap(tournament.groupId);
+
       const { discordId, actorName } = auditUser(req);
       auditLog.log({
         groupId: tournament.groupId,
@@ -830,6 +865,44 @@ module.exports = (app) => {
           puuid: tournament.currentAuctionPuuid,
           deadline: result.deadline,
           durationSeconds: result.durationSeconds,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 시간 종료: 진행 중인 입찰을 즉시 마감(deadline을 현재 시각으로 만료)
+  route.post('/:id/auction/end-bid', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.endBidTimer(tournament, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_end_bid',
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, deadline: result.deadline },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:bid-end', {
+          tournamentId: tournament.id,
+          puuid: tournament.currentAuctionPuuid,
+          deadline: result.deadline,
         });
       }
 

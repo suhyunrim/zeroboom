@@ -1525,6 +1525,47 @@ describe('extendBidTimer', () => {
   });
 });
 
+describe('endBidTimer', () => {
+  const baseTournament = () => ({
+    status: 'auction',
+    currentAuctionPuuid: 'm1',
+    currentAuctionDeadline: new Date(Date.now() + 5000),
+    save: jest.fn(),
+  });
+
+  test('정상 마감: deadline을 현재 시각으로 만료', async () => {
+    const tournament = baseTournament();
+    const after = Date.now();
+    const result = await tournamentController.endBidTimer(tournament);
+    expect(result.ok).toBe(true);
+    expect(tournament.currentAuctionDeadline.getTime()).toBeLessThanOrEqual(after + 1000);
+    // 매물은 유지
+    expect(tournament.currentAuctionPuuid).toBe('m1');
+    expect(tournament.save).toHaveBeenCalled();
+  });
+
+  test('진행 중인 입찰이 없으면(deadline null) 거부', async () => {
+    const tournament = { ...baseTournament(), currentAuctionDeadline: null };
+    const result = await tournamentController.endBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('진행 중인 입찰이 없습니다');
+  });
+
+  test('이미 만료된(deadline 과거) 입찰이면 거부', async () => {
+    const tournament = { ...baseTournament(), currentAuctionDeadline: new Date(Date.now() - 1000) };
+    const result = await tournamentController.endBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('진행 중인 입찰이 없습니다');
+  });
+
+  test('경매 단계가 아니면 거부', async () => {
+    const tournament = { ...baseTournament(), status: 'preparing' };
+    const result = await tournamentController.endBidTimer(tournament);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('경매 단계');
+  });
+});
+
 describe('recordAuctionBid currentAuction 자동 클리어', () => {
   test('낙찰 puuid가 currentAuctionPuuid와 같으면 클리어', async () => {
     const tournament = {

@@ -380,6 +380,23 @@ const getTournamentChampionships = async (groupId, puuid) => {
     }));
 };
 
+module.exports.getTournamentChampionships = getTournamentChampionships;
+
+// championStats({ [championName]: { games, wins } })에서 많이 한 순으로 top N 추출
+const MOST_CHAMPIONS_COUNT = 5;
+const topChampions = (championStats, count = MOST_CHAMPIONS_COUNT) => {
+  if (!championStats || typeof championStats !== 'object') return [];
+  return Object.entries(championStats)
+    .map(([championName, s]) => ({
+      championName,
+      games: s.games || 0,
+      wins: s.wins || 0,
+      winRate: s.games ? Math.round((s.wins / s.games) * 100) : 0,
+    }))
+    .sort((a, b) => b.games - a.games)
+    .slice(0, count);
+};
+
 module.exports.getInfo = async (groupId, puuid) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
   if (!puuid) return { result: 'invalid puuid', status: 501 };
@@ -456,6 +473,9 @@ module.exports.getInfo = async (groupId, puuid) => {
     // 토너먼트 우승 트로피
     const tournamentChampionships = await getTournamentChampionships(groupId, puuid);
 
+    // 솔랭 모스트 챔피언
+    const mostChampions = topChampions(summonerInfo.championStats);
+
     return {
       result: {
         userInfo,
@@ -465,6 +485,7 @@ module.exports.getInfo = async (groupId, puuid) => {
         subAccount,
         statusMessage,
         tournamentChampionships,
+        mostChampions,
       },
       status: 200,
     };
