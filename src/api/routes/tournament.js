@@ -92,7 +92,7 @@ const buildCandidateDetail = async (tournament, puuid) => {
   const [summoner, user, achievementsRaw, honorStats, championships, scoutMap] = await Promise.all([
     models.summoner.findOne({
       where: { puuid },
-      attributes: ['puuid', 'name', 'profileIconId', 'rankTier', 'rankWin', 'rankLose', 'mainPosition'],
+      attributes: ['puuid', 'name', 'profileIconId', 'rankTier', 'rankWin', 'rankLose', 'mainPosition', 'championStats'],
     }),
     models.user.findOne({
       where: { puuid, groupId: tournament.groupId },
@@ -144,6 +144,7 @@ const buildCandidateDetail = async (tournament, puuid) => {
     achievements: extractTopAchievementsPerCategory(achievementsRaw),
     honor: honorStats,
     tournamentChampionships: championships,
+    mostChampions: userController.topChampions(summoner ? summoner.championStats : null, SCOUT_TOP_N),
     soulmates: withName(soulmates),
     nemeses: withName(nemeses),
   };
