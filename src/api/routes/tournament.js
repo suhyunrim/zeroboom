@@ -105,7 +105,9 @@ const buildCandidateDetail = async (tournament, puuid) => {
     }),
     honorController.getHonorStats(tournament.groupId, puuid),
     userController.getTournamentChampionships(tournament.groupId, puuid),
-    auctionScout.getScoutMap(tournament.groupId),
+    // 스카우트(천생연분/톰과제리)는 그룹 전체 매치 스캔이라 실패/지연 위험이 커서 격리한다.
+    // 실패해도 매물 상세 전체가 깨지지 않도록 빈 맵으로 폴백.
+    auctionScout.getScoutMap(tournament.groupId).catch(() => ({})),
   ]);
 
   // 천생연분/톰과제리 상위 N명 추출 + 상대 puuid 이름 보강

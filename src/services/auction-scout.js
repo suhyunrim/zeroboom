@@ -27,8 +27,14 @@ const computeScout = (matchRows, outsiderSet = new Set()) => {
   };
 
   for (const m of matchRows) {
-    const t1 = JSON.parse(m.team1).map((p) => p[0]);
-    const t2 = JSON.parse(m.team2).map((p) => p[0]);
+    let t1;
+    let t2;
+    try {
+      t1 = JSON.parse(m.team1).map((p) => p[0]);
+      t2 = JSON.parse(m.team2).map((p) => p[0]);
+    } catch (e) {
+      continue; // 손상된 매치 행(null/깨진 JSON)은 건너뛴다 — 한 행이 전체 집계를 깨지 않도록
+    }
     const w = m.winTeam;
 
     const within = (team, won) => {
