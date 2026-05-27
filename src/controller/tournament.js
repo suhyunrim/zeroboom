@@ -865,6 +865,21 @@ const extendBidTimer = async (tournament, options = {}) => {
   return { ok: true, deadline, durationSeconds: duration };
 };
 
+// 입찰 즉시 마감: 진행 중인 입찰의 deadline을 현재 시각으로 만료시킨다.
+// 매물(currentAuctionPuuid)은 유지하고, 시간만 끝내 낙찰 단계로 넘긴다.
+const endBidTimer = async (tournament, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if (!tournament.currentAuctionDeadline || new Date(tournament.currentAuctionDeadline) <= new Date()) {
+    return { ok: false, error: '진행 중인 입찰이 없습니다.' };
+  }
+  const deadline = new Date();
+  tournament.currentAuctionDeadline = deadline;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true, deadline };
+};
+
 const clearCurrentAuction = async (tournament, options = {}) => {
   tournament.currentAuctionPuuid = null;
   tournament.currentAuctionDeadline = null;
@@ -908,6 +923,7 @@ module.exports = {
   setCurrentAuction,
   startBidTimer,
   extendBidTimer,
+  endBidTimer,
   clearCurrentAuction,
   computeBracketSize,
   getWinningScore,

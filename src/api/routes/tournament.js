@@ -841,6 +841,44 @@ module.exports = (app) => {
     }
   });
 
+  // 시간 종료: 진행 중인 입찰을 즉시 마감(deadline을 현재 시각으로 만료)
+  route.post('/:id/auction/end-bid', verifyToken, async (req, res) => {
+    try {
+      const tournament = await loadTournamentForAdmin(req, res);
+      if (!tournament) return undefined;
+
+      const result = await models.sequelize.transaction(async (transaction) => {
+        return tournamentController.endBidTimer(tournament, { transaction });
+      });
+      if (!result.ok) return res.status(400).json({ result: result.error });
+
+      const { discordId, actorName } = auditUser(req);
+      auditLog.log({
+        groupId: tournament.groupId,
+        actorDiscordId: discordId,
+        actorName,
+        action: 'tournament.auction_end_bid',
+        details: { tournamentId: tournament.id, puuid: tournament.currentAuctionPuuid, deadline: result.deadline },
+        source: 'web',
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`tournament:${tournament.id}`).emit('auction:bid-end', {
+          tournamentId: tournament.id,
+          puuid: tournament.currentAuctionPuuid,
+          deadline: result.deadline,
+        });
+      }
+
+      const detail = await buildDetail(tournament);
+      return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
   // 경매 입찰 취소: 잘못 낙찰한 경우 되돌리기
   route.delete('/:id/auction/bid', verifyToken, async (req, res) => {
     const { teamId, puuid } = req.body || {};
