@@ -223,6 +223,9 @@ module.exports.getPositions = async (name, options = {}) => {
       lastMatchId: null,
     };
 
+    // 챔피언 집계 (lastMatchId 커서는 positionStats와 공유 → 같은 매치 집합으로 동기화)
+    const championStats = found.championStats || {};
+
     // lastMatchId 이후의 새 매치만 필터링
     let newMatchIds = matchIds;
     if (positionStats.lastMatchId) {
@@ -244,7 +247,18 @@ module.exports.getPositions = async (name, options = {}) => {
       try {
         const matchData = await retryWithBackoff(() => getMatchData(newMatchIds[i]));
         const summonerData = matchData.info.participants.find((elem) => elem.puuid == found.puuid);
-        if (!summonerData || !summonerData.teamPosition)
+        if (!summonerData)
+          continue;
+
+        // 챔피언 카운트 (teamPosition 유무와 무관하게 같은 매치 응답에서 집계)
+        if (summonerData.championName) {
+          const champ = summonerData.championName;
+          if (!championStats[champ]) championStats[champ] = { games: 0, wins: 0 };
+          championStats[champ].games++;
+          if (summonerData.win) championStats[champ].wins++;
+        }
+
+        if (!summonerData.teamPosition)
           continue;
 
         const position = summonerData.teamPosition.toLowerCase();
@@ -298,6 +312,7 @@ module.exports.getPositions = async (name, options = {}) => {
       subPosition: sorted[1][0] || null,
       subPositionRate: subPositionRate,
       positionStats: positionStats,
+      championStats: championStats,
       positionUpdatedAt: moment(),
     };
 

@@ -63,6 +63,9 @@ module.exports = (sequelize, DataTypes) => {
       positionStats: {
         type: DataTypes.JSON,
       },
+      championStats: {
+        type: DataTypes.JSON,
+      },
     },
     {},
   );
