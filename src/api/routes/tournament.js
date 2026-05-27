@@ -5,6 +5,8 @@ const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const tournamentController = require('../../controller/tournament');
 const honorController = require('../../controller/honor');
+const userController = require('../../controller/user');
+const auctionScout = require('../../services/auction-scout');
 const { extractTopAchievementsPerCategory } = require('../../services/achievement/topPerCategory');
 
 const { STATUS } = tournamentController;
@@ -79,12 +81,15 @@ const enrichMatchesWithHeadToHead = (matches, scrims) => {
   });
 };
 
-// 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예)를 모아 반환.
+// 매물 카드에 보여줄 천생연분/톰과제리 인원 수
+const SCOUT_TOP_N = 3;
+
+// 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예/트로피/스카우팅)를 모아 반환.
 const buildCandidateDetail = async (tournament, puuid) => {
   if (!puuid) return null;
   const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
   const position = tournamentController.findCandidatePosition(candidates, puuid);
-  const [summoner, user, achievementsRaw, honorStats] = await Promise.all([
+  const [summoner, user, achievementsRaw, honorStats, championships, scoutMap] = await Promise.all([
     models.summoner.findOne({
       where: { puuid },
       attributes: ['puuid', 'name', 'profileIconId', 'rankTier', 'rankWin', 'rankLose', 'mainPosition'],
@@ -99,7 +104,29 @@ const buildCandidateDetail = async (tournament, puuid) => {
       raw: true,
     }),
     honorController.getHonorStats(tournament.groupId, puuid),
+    userController.getTournamentChampionships(tournament.groupId, puuid),
+    auctionScout.getScoutMap(tournament.groupId),
   ]);
+
+  // 천생연분/톰과제리 상위 N명 추출 + 상대 puuid 이름 보강
+  const scout = scoutMap[puuid] || { soulmates: [], nemeses: [] };
+  const soulmates = scout.soulmates.slice(0, SCOUT_TOP_N);
+  const nemeses = scout.nemeses.slice(0, SCOUT_TOP_N);
+  const partnerPuuids = [...new Set([...soulmates, ...nemeses].map((s) => s.puuid))];
+  const partnerSummoners = partnerPuuids.length
+    ? await models.summoner.findAll({
+        where: { puuid: partnerPuuids },
+        attributes: ['puuid', 'name', 'profileIconId'],
+      })
+    : [];
+  const partnerInfo = {};
+  partnerSummoners.forEach((s) => { partnerInfo[s.puuid] = { name: s.name, profileIconId: s.profileIconId }; });
+  const withName = (arr) => arr.map((x) => ({
+    ...x,
+    name: partnerInfo[x.puuid] ? partnerInfo[x.puuid].name : null,
+    profileIconId: partnerInfo[x.puuid] ? partnerInfo[x.puuid].profileIconId : null,
+  }));
+
   return {
     puuid,
     position,
@@ -114,6 +141,9 @@ const buildCandidateDetail = async (tournament, puuid) => {
     lose: user ? user.lose : null,
     achievements: extractTopAchievementsPerCategory(achievementsRaw),
     honor: honorStats,
+    tournamentChampionships: championships,
+    soulmates: withName(soulmates),
+    nemeses: withName(nemeses),
   };
 };
 
@@ -634,6 +664,9 @@ module.exports = (app) => {
         return tournamentController.startAuction(tournament, teams, { transaction });
       });
       if (!result.ok) return res.status(400).json({ result: result.error });
+
+      // 매물 스카우팅(천생연분/톰과제리) 캐시를 백그라운드로 미리 데운다. 응답을 막지 않음.
+      auctionScout.warmScoutMap(tournament.groupId);
 
       const { discordId, actorName } = auditUser(req);
       auditLog.log({

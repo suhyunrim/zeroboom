@@ -380,6 +380,8 @@ const getTournamentChampionships = async (groupId, puuid) => {
     }));
 };
 
+module.exports.getTournamentChampionships = getTournamentChampionships;
+
 module.exports.getInfo = async (groupId, puuid) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
   if (!puuid) return { result: 'invalid puuid', status: 501 };
