@@ -397,6 +397,8 @@ const topChampions = (championStats, count = MOST_CHAMPIONS_COUNT) => {
     .slice(0, count);
 };
 
+module.exports.topChampions = topChampions;
+
 module.exports.getInfo = async (groupId, puuid) => {
   if (!groupId) return { result: 'invalid groupId', status: 501 };
   if (!puuid) return { result: 'invalid puuid', status: 501 };

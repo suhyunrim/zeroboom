@@ -18,8 +18,11 @@ const SOLO_RANKED_QUEUE = 420;
 const DEPTH = Number(process.env.DEPTH || 200); // 긁을 최신 솔랭 판 수
 const TARGET = Number(process.env.TARGET || 100); // 이 판수 이상이면 스킵
 const WITHIN_DAYS = Number(process.env.WITHIN_DAYS || 30);
-const MATCH_DELAY_MS = Number(process.env.MATCH_DELAY_MS || 1300);
-const SUMMONER_DELAY_MS = Number(process.env.SUMMONER_DELAY_MS || 1500);
+// 라이브 봇과 Riot 키를 공유하므로 보수적으로(기존 코드 기준 최대치):
+//  - 매치 간 2000ms: challenge.js 대량 동기화의 sleep(2000)
+//  - 유저 간 3000ms: summoner.js 배치 delayBetweenSummoners 기본값
+const MATCH_DELAY_MS = Number(process.env.MATCH_DELAY_MS || 2000);
+const SUMMONER_DELAY_MS = Number(process.env.SUMMONER_DELAY_MS || 3000);
 const FORCE = process.env.FORCE === '1';
 const LIMIT = process.env.LIMIT ? Number(process.env.LIMIT) : null;
 
