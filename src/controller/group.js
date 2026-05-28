@@ -88,6 +88,7 @@ module.exports.getRanking = async (groupName) => {
     where: {
       groupId: group.id,
       role: { [Op.ne]: 'outsider' },
+      leftGuildAt: null,
       latestMatchDate: {
         [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
       }

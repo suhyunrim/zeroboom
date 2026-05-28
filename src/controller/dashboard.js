@@ -284,6 +284,7 @@ module.exports.getDashboardStats = async (groupId, month) => {
       where: {
         groupId,
         role: { [Op.ne]: 'outsider' },
+        leftGuildAt: null,
         firstMatchDate: { [Op.gte]: threeWeeksAgo },
       },
       attributes: ['puuid', 'firstMatchDate'],
