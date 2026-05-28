@@ -83,6 +83,8 @@ const enrichMatchesWithHeadToHead = (matches, scrims) => {
 
 // 매물 카드에 보여줄 천생연분/톰과제리 인원 수
 const SCOUT_TOP_N = 3;
+// 매물 카드에 보여줄 솔랭 모스트 챔피언 수 (천생연분/톰과제리보다 조금 더 풍부하게)
+const MOST_CHAMPIONS_TOP_N = 5;
 
 // 경매 진행 중 현재 매물 후보의 풍부한 정보(내전 티어/솔랭/승패/업적/명예/트로피/스카우팅)를 모아 반환.
 const buildCandidateDetail = async (tournament, puuid) => {
@@ -144,7 +146,7 @@ const buildCandidateDetail = async (tournament, puuid) => {
     achievements: extractTopAchievementsPerCategory(achievementsRaw),
     honor: honorStats,
     tournamentChampionships: championships,
-    mostChampions: userController.topChampions(summoner ? summoner.championStats : null, SCOUT_TOP_N),
+    mostChampions: userController.topChampions(summoner ? summoner.championStats : null, MOST_CHAMPIONS_TOP_N),
     soulmates: withName(soulmates),
     nemeses: withName(nemeses),
   };
