@@ -31,7 +31,7 @@ const CATEGORY_TO_STAT = {
 
 async function getActiveMembers(groupId) {
   return models.user.findAll({
-    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' }, leftGuildAt: null },
     attributes: ['puuid', 'discordId'],
     raw: true,
   });
@@ -208,7 +208,7 @@ async function getCategoryAchievements(groupId, category) {
 
 async function getUserRanking(groupId) {
   const activeMembers = await models.user.findAll({
-    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' }, leftGuildAt: null },
     attributes: ['puuid', 'createdAt'],
     raw: true,
   });

@@ -80,7 +80,7 @@ module.exports.invalidateLeaderboardCache = async (groupId) => {
  */
 async function getGroupMainMembers(groupId) {
   return models.user.findAll({
-    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+    where: { groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' }, leftGuildAt: null },
     attributes: ['puuid'],
   });
 }
@@ -943,7 +943,7 @@ module.exports.syncAllActiveChallenges = async () => {
     for (const challenge of challenges) {
       // 그룹 전체 유저 (본캐만)
       const groupUsers = await models.user.findAll({
-        where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' } },
+        where: { groupId: challenge.groupId, primaryPuuid: null, role: { [Op.ne]: 'outsider' }, leftGuildAt: null },
         attributes: ['puuid'],
       });
       const groupPuuids = groupUsers.map((u) => u.puuid);

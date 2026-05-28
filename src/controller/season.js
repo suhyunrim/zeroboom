@@ -57,7 +57,7 @@ module.exports.resetSeason = async (groupId, actorDiscordId, actorName) => {
     // 시즌 종료 알림 발송 (전 유저, 최종 레이팅 + 순위 포함)
     try {
       const ranked = users
-        .filter((u) => u.role !== 'outsider' && u.discordId)
+        .filter((u) => u.role !== 'outsider' && u.discordId && !u.leftGuildAt)
         .map((u) => ({
           discordId: u.discordId,
           puuid: u.puuid,

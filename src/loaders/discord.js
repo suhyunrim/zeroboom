@@ -1502,7 +1502,24 @@ module.exports = async (app) => {
           },
         },
       );
-      logger.info(`서버 탈퇴 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}`);
+
+      // 본캐가 admin이면 일반 member로 강등 — 서버에서 나갔으니 관리자 권한 박탈
+      const [adminDemoted] = await models.user.update(
+        { role: 'member' },
+        { where: { groupId: group.id, puuid: main.puuid, role: 'admin' } },
+      );
+      if (adminDemoted > 0) {
+        auditLog.log({
+          groupId: group.id,
+          actorDiscordId: null,
+          actorName: 'system(guildMemberRemove)',
+          action: 'user.role_demote_on_leave',
+          details: { puuid: main.puuid, discordId: member.id, before: 'admin', after: 'member' },
+          source: 'discord',
+        });
+      }
+
+      logger.info(`서버 탈퇴 감지: ${member.displayName} (${member.id}) - 그룹 ${group.id}${adminDemoted > 0 ? ' (admin 강등)' : ''}`);
     } catch (e) {
       logger.error('서버 탈퇴 처리 오류:', e);
     }
