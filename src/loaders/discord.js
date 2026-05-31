@@ -24,6 +24,7 @@ const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
 const auditLog = require('../controller/audit-log');
 const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
+const { withLock } = require('../utils/keyed-mutex');
 const {
   startOnboarding,
   handleOnboardSelectMenu,
@@ -616,21 +617,30 @@ module.exports = async (app) => {
       // cancelMatch 버튼 체크 (승/패 취소)
       if (split[0] === 'cancelMatch') {
         const gameId = Number(split[1]);
-        const matchData = await models.match.findOne({ where: { gameId } });
-        if (!matchData) {
+
+        // 승패확정과 같은 gameId 락으로 직렬화 (확정/취소 동시 실행 시 레이팅 꼬임 방지)
+        const locked = await withLock(gameId, async () => {
+          const matchData = await models.match.findOne({ where: { gameId } });
+          if (!matchData) return { error: 'notfound' };
+          const previousWinTeam = matchData.winTeam;
+          if (!previousWinTeam) return { error: 'notset' };
+
+          // 투표 세션 및 DB 데이터 삭제
+          honorVoteSessions.delete(gameId);
+          await Promise.all([honorController.deleteVotesByGameId(gameId), matchData.update({ winTeam: null })]);
+          await matchController.applyMatchResult(gameId, previousWinTeam);
+          return { previousWinTeam };
+        });
+
+        if (locked.error === 'notfound') {
           await interaction.reply({ content: '매치 데이터를 찾을 수 없습니다.', ephemeral: true });
           return;
         }
-        const previousWinTeam = matchData.winTeam;
-        if (!previousWinTeam) {
+        if (locked.error === 'notset') {
           await interaction.reply({ content: '이미 승/패가 설정되지 않은 상태입니다.', ephemeral: true });
           return;
         }
-
-        // 투표 세션 및 DB 데이터 삭제
-        honorVoteSessions.delete(gameId);
-        await Promise.all([honorController.deleteVotesByGameId(gameId), matchData.update({ winTeam: null })]);
-        await matchController.applyMatchResult(gameId, previousWinTeam);
+        const previousWinTeam = locked.previousWinTeam;
 
         const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
         auditLog
@@ -729,13 +739,28 @@ module.exports = async (app) => {
         const group = await models.group.findOne({
           where: { discordGuildId: interaction.guildId },
         });
-        const matchData = await models.match.findOne({
-          where: { gameId: Number(split[1]) },
-        });
-        const previousWinTeam = matchData.winTeam; // 이전 승리팀 저장 (되돌리기용)
+        const gameId = Number(split[1]);
         const winTeam = Number(split[2]);
-        await matchData.update({ winTeam });
-        const matchResult = await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
+
+        // 같은 매치 동시 확정(더블클릭) 시 read-modify-write 인터리브로 레이팅이 유실되던 문제 방지:
+        // gameId 단위로 직렬화하고, 이미 같은 결과로 확정돼 있으면 재적용하지 않는다.
+        const locked = await withLock(gameId, async () => {
+          const matchData = await models.match.findOne({ where: { gameId } });
+          const previousWinTeam = matchData.winTeam; // 이전 승리팀 저장 (되돌리기용)
+          if (previousWinTeam === winTeam) {
+            return { matchData, previousWinTeam, alreadyConfirmed: true };
+          }
+          await matchData.update({ winTeam });
+          const matchResult = await matchController.applyMatchResult(matchData.gameId, previousWinTeam);
+          return { matchData, previousWinTeam, matchResult, alreadyConfirmed: false };
+        });
+
+        if (locked.alreadyConfirmed) {
+          await interaction.reply({ content: '이미 처리된 매치입니다.', ephemeral: true });
+          return;
+        }
+
+        const { matchData, previousWinTeam, matchResult } = locked;
         const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
 
         auditLog
