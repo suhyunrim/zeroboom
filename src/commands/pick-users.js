@@ -12,6 +12,8 @@ const {
   executePick,
   buildPositionUI,
   buildUserEditUI,
+  buildBulkPositionText,
+  parseBulkPositionInput,
   createReactButtonHandler,
 } = utils;
 
@@ -56,6 +58,8 @@ exports.handleToggle = handleToggle;
 exports.executePick = executePick;
 exports.buildPositionUI = buildPositionUI;
 exports.buildUserEditUI = buildUserEditUI;
+exports.buildBulkPositionText = buildBulkPositionText;
+exports.parseBulkPositionInput = parseBulkPositionInput;
 
 exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 

@@ -345,6 +345,10 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
       .setLabel('🤖 자동 포지션 배치')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
+      .setCustomId(`posBulkEdit|${timeKey}`)
+      .setLabel('✏️ 일괄 수정')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
       .setLabel('🎮 매칭 생성')
       .setStyle(ButtonStyle.Success),
@@ -401,6 +405,62 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
     ],
     ephemeral: true,
   };
+};
+
+// 일괄 수정 모달 파싱용 유효 토큰
+const VALID_TEAMS = ['1팀', '2팀', '랜덤팀'];
+const VALID_POSITIONS = ['탑', '정글', '미드', '원딜', '서폿', '상관X'];
+
+/**
+ * 일괄 수정 모달 prefill 텍스트 생성 (positionData → 문자열)
+ * 각 줄: "{번호}. {닉네임} | {팀} {포지션}"
+ */
+const buildBulkPositionText = (pickedUsers, positionData) => {
+  return pickedUsers
+    .map((nickname, i) => {
+      const d = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+      return `${i + 1}. ${nickname} | ${d.team} ${d.position}`;
+    })
+    .join('\n');
+};
+
+/**
+ * 일괄 수정 모달 제출 텍스트 파싱 (문자열 → positionData)
+ * - 줄 맨 앞 번호로 유저를 식별하므로 닉네임을 고쳐도 안전하다.
+ * - "|" 오른쪽(없으면 줄 전체)에서 팀/포지션 토큰을 인식, 못 찾으면 랜덤팀/상관X.
+ */
+const parseBulkPositionInput = (text, pickedUsers) => {
+  const positionData = {};
+  pickedUsers.forEach((nickname) => {
+    positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+  });
+
+  (text || '').split('\n').forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    // 맨 앞 번호 추출 (예: "3. ..." 또는 "3) ..." → 3)
+    const numMatch = line.match(/^(\d+)\s*[.)]/);
+    if (!numMatch) return;
+    const nickname = pickedUsers[Number(numMatch[1]) - 1];
+    if (!nickname) return;
+
+    const rest = line.includes('|') ? line.slice(line.indexOf('|') + 1) : line;
+    let team = null;
+    let position = null;
+    rest.split(/\s+/).forEach((tok) => {
+      const t = tok.trim();
+      if (!t) return;
+      if (t === '랜덤' || t === '랜덤팀') team = '랜덤팀';
+      else if (VALID_TEAMS.includes(t)) team = t;
+      else if (t === '자유' || t === '상관없음') position = '상관X';
+      else if (VALID_POSITIONS.includes(t)) position = t;
+    });
+
+    positionData[nickname] = { team: team || '랜덤팀', position: position || '상관X' };
+  });
+
+  return positionData;
 };
 
 /**
@@ -885,6 +945,8 @@ module.exports = {
   buildToggleMessage,
   buildPositionUI,
   buildUserEditUI,
+  buildBulkPositionText,
+  parseBulkPositionInput,
 
   // 데이터 빌더
   buildFakeOptions,

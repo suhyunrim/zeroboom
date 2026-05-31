@@ -508,6 +508,36 @@ module.exports = async (app) => {
         return;
       }
 
+      // posBulkEdit 버튼 (텍스트 일괄 수정 모달 열기)
+      if (split[0] === 'posBulkEdit') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const prefill = pickUsersCommand.buildBulkPositionText(data.pickedUsers, data.positionData);
+
+        const input = new TextInputBuilder()
+          .setCustomId('assignments')
+          .setLabel('번호·| 유지, 팀/포지션만 수정')
+          .setStyle(TextInputStyle.Paragraph)
+          .setValue(prefill)
+          .setRequired(true);
+
+        const modal = new ModalBuilder()
+          .setCustomId(`posBulkModal|${timeKey}`)
+          .setTitle('포지션 일괄 수정')
+          .addComponents(new ActionRowBuilder().addComponents(input));
+
+        await interaction.showModal(modal);
+        return;
+      }
+
       // posEditUser 버튼 (유저별 설정 버튼, customId에 인덱스 사용)
       if (split[0] === 'posEditUser') {
         const timeKey = split[1];
@@ -1473,6 +1503,32 @@ module.exports = async (app) => {
       const split = interaction.customId.split('|');
       if (split[0] === 'onboard' || split[0] === 'onboardTest') {
         await handleOnboardModalSubmit(interaction, client);
+        return;
+      }
+
+      // posBulkModal 제출 (포지션 일괄 수정)
+      if (split[0] === 'posBulkModal') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const text = interaction.fields.getTextInputValue('assignments');
+        const commandList = await commandListLoader();
+        const pickUsersCommand = commandList.get('인원뽑기');
+        data.positionData = pickUsersCommand.parseBulkPositionInput(text, data.pickedUsers);
+        pickUsersData.set(timeKey, data);
+
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        if (data.mainMessage) {
+          await data.mainMessage.edit(mainUI);
+          await interaction.reply({ content: '✅ 포지션을 일괄 반영했습니다.', ephemeral: true });
+        } else {
+          await interaction.update(mainUI);
+        }
         return;
       }
     } catch (e) {
