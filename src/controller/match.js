@@ -12,6 +12,7 @@ const ratingCalculator = new elo(16);
 const matchMaker = require('../match-maker/match-maker');
 const User = require('../entity/user').User;
 const { formatTier } = require('../utils/tierUtils');
+const { withLock } = require('../utils/keyed-mutex');
 const {
   getKSTHours, isWeekendTime, isWeekdayTime, getKSTDateKey, kstDayKeyDiff,
 } = require('../utils/timeUtils');
@@ -651,23 +652,26 @@ module.exports.cancelMatch = async (groupId, matchId) => {
     return { status: 400, result: { error: 'matchId는 필수입니다.' } };
   }
 
-  const matchData = await models.match.findOne({
-    where: { gameId: matchId, groupId },
+  // 같은 매치의 동시 확정/취소가 레이팅 read-modify-write를 인터리브하지 않도록 gameId 단위로 직렬화
+  return withLock(matchId, async () => {
+    const matchData = await models.match.findOne({
+      where: { gameId: matchId, groupId },
+    });
+
+    if (!matchData) {
+      return { status: 404, result: { error: '해당 매치를 찾을 수 없습니다.' } };
+    }
+
+    const previousWinTeam = matchData.winTeam;
+    if (!previousWinTeam) {
+      return { status: 400, result: { error: '이미 취소된 매치입니다.' } };
+    }
+
+    await Promise.all([honorController.deleteVotesByGameId(matchId), matchData.update({ winTeam: null })]);
+    await module.exports.applyMatchResult(matchId, previousWinTeam);
+
+    return { status: 200, result: { gameId: matchId } };
   });
-
-  if (!matchData) {
-    return { status: 404, result: { error: '해당 매치를 찾을 수 없습니다.' } };
-  }
-
-  const previousWinTeam = matchData.winTeam;
-  if (!previousWinTeam) {
-    return { status: 400, result: { error: '이미 취소된 매치입니다.' } };
-  }
-
-  await Promise.all([honorController.deleteVotesByGameId(matchId), matchData.update({ winTeam: null })]);
-  await module.exports.applyMatchResult(matchId, previousWinTeam);
-
-  return { status: 200, result: { gameId: matchId } };
 };
 
 module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
