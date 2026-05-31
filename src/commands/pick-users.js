@@ -59,6 +59,8 @@ exports.buildUserEditUI = buildUserEditUI;
 
 exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 
+exports.autoAssignPositions = (interaction, data) => utils.autoAssignPositions(interaction, data, models, matchMake);
+
 exports.conf = {
   enabled: true,
   requireGroup: true,

@@ -341,6 +341,10 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
   const confirmRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
+      .setCustomId(`posAutoAssign|${timeKey}`)
+      .setLabel('🤖 자동 포지션 배치')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
       .setLabel('🎮 매칭 생성')
       .setStyle(ButtonStyle.Success),
@@ -603,6 +607,68 @@ const createReactButtonHandler = (matchMake, models, buildPositionUIFn = buildPo
 };
 
 /**
+ * 자동 포지션 배치: 레이팅 기반 매칭 + 포지션 최적화 1순위 결과를
+ * positionData(팀+포지션)에 반영한다. (포지션 정하기 UI의 "자동 배치" 버튼용)
+ * @returns {Promise<{positionData: Object}|{error: string}>}
+ */
+const autoAssignPositions = async (interaction, data, models, matchMake) => {
+  const { optimizePositionsForMatches, POSITION_KR } = require('../match-maker/position-optimizer');
+
+  const group = await models.group.findOne({
+    where: { discordGuildId: interaction.guildId },
+  });
+  if (!group) return { error: '그룹 정보를 찾을 수 없습니다.' };
+
+  // 등록 유저 정보 수집 (미등록 유저가 있으면 레이팅/포지션 데이터가 없어 자동 배치 불가)
+  const { playerDataMap, fakeOptions, error } = await buildPlayerDataMap(
+    data.pickedUsers,
+    data.pickedMembersData,
+    group.id,
+    models,
+  );
+  if (error) return { error };
+
+  // 레이팅 기반 매칭 풀 생성 후 오프 최소 포지션 배정 1순위 선택
+  const fakeInteraction = { ...interaction, options: { data: fakeOptions } };
+  const matchResult = await matchMake.run(group.groupName, fakeInteraction);
+  if (typeof matchResult === 'string' || !matchResult.match) {
+    return { error: matchResult || '매칭 생성에 실패했습니다.' };
+  }
+
+  const matchPool = matchResult.allMatches || matchResult.match;
+  const optimized = optimizePositionsForMatches(matchPool, playerDataMap, { resultCount: 1 });
+  if (!optimized || optimized.length === 0) {
+    return { error: '포지션 자동 배치에 실패했습니다.' };
+  }
+
+  // 최적화 결과의 playerName(실제 소환사명)을 뽑힌 닉네임으로 역매핑
+  // (fakeOptions와 pickedUsers는 같은 인덱스 순서)
+  const nameToNickname = {};
+  fakeOptions.forEach((opt, i) => {
+    nameToNickname[opt.value] = data.pickedUsers[i];
+  });
+
+  const positionData = {};
+  data.pickedUsers.forEach((nickname) => {
+    positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+  });
+
+  const po = optimized[0].positionOptimization;
+  const applyTeam = (teamResult, team) => {
+    teamResult.assignments.forEach((a) => {
+      const nickname = nameToNickname[a.playerName];
+      if (nickname) {
+        positionData[nickname] = { team, position: POSITION_KR[a.position] || '상관X' };
+      }
+    });
+  };
+  applyTeam(po.teamA, '1팀');
+  applyTeam(po.teamB, '2팀');
+
+  return { positionData };
+};
+
+/**
  * 포지션 매칭 생성 핸들러
  */
 const handlePositionMatch = async (interaction, data, models, matchMake) => {
@@ -829,4 +895,5 @@ module.exports = {
   executePick,
   createReactButtonHandler,
   handlePositionMatch,
+  autoAssignPositions,
 };

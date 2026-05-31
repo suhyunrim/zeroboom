@@ -480,6 +480,34 @@ module.exports = async (app) => {
         return;
       }
 
+      // posAutoAssign 버튼 (포지션 자동 배치 — 최적화 결과를 팀/포지션에 반영)
+      if (split[0] === 'posAutoAssign') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        // 최적화 연산 동안 인터랙션 만료 방지
+        await interaction.deferUpdate();
+
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const result = await pickUsersCommand.autoAssignPositions(interaction, data);
+        if (result.error) {
+          await interaction.followUp({ content: result.error, ephemeral: true });
+          return;
+        }
+
+        data.positionData = result.positionData;
+        pickUsersData.set(timeKey, data);
+
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        await interaction.editReply(mainUI);
+        return;
+      }
+
       // posEditUser 버튼 (유저별 설정 버튼, customId에 인덱스 사용)
       if (split[0] === 'posEditUser') {
         const timeKey = split[1];
