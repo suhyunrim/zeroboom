@@ -16,6 +16,8 @@ const {
   buildTeamSelectOptions,
   applyTeamSelection,
   applyPositionPageValues,
+  getFullPositions,
+  findOverfullPosition,
   createReactButtonHandler,
 } = utils;
 
@@ -64,6 +66,8 @@ exports.buildPositionOnlyOptions = buildPositionOnlyOptions;
 exports.buildTeamSelectOptions = buildTeamSelectOptions;
 exports.applyTeamSelection = applyTeamSelection;
 exports.applyPositionPageValues = applyPositionPageValues;
+exports.getFullPositions = getFullPositions;
+exports.findOverfullPosition = findOverfullPosition;
 
 exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 

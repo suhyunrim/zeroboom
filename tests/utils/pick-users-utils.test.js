@@ -25,6 +25,8 @@ const {
   buildTeamSelectOptions,
   applyTeamSelection,
   applyPositionPageValues,
+  getFullPositions,
+  findOverfullPosition,
 } = require('../../src/utils/pick-users-utils');
 
 beforeEach(() => {
@@ -256,6 +258,66 @@ describe('buildPositionOnlyOptions', () => {
     const defaults = opts.filter((o) => o.default);
     expect(defaults).toHaveLength(1);
     expect(defaults[0].value).toBe('미드');
+  });
+
+  test('꽉 찬 포지션은 제외, 단 본인 현재 포지션·상관X는 유지', () => {
+    const opts = buildPositionOnlyOptions('탑', ['정글', '미드', '탑']);
+    const values = opts.map((o) => o.value);
+    expect(values).not.toContain('정글'); // 꽉 참 → 제외
+    expect(values).not.toContain('미드');
+    expect(values).toContain('탑'); // 본인 현재 포지션 → 유지
+    expect(values).toContain('상관X'); // 항상 유지
+    expect(values).toContain('원딜'); // 안 찬 포지션 유지
+  });
+});
+
+describe('getFullPositions', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
+
+  test('현재 페이지(excludeIndices) 제외하고 2명 찬 포지션 반환', () => {
+    const positionData = {
+      '닉A': { team: '랜덤팀', position: '탑' },
+      '닉B': { team: '랜덤팀', position: '탑' }, // 탑 2명 → 꽉 참
+      '닉C': { team: '랜덤팀', position: '정글' },
+      '닉D': { team: '랜덤팀', position: '미드' },
+      '닉E': { team: '랜덤팀', position: '상관X' },
+      '닉F': { team: '랜덤팀', position: '상관X' },
+    };
+    // 페이지 = 0~4번. 닉F(5)만 페이지 밖. → 닉F는 상관X라 꽉 찬 포지션 없음
+    expect(getFullPositions(positionData, pickedUsers, [0, 1, 2, 3, 4])).toEqual([]);
+    // 페이지 밖 전체(아무도 제외 안 함) → 탑이 2명
+    expect(getFullPositions(positionData, pickedUsers, [])).toEqual(['탑']);
+  });
+});
+
+describe('findOverfullPosition', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+  const base = {
+    '닉A': { team: '랜덤팀', position: '탑' },
+    '닉B': { team: '랜덤팀', position: '탑' },
+    '닉C': { team: '랜덤팀', position: '상관X' },
+    '닉D': { team: '랜덤팀', position: '정글' },
+  };
+
+  test('제출값 반영 후 3명이면 해당 포지션 반환', () => {
+    // 닉C를 탑으로 → 탑 3명
+    expect(findOverfullPosition(base, pickedUsers, { 2: '탑' })).toBe('탑');
+  });
+
+  test('2명까지는 통과(null)', () => {
+    expect(findOverfullPosition(base, pickedUsers, { 2: '정글' })).toBeNull();
+  });
+
+  test('교차 페이지: 1페이지 탑 1명 + 2페이지에서 탑 2명 → 합산 3명 에러', () => {
+    const sixUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
+    // 1페이지(0~?)에서 닉A만 탑으로 이미 저장된 상태
+    const positionData = {};
+    sixUsers.forEach((n) => { positionData[n] = { team: '랜덤팀', position: '상관X' }; });
+    positionData['닉A'] = { team: '랜덤팀', position: '탑' };
+    // 2페이지 제출에서 닉E(4), 닉F(5) 둘 다 탑 → 저장된 닉A 포함 탑 3명
+    expect(findOverfullPosition(positionData, sixUsers, { 4: '탑', 5: '탑' })).toBe('탑');
+    // 한 명만 탑이면 합산 2명 → 통과
+    expect(findOverfullPosition(positionData, sixUsers, { 4: '탑', 5: '정글' })).toBeNull();
   });
 });
 

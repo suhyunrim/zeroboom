@@ -567,6 +567,10 @@ module.exports = async (app) => {
           .setCustomId(`posPosModal|${timeKey}|${page}`)
           .setTitle(`포지션 입력 (${page + 1}/${totalPages})`);
 
+        // 이 페이지 밖에서 이미 정원(2명)이 찬 포지션은 드롭다운에서 제외
+        const pageIndices = slice.map((_, i) => start + i);
+        const fullPositions = pickUsersCommand.getFullPositions(data.positionData, data.pickedUsers, pageIndices);
+
         slice.forEach((nickname, i) => {
           const globalIdx = start + i;
           const d = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
@@ -574,7 +578,7 @@ module.exports = async (app) => {
             .setCustomId(`pos_${globalIdx}`)
             .setMinValues(1)
             .setMaxValues(1)
-            .addOptions(pickUsersCommand.buildPositionOnlyOptions(d.position));
+            .addOptions(pickUsersCommand.buildPositionOnlyOptions(d.position, fullPositions));
           const label = new LabelBuilder()
             .setLabel(`${globalIdx + 1}. ${nickname}`.slice(0, 45))
             .setStringSelectMenuComponent(select);
@@ -1605,6 +1609,24 @@ module.exports = async (app) => {
 
         const commandList = await commandListLoader();
         const pickUsersCommand = commandList.get('인원뽑기');
+
+        // 정원(2명) 초과 검사 — 같은 페이지 내 중복은 실시간 차단이 안 되므로 제출 시 잡는다
+        const overfull = pickUsersCommand.findOverfullPosition(data.positionData, data.pickedUsers, valuesByIndex);
+        if (overfull) {
+          const retryRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`posPosEdit|${timeKey}|${page}`)
+              .setLabel(`${start + 1}~${start + slice.length}번 다시 입력`)
+              .setStyle(ButtonStyle.Primary),
+          );
+          await interaction.reply({
+            content: `⚠️ **${overfull}** 포지션에 3명 이상입니다. 한 포지션은 최대 2명(양 팀 1명씩)까지 가능합니다. 다시 입력해주세요.`,
+            components: [retryRow],
+            ephemeral: true,
+          });
+          return;
+        }
+
         pickUsersCommand.applyPositionPageValues(data.positionData, data.pickedUsers, valuesByIndex);
         pickUsersData.set(timeKey, data);
 

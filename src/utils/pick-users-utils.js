@@ -347,11 +347,11 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
     new ButtonBuilder()
       .setCustomId(`posTeamEdit|${timeKey}`)
       .setLabel('👥 팀 입력')
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`posPosEdit|${timeKey}|0`)
       .setLabel('🎯 포지션 입력')
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
       .setLabel('🎮 매칭 생성')
@@ -413,15 +413,54 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
 
 // 팀/포지션 일괄 입력 모달용 헬퍼
 
+// 한 포지션 정원(양 팀에 1명씩 → @포지션으로 갈림)
+const POSITION_CAPACITY = 2;
+
 /**
  * 포지션 셀렉트 옵션 생성 (포지션 이모지 포함). 현재 포지션을 default로 표시한다.
+ * fullPositions에 든 포지션은 옵션에서 제외하되, 본인 현재 포지션과 상관X는 항상 포함.
  */
-const buildPositionOnlyOptions = (position) => {
-  return ['탑', '정글', '미드', '원딜', '서폿', '상관X'].map((p) => ({
-    label: `${POSITION_EMOJI[p]} ${p === '상관X' ? '상관없음' : p}`,
-    value: p,
-    default: p === position,
-  }));
+const buildPositionOnlyOptions = (position, fullPositions = []) => {
+  const full = new Set(fullPositions);
+  return ['탑', '정글', '미드', '원딜', '서폿', '상관X']
+    .filter((p) => p === '상관X' || p === position || !full.has(p))
+    .map((p) => ({
+      label: `${POSITION_EMOJI[p]} ${p === '상관X' ? '상관없음' : p}`,
+      value: p,
+      default: p === position,
+    }));
+};
+
+/**
+ * 현재 페이지(excludeIndices)를 제외한 나머지 유저 기준으로, 정원(2명)이 찬 포지션 목록 반환.
+ * 모달 열 때 드롭다운에서 제외할 포지션 계산용. (같은 페이지는 실시간 추적 불가라 제외)
+ */
+const getFullPositions = (positionData, pickedUsers, excludeIndices = []) => {
+  const exclude = new Set(excludeIndices.map(Number));
+  const counts = {};
+  pickedUsers.forEach((nickname, idx) => {
+    if (exclude.has(idx)) return;
+    const pos = positionData[nickname] && positionData[nickname].position;
+    if (!pos || pos === '상관X') return;
+    counts[pos] = (counts[pos] || 0) + 1;
+  });
+  return Object.keys(counts).filter((p) => counts[p] >= POSITION_CAPACITY);
+};
+
+/**
+ * 페이지 제출값(valuesByIndex)을 반영했다고 가정하고 정원 초과 포지션을 찾는다.
+ * 정원(2명)을 초과(3명 이상)하는 첫 포지션을 반환, 없으면 null. (제출 검증용)
+ */
+const findOverfullPosition = (positionData, pickedUsers, valuesByIndex) => {
+  const counts = {};
+  pickedUsers.forEach((nickname, idx) => {
+    const pos = Object.prototype.hasOwnProperty.call(valuesByIndex, idx)
+      ? valuesByIndex[idx]
+      : positionData[nickname] && positionData[nickname].position;
+    if (!pos || pos === '상관X') return;
+    counts[pos] = (counts[pos] || 0) + 1;
+  });
+  return Object.keys(counts).find((p) => counts[p] > POSITION_CAPACITY) || null;
 };
 
 /**
@@ -957,6 +996,8 @@ module.exports = {
   buildTeamSelectOptions,
   applyTeamSelection,
   applyPositionPageValues,
+  getFullPositions,
+  findOverfullPosition,
 
   // 데이터 빌더
   buildFakeOptions,
