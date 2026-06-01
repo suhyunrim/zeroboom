@@ -21,8 +21,10 @@ jest.mock('../../src/db/models', () => mockModels);
 const {
   buildFakeOptions,
   buildPlayerDataMap,
-  buildBulkPositionText,
-  parseBulkPositionInput,
+  buildPositionOnlyOptions,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  applyPositionPageValues,
 } = require('../../src/utils/pick-users-utils');
 
 beforeEach(() => {
@@ -241,58 +243,91 @@ describe('buildPlayerDataMap', () => {
   });
 });
 
-describe('buildBulkPositionText / parseBulkPositionInput', () => {
-  const pickedUsers = ['닉A', '닉 B', '닉C'];
+describe('buildPositionOnlyOptions', () => {
+  test('6개 옵션(탑/정글/미드/원딜/서폿/상관X) + 이모지 라벨', () => {
+    const opts = buildPositionOnlyOptions('탑');
+    expect(opts.map((o) => o.value)).toEqual(['탑', '정글', '미드', '원딜', '서폿', '상관X']);
+    expect(opts[0].label).toBe('⚔️ 탑');
+    expect(opts[5].label).toBe('🎲 상관없음'); // 상관X는 "상관없음"으로 표기
+  });
 
-  test('prefill 텍스트 포맷: "번호. 닉네임 | 팀 포지션"', () => {
+  test('현재 포지션만 default=true', () => {
+    const opts = buildPositionOnlyOptions('미드');
+    const defaults = opts.filter((o) => o.default);
+    expect(defaults).toHaveLength(1);
+    expect(defaults[0].value).toBe('미드');
+  });
+});
+
+describe('buildTeamSelectOptions', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('value=인덱스, 라벨=번호+닉네임', () => {
+    const positionData = {};
+    pickedUsers.forEach((n) => { positionData[n] = { team: '랜덤팀', position: '상관X' }; });
+    const opts = buildTeamSelectOptions(pickedUsers, positionData, 2);
+    expect(opts.map((o) => o.value)).toEqual(['0', '1', '2', '3']);
+    expect(opts[0].label).toBe('1. 닉A');
+    expect(opts.every((o) => !o.default)).toBe(true);
+  });
+
+  test('현재 1팀 유저를 default로, teamSize까지만', () => {
     const positionData = {
       '닉A': { team: '1팀', position: '탑' },
-      '닉 B': { team: '2팀', position: '서폿' },
-      '닉C': { team: '랜덤팀', position: '상관X' },
+      '닉B': { team: '1팀', position: '정글' },
+      '닉C': { team: '1팀', position: '미드' }, // teamSize=2 초과분
+      '닉D': { team: '2팀', position: '원딜' },
     };
-    expect(buildBulkPositionText(pickedUsers, positionData)).toBe(
-      '1. 닉A | 1팀 탑\n2. 닉 B | 2팀 서폿\n3. 닉C | 랜덤팀 상관X',
-    );
+    const opts = buildTeamSelectOptions(pickedUsers, positionData, 2);
+    expect(opts.filter((o) => o.default).map((o) => o.value)).toEqual(['0', '1']);
   });
+});
 
-  test('build → parse 라운드트립 (원본 보존)', () => {
+describe('applyTeamSelection', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('선택 인덱스=1팀, 나머지=2팀, 포지션은 유지', () => {
     const positionData = {
-      '닉A': { team: '1팀', position: '미드' },
-      '닉 B': { team: '랜덤팀', position: '원딜' },
-      '닉C': { team: '2팀', position: '상관X' },
+      '닉A': { team: '랜덤팀', position: '탑' },
+      '닉B': { team: '랜덤팀', position: '정글' },
+      '닉C': { team: '랜덤팀', position: '미드' },
+      '닉D': { team: '랜덤팀', position: '원딜' },
     };
-    const text = buildBulkPositionText(pickedUsers, positionData);
-    expect(parseBulkPositionInput(text, pickedUsers)).toEqual(positionData);
+    applyTeamSelection(positionData, pickedUsers, ['0', '2']);
+    expect(positionData['닉A']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉C']).toEqual({ team: '1팀', position: '미드' });
+    expect(positionData['닉B']).toEqual({ team: '2팀', position: '정글' });
+    expect(positionData['닉D']).toEqual({ team: '2팀', position: '원딜' });
+  });
+});
+
+describe('applyPositionPageValues', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
+
+  const makeData = () => {
+    const d = {};
+    pickedUsers.forEach((n) => { d[n] = { team: '1팀', position: '상관X' }; });
+    return d;
+  };
+
+  test('인덱스 기준으로 포지션만 반영, 팀은 유지', () => {
+    const positionData = makeData();
+    applyPositionPageValues(positionData, pickedUsers, { 0: '탑', 2: '서폿' });
+    expect(positionData['닉A']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉C']).toEqual({ team: '1팀', position: '서폿' });
+    // 언급되지 않은 유저는 그대로
+    expect(positionData['닉B']).toEqual({ team: '1팀', position: '상관X' });
   });
 
-  test('번호로 유저 식별 — 닉네임을 고쳐도 안전', () => {
-    const text = '1. 아무거나막침 | 2팀 정글\n2. 닉 B | 1팀 탑\n3. 닉C | 랜덤팀 상관X';
-    const result = parseBulkPositionInput(text, pickedUsers);
-    expect(result['닉A']).toEqual({ team: '2팀', position: '정글' });
-    expect(result['닉 B']).toEqual({ team: '1팀', position: '탑' });
+  test('두 번째 페이지 인덱스(5~)도 정상 반영', () => {
+    const positionData = makeData();
+    applyPositionPageValues(positionData, pickedUsers, { 5: '미드' });
+    expect(positionData['닉F']).toEqual({ team: '1팀', position: '미드' });
   });
 
-  test('팀/포지션 누락 시 기본값(랜덤팀/상관X)', () => {
-    const text = '1. 닉A | 1팀\n2. 닉 B | 미드\n3. 닉C |';
-    const result = parseBulkPositionInput(text, pickedUsers);
-    expect(result['닉A']).toEqual({ team: '1팀', position: '상관X' });
-    expect(result['닉 B']).toEqual({ team: '랜덤팀', position: '미드' });
-    expect(result['닉C']).toEqual({ team: '랜덤팀', position: '상관X' });
-  });
-
-  test('별칭 토큰: 랜덤→랜덤팀, 자유/상관없음→상관X', () => {
-    const text = '1. 닉A | 랜덤 자유\n2. 닉 B | 1팀 상관없음\n3. 닉C | 랜덤팀 탑';
-    const result = parseBulkPositionInput(text, pickedUsers);
-    expect(result['닉A']).toEqual({ team: '랜덤팀', position: '상관X' });
-    expect(result['닉 B']).toEqual({ team: '1팀', position: '상관X' });
-    expect(result['닉C']).toEqual({ team: '랜덤팀', position: '탑' });
-  });
-
-  test('잘못된/빈 줄과 범위 밖 번호는 무시, 미언급 유저는 기본값 유지', () => {
-    const text = '\n잡담\n2. 닉 B | 2팀 원딜\n9. 없는번호 | 1팀 탑\n';
-    const result = parseBulkPositionInput(text, pickedUsers);
-    expect(result['닉 B']).toEqual({ team: '2팀', position: '원딜' });
-    expect(result['닉A']).toEqual({ team: '랜덤팀', position: '상관X' });
-    expect(result['닉C']).toEqual({ team: '랜덤팀', position: '상관X' });
+  test('빈 값/범위 밖 인덱스는 무시', () => {
+    const positionData = makeData();
+    applyPositionPageValues(positionData, pickedUsers, { 0: '', 99: '탑' });
+    expect(positionData['닉A']).toEqual({ team: '1팀', position: '상관X' });
   });
 });

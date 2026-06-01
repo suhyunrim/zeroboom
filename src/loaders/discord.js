@@ -508,8 +508,8 @@ module.exports = async (app) => {
         return;
       }
 
-      // posBulkEdit 버튼 (텍스트 일괄 수정 모달 열기)
-      if (split[0] === 'posBulkEdit') {
+      // posTeamEdit 버튼 (팀 일괄 입력 모달 — 멀티셀렉트 1개로 1팀 인원 선택)
+      if (split[0] === 'posTeamEdit') {
         const timeKey = split[1];
         const data = pickUsersData.get(timeKey);
 
@@ -518,21 +518,68 @@ module.exports = async (app) => {
           return;
         }
 
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+        const { ModalBuilder, StringSelectMenuBuilder, LabelBuilder } = require('discord.js');
         const pickUsersCommand = commandList.get('인원뽑기');
-        const prefill = pickUsersCommand.buildBulkPositionText(data.pickedUsers, data.positionData);
+        const teamSize = Math.floor(data.pickedUsers.length / 2);
 
-        const input = new TextInputBuilder()
-          .setCustomId('assignments')
-          .setLabel('번호·| 유지, 팀/포지션만 수정')
-          .setStyle(TextInputStyle.Paragraph)
-          .setValue(prefill)
-          .setRequired(true);
+        const select = new StringSelectMenuBuilder()
+          .setCustomId('team1')
+          .setMinValues(teamSize)
+          .setMaxValues(teamSize)
+          .addOptions(pickUsersCommand.buildTeamSelectOptions(data.pickedUsers, data.positionData, teamSize));
+        const label = new LabelBuilder()
+          .setLabel(`🔵 1팀에 넣을 ${teamSize}명 선택 (나머지 2팀)`.slice(0, 45))
+          .setStringSelectMenuComponent(select);
 
         const modal = new ModalBuilder()
-          .setCustomId(`posBulkModal|${timeKey}`)
-          .setTitle('포지션 일괄 수정')
-          .addComponents(new ActionRowBuilder().addComponents(input));
+          .setCustomId(`posTeamModal|${timeKey}`)
+          .setTitle('팀 일괄 입력')
+          .addComponents(label);
+
+        await interaction.showModal(modal);
+        return;
+      }
+
+      // posPosEdit 버튼 (포지션 일괄 입력 모달 — 5명씩 페이지)
+      if (split[0] === 'posPosEdit') {
+        const timeKey = split[1];
+        const page = Number(split[2]) || 0;
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const PAGE_SIZE = 5; // 모달 컴포넌트 최대 5개 한도
+        const start = page * PAGE_SIZE;
+        const slice = data.pickedUsers.slice(start, start + PAGE_SIZE);
+        if (slice.length === 0) {
+          await interaction.reply({ content: '입력할 유저가 없습니다.', ephemeral: true });
+          return;
+        }
+
+        const { ModalBuilder, StringSelectMenuBuilder, LabelBuilder } = require('discord.js');
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const totalPages = Math.ceil(data.pickedUsers.length / PAGE_SIZE);
+
+        const modal = new ModalBuilder()
+          .setCustomId(`posPosModal|${timeKey}|${page}`)
+          .setTitle(`포지션 입력 (${page + 1}/${totalPages})`);
+
+        slice.forEach((nickname, i) => {
+          const globalIdx = start + i;
+          const d = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+          const select = new StringSelectMenuBuilder()
+            .setCustomId(`pos_${globalIdx}`)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(pickUsersCommand.buildPositionOnlyOptions(d.position));
+          const label = new LabelBuilder()
+            .setLabel(`${globalIdx + 1}. ${nickname}`.slice(0, 45))
+            .setStringSelectMenuComponent(select);
+          modal.addComponents(label);
+        });
 
         await interaction.showModal(modal);
         return;
@@ -1506,8 +1553,8 @@ module.exports = async (app) => {
         return;
       }
 
-      // posBulkModal 제출 (포지션 일괄 수정)
-      if (split[0] === 'posBulkModal') {
+      // posTeamModal 제출 (팀 일괄 입력)
+      if (split[0] === 'posTeamModal') {
         const timeKey = split[1];
         const data = pickUsersData.get(timeKey);
 
@@ -1516,18 +1563,75 @@ module.exports = async (app) => {
           return;
         }
 
-        const text = interaction.fields.getTextInputValue('assignments');
+        const selected = interaction.fields.getStringSelectValues('team1');
         const commandList = await commandListLoader();
         const pickUsersCommand = commandList.get('인원뽑기');
-        data.positionData = pickUsersCommand.parseBulkPositionInput(text, data.pickedUsers);
+        pickUsersCommand.applyTeamSelection(data.positionData, data.pickedUsers, selected);
         pickUsersData.set(timeKey, data);
 
         const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
         if (data.mainMessage) {
           await data.mainMessage.edit(mainUI);
-          await interaction.reply({ content: '✅ 포지션을 일괄 반영했습니다.', ephemeral: true });
+          await interaction.reply({ content: '✅ 팀을 반영했습니다.', ephemeral: true });
         } else {
           await interaction.update(mainUI);
+        }
+        return;
+      }
+
+      // posPosModal 제출 (포지션 일괄 입력 — 5명씩 페이지)
+      if (split[0] === 'posPosModal') {
+        const timeKey = split[1];
+        const page = Number(split[2]) || 0;
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const PAGE_SIZE = 5;
+        const start = page * PAGE_SIZE;
+        const slice = data.pickedUsers.slice(start, start + PAGE_SIZE);
+        const totalPages = Math.ceil(data.pickedUsers.length / PAGE_SIZE);
+
+        // 이 페이지의 포지션 셀렉트 값 수집
+        const valuesByIndex = {};
+        slice.forEach((nickname, i) => {
+          const globalIdx = start + i;
+          const vals = interaction.fields.getStringSelectValues(`pos_${globalIdx}`);
+          if (vals && vals.length) valuesByIndex[globalIdx] = vals[0];
+        });
+
+        const commandList = await commandListLoader();
+        const pickUsersCommand = commandList.get('인원뽑기');
+        pickUsersCommand.applyPositionPageValues(data.positionData, data.pickedUsers, valuesByIndex);
+        pickUsersData.set(timeKey, data);
+
+        // 메인 임베드 갱신
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        if (data.mainMessage) {
+          await data.mainMessage.edit(mainUI);
+        }
+
+        // 다음 페이지가 있으면 "다음" 버튼, 없으면 완료 안내 (모달→모달 직접 연결 불가)
+        const nextPage = page + 1;
+        if (nextPage < totalPages) {
+          const nextStart = nextPage * PAGE_SIZE;
+          const nextEnd = Math.min(nextStart + PAGE_SIZE, data.pickedUsers.length);
+          const nextRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`posPosEdit|${timeKey}|${nextPage}`)
+              .setLabel(`다음 (${nextStart + 1}~${nextEnd}번) 입력`)
+              .setStyle(ButtonStyle.Primary),
+          );
+          await interaction.reply({
+            content: `✅ ${start + 1}~${start + slice.length}번 포지션 반영 완료. 아래 버튼으로 다음 페이지를 입력하세요.`,
+            components: [nextRow],
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({ content: '✅ 포지션을 모두 반영했습니다.', ephemeral: true });
         }
         return;
       }

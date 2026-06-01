@@ -12,8 +12,10 @@ const {
   executePick,
   buildPositionUI,
   buildUserEditUI,
-  buildBulkPositionText,
-  parseBulkPositionInput,
+  buildPositionOnlyOptions,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  applyPositionPageValues,
   createReactButtonHandler,
 } = utils;
 
@@ -58,8 +60,10 @@ exports.handleToggle = handleToggle;
 exports.executePick = executePick;
 exports.buildPositionUI = buildPositionUI;
 exports.buildUserEditUI = buildUserEditUI;
-exports.buildBulkPositionText = buildBulkPositionText;
-exports.parseBulkPositionInput = parseBulkPositionInput;
+exports.buildPositionOnlyOptions = buildPositionOnlyOptions;
+exports.buildTeamSelectOptions = buildTeamSelectOptions;
+exports.applyTeamSelection = applyTeamSelection;
+exports.applyPositionPageValues = applyPositionPageValues;
 
 exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 

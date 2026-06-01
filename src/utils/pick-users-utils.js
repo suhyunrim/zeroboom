@@ -345,8 +345,12 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
       .setLabel('🤖 자동 포지션 배치')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`posBulkEdit|${timeKey}`)
-      .setLabel('✏️ 일괄 수정')
+      .setCustomId(`posTeamEdit|${timeKey}`)
+      .setLabel('👥 팀 입력')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`posPosEdit|${timeKey}|0`)
+      .setLabel('🎯 포지션 입력')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
@@ -407,59 +411,61 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
   };
 };
 
-// 일괄 수정 모달 파싱용 유효 토큰
-const VALID_TEAMS = ['1팀', '2팀', '랜덤팀'];
-const VALID_POSITIONS = ['탑', '정글', '미드', '원딜', '서폿', '상관X'];
+// 팀/포지션 일괄 입력 모달용 헬퍼
 
 /**
- * 일괄 수정 모달 prefill 텍스트 생성 (positionData → 문자열)
- * 각 줄: "{번호}. {닉네임} | {팀} {포지션}"
+ * 포지션 셀렉트 옵션 생성 (포지션 이모지 포함). 현재 포지션을 default로 표시한다.
  */
-const buildBulkPositionText = (pickedUsers, positionData) => {
-  return pickedUsers
-    .map((nickname, i) => {
-      const d = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
-      return `${i + 1}. ${nickname} | ${d.team} ${d.position}`;
-    })
-    .join('\n');
+const buildPositionOnlyOptions = (position) => {
+  return ['탑', '정글', '미드', '원딜', '서폿', '상관X'].map((p) => ({
+    label: `${POSITION_EMOJI[p]} ${p === '상관X' ? '상관없음' : p}`,
+    value: p,
+    default: p === position,
+  }));
 };
 
 /**
- * 일괄 수정 모달 제출 텍스트 파싱 (문자열 → positionData)
- * - 줄 맨 앞 번호로 유저를 식별하므로 닉네임을 고쳐도 안전하다.
- * - "|" 오른쪽(없으면 줄 전체)에서 팀/포지션 토큰을 인식, 못 찾으면 랜덤팀/상관X.
+ * 팀 일괄 입력 멀티셀렉트 옵션 생성. 현재 1팀인 유저를 default로(최대 teamSize명) 표시한다.
+ * value = pickedUsers 인덱스 문자열
  */
-const parseBulkPositionInput = (text, pickedUsers) => {
-  const positionData = {};
-  pickedUsers.forEach((nickname) => {
-    positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+const buildTeamSelectOptions = (pickedUsers, positionData, teamSize) => {
+  let defaultCount = 0;
+  return pickedUsers.map((nickname, idx) => {
+    const isTeam1 = positionData[nickname] && positionData[nickname].team === '1팀';
+    const useDefault = isTeam1 && defaultCount < teamSize;
+    if (useDefault) defaultCount += 1;
+    return {
+      label: `${idx + 1}. ${nickname}`.slice(0, 100),
+      value: String(idx),
+      default: useDefault,
+    };
   });
+};
 
-  (text || '').split('\n').forEach((rawLine) => {
-    const line = rawLine.trim();
-    if (!line) return;
-
-    // 맨 앞 번호 추출 (예: "3. ..." 또는 "3) ..." → 3)
-    const numMatch = line.match(/^(\d+)\s*[.)]/);
-    if (!numMatch) return;
-    const nickname = pickedUsers[Number(numMatch[1]) - 1];
-    if (!nickname) return;
-
-    const rest = line.includes('|') ? line.slice(line.indexOf('|') + 1) : line;
-    let team = null;
-    let position = null;
-    rest.split(/\s+/).forEach((tok) => {
-      const t = tok.trim();
-      if (!t) return;
-      if (t === '랜덤' || t === '랜덤팀') team = '랜덤팀';
-      else if (VALID_TEAMS.includes(t)) team = t;
-      else if (t === '자유' || t === '상관없음') position = '상관X';
-      else if (VALID_POSITIONS.includes(t)) position = t;
-    });
-
-    positionData[nickname] = { team: team || '랜덤팀', position: position || '상관X' };
+/**
+ * 팀 멀티셀렉트 결과를 positionData에 반영한다.
+ * 선택된 인덱스 = 1팀, 나머지 = 2팀. 포지션은 그대로 유지.
+ */
+const applyTeamSelection = (positionData, pickedUsers, selectedIndices) => {
+  const selected = new Set((selectedIndices || []).map(Number));
+  pickedUsers.forEach((nickname, idx) => {
+    const cur = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+    positionData[nickname] = { team: selected.has(idx) ? '1팀' : '2팀', position: cur.position };
   });
+  return positionData;
+};
 
+/**
+ * 포지션 모달 페이지 제출값을 positionData에 반영한다 (팀은 그대로 유지).
+ * @param {Object} valuesByIndex { [pickedUsers 인덱스]: 포지션 }
+ */
+const applyPositionPageValues = (positionData, pickedUsers, valuesByIndex) => {
+  Object.entries(valuesByIndex).forEach(([idx, position]) => {
+    const nickname = pickedUsers[Number(idx)];
+    if (!nickname || !position) return;
+    const cur = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+    positionData[nickname] = { team: cur.team, position };
+  });
   return positionData;
 };
 
@@ -708,22 +714,24 @@ const autoAssignPositions = async (interaction, data, models, matchMake) => {
     nameToNickname[opt.value] = data.pickedUsers[i];
   });
 
+  // 팀은 기존 설정을 보존하고 포지션만 채운다 (자동배치는 포지션만 배정)
   const positionData = {};
   data.pickedUsers.forEach((nickname) => {
-    positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+    const cur = (data.positionData && data.positionData[nickname]) || { team: '랜덤팀', position: '상관X' };
+    positionData[nickname] = { team: cur.team, position: cur.position };
   });
 
   const po = optimized[0].positionOptimization;
-  const applyTeam = (teamResult, team) => {
+  const applyPositions = (teamResult) => {
     teamResult.assignments.forEach((a) => {
       const nickname = nameToNickname[a.playerName];
       if (nickname) {
-        positionData[nickname] = { team, position: POSITION_KR[a.position] || '상관X' };
+        positionData[nickname].position = POSITION_KR[a.position] || '상관X';
       }
     });
   };
-  applyTeam(po.teamA, '1팀');
-  applyTeam(po.teamB, '2팀');
+  applyPositions(po.teamA);
+  applyPositions(po.teamB);
 
   return { positionData };
 };
@@ -945,8 +953,10 @@ module.exports = {
   buildToggleMessage,
   buildPositionUI,
   buildUserEditUI,
-  buildBulkPositionText,
-  parseBulkPositionInput,
+  buildPositionOnlyOptions,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  applyPositionPageValues,
 
   // 데이터 빌더
   buildFakeOptions,
