@@ -480,34 +480,6 @@ module.exports = async (app) => {
         return;
       }
 
-      // posAutoAssign 버튼 (포지션 자동 배치 — 최적화 결과를 팀/포지션에 반영)
-      if (split[0] === 'posAutoAssign') {
-        const timeKey = split[1];
-        const data = pickUsersData.get(timeKey);
-
-        if (!data) {
-          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
-          return;
-        }
-
-        // 최적화 연산 동안 인터랙션 만료 방지
-        await interaction.deferUpdate();
-
-        const pickUsersCommand = commandList.get('인원뽑기');
-        const result = await pickUsersCommand.autoAssignPositions(interaction, data);
-        if (result.error) {
-          await interaction.followUp({ content: result.error, ephemeral: true });
-          return;
-        }
-
-        data.positionData = result.positionData;
-        pickUsersData.set(timeKey, data);
-
-        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
-        await interaction.editReply(mainUI);
-        return;
-      }
-
       // posTeamEdit 버튼 (팀 일괄 입력 모달 — 멀티셀렉트 1개로 1팀 인원 선택)
       if (split[0] === 'posTeamEdit') {
         const timeKey = split[1];
@@ -567,6 +539,7 @@ module.exports = async (app) => {
             .setCustomId(`lane_${lane}`)
             .setMinValues(0)
             .setMaxValues(maxPerLane)
+            .setRequired(false) // min 0 허용하려면 required=false 필요 (모달 컴포넌트 기본 required)
             .addOptions(pickUsersCommand.buildLaneOptions(data.pickedUsers, selected));
           const label = new LabelBuilder()
             .setLabel(`${POSITION_EMOJI[lane]} ${lane} (최대 2명)`)
