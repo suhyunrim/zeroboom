@@ -349,7 +349,7 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
       .setLabel('👥 팀 입력')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`posPosEdit|${timeKey}|0`)
+      .setCustomId(`posPosEdit|${timeKey}`)
       .setLabel('🎯 포지션 입력')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
@@ -417,50 +417,28 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
 const POSITION_CAPACITY = 2;
 
 /**
- * 포지션 셀렉트 옵션 생성 (포지션 이모지 포함). 현재 포지션을 default로 표시한다.
- * fullPositions에 든 포지션은 옵션에서 제외하되, 본인 현재 포지션과 상관X는 항상 포함.
+ * 포지션별(레인) 멀티셀렉트 옵션 생성. selectedIndices에 든 유저를 default로 표시한다.
+ * value = pickedUsers 인덱스 문자열
  */
-const buildPositionOnlyOptions = (position, fullPositions = []) => {
-  const full = new Set(fullPositions);
-  return ['탑', '정글', '미드', '원딜', '서폿', '상관X']
-    .filter((p) => p === '상관X' || p === position || !full.has(p))
-    .map((p) => ({
-      label: `${POSITION_EMOJI[p]} ${p === '상관X' ? '상관없음' : p}`,
-      value: p,
-      default: p === position,
-    }));
+const buildLaneOptions = (pickedUsers, selectedIndices = []) => {
+  const selected = new Set(selectedIndices.map(Number));
+  return pickedUsers.map((nickname, idx) => ({
+    label: `${idx + 1}. ${nickname}`.slice(0, 100),
+    value: String(idx),
+    default: selected.has(idx),
+  }));
 };
 
 /**
- * 현재 페이지(excludeIndices)를 제외한 나머지 유저 기준으로, 정원(2명)이 찬 포지션 목록 반환.
- * 모달 열 때 드롭다운에서 제외할 포지션 계산용. (같은 페이지는 실시간 추적 불가라 제외)
+ * positionData에서 특정 레인(포지션)에 배정된 유저 인덱스를 최대 정원(2명)까지 반환. (모달 prefill용)
  */
-const getFullPositions = (positionData, pickedUsers, excludeIndices = []) => {
-  const exclude = new Set(excludeIndices.map(Number));
-  const counts = {};
+const laneDefaults = (pickedUsers, positionData, lane) => {
+  const indices = [];
   pickedUsers.forEach((nickname, idx) => {
-    if (exclude.has(idx)) return;
-    const pos = positionData[nickname] && positionData[nickname].position;
-    if (!pos || pos === '상관X') return;
-    counts[pos] = (counts[pos] || 0) + 1;
+    if (indices.length >= POSITION_CAPACITY) return;
+    if (positionData[nickname] && positionData[nickname].position === lane) indices.push(String(idx));
   });
-  return Object.keys(counts).filter((p) => counts[p] >= POSITION_CAPACITY);
-};
-
-/**
- * 페이지 제출값(valuesByIndex)을 반영했다고 가정하고 정원 초과 포지션을 찾는다.
- * 정원(2명)을 초과(3명 이상)하는 첫 포지션을 반환, 없으면 null. (제출 검증용)
- */
-const findOverfullPosition = (positionData, pickedUsers, valuesByIndex) => {
-  const counts = {};
-  pickedUsers.forEach((nickname, idx) => {
-    const pos = Object.prototype.hasOwnProperty.call(valuesByIndex, idx)
-      ? valuesByIndex[idx]
-      : positionData[nickname] && positionData[nickname].position;
-    if (!pos || pos === '상관X') return;
-    counts[pos] = (counts[pos] || 0) + 1;
-  });
-  return Object.keys(counts).find((p) => counts[p] > POSITION_CAPACITY) || null;
+  return indices;
 };
 
 /**
@@ -495,17 +473,40 @@ const applyTeamSelection = (positionData, pickedUsers, selectedIndices) => {
 };
 
 /**
- * 포지션 모달 페이지 제출값을 positionData에 반영한다 (팀은 그대로 유지).
- * @param {Object} valuesByIndex { [pickedUsers 인덱스]: 포지션 }
+ * 레인 모달 제출값을 positionData에 반영한다 (팀은 유지, 포지션은 레인 기준으로 재설정).
+ * @param {Object} laneValues { 포지션: [pickedUsers 인덱스 문자열, ...] }
  */
-const applyPositionPageValues = (positionData, pickedUsers, valuesByIndex) => {
-  Object.entries(valuesByIndex).forEach(([idx, position]) => {
-    const nickname = pickedUsers[Number(idx)];
-    if (!nickname || !position) return;
+const applyLaneSelection = (positionData, pickedUsers, laneValues) => {
+  // 포지션 초기화 (팀 유지) — 레인 모달이 포지션의 단일 소스
+  pickedUsers.forEach((nickname) => {
     const cur = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
-    positionData[nickname] = { team: cur.team, position };
+    positionData[nickname] = { team: cur.team, position: '상관X' };
+  });
+  Object.entries(laneValues).forEach(([lane, indices]) => {
+    (indices || []).forEach((idx) => {
+      const nickname = pickedUsers[Number(idx)];
+      if (nickname) positionData[nickname].position = lane;
+    });
   });
   return positionData;
+};
+
+/**
+ * 한 유저가 두 개 이상 레인에 배정됐는지 검사. 첫 충돌 유저 정보를 반환, 없으면 null.
+ * @returns {null | { nickname: string, lanes: string[] }}
+ */
+const findLaneConflict = (pickedUsers, laneValues) => {
+  const lanesByIndex = {};
+  Object.entries(laneValues).forEach(([lane, indices]) => {
+    (indices || []).forEach((idx) => {
+      const k = Number(idx);
+      (lanesByIndex[k] = lanesByIndex[k] || []).push(lane);
+    });
+  });
+  const dup = Object.keys(lanesByIndex).find((k) => lanesByIndex[k].length > 1);
+  if (dup === undefined) return null;
+  const idx = Number(dup);
+  return { nickname: pickedUsers[idx] || `#${idx + 1}`, lanes: lanesByIndex[idx] };
 };
 
 /**
@@ -992,12 +993,12 @@ module.exports = {
   buildToggleMessage,
   buildPositionUI,
   buildUserEditUI,
-  buildPositionOnlyOptions,
   buildTeamSelectOptions,
   applyTeamSelection,
-  applyPositionPageValues,
-  getFullPositions,
-  findOverfullPosition,
+  buildLaneOptions,
+  laneDefaults,
+  applyLaneSelection,
+  findLaneConflict,
 
   // 데이터 빌더
   buildFakeOptions,

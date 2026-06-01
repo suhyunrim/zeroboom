@@ -540,10 +540,9 @@ module.exports = async (app) => {
         return;
       }
 
-      // posPosEdit 버튼 (포지션 일괄 입력 모달 — 5명씩 페이지)
+      // posPosEdit 버튼 (포지션 입력 모달 — 포지션별 5칸, 한 모달)
       if (split[0] === 'posPosEdit') {
         const timeKey = split[1];
-        const page = Number(split[2]) || 0;
         const data = pickUsersData.get(timeKey);
 
         if (!data) {
@@ -551,39 +550,35 @@ module.exports = async (app) => {
           return;
         }
 
-        const PAGE_SIZE = 5; // 모달 컴포넌트 최대 5개 한도
-        const start = page * PAGE_SIZE;
-        const slice = data.pickedUsers.slice(start, start + PAGE_SIZE);
-        if (slice.length === 0) {
-          await interaction.reply({ content: '입력할 유저가 없습니다.', ephemeral: true });
-          return;
-        }
-
         const { ModalBuilder, StringSelectMenuBuilder, LabelBuilder } = require('discord.js');
         const pickUsersCommand = commandList.get('인원뽑기');
-        const totalPages = Math.ceil(data.pickedUsers.length / PAGE_SIZE);
+        const LANES = ['탑', '정글', '미드', '원딜', '서폿'];
+        const maxPerLane = Math.min(2, data.pickedUsers.length);
 
         const modal = new ModalBuilder()
-          .setCustomId(`posPosModal|${timeKey}|${page}`)
-          .setTitle(`포지션 입력 (${page + 1}/${totalPages})`);
+          .setCustomId(`posPosModal|${timeKey}`)
+          .setTitle('포지션 입력');
 
-        // 이 페이지 밖에서 이미 정원(2명)이 찬 포지션은 드롭다운에서 제외
-        const pageIndices = slice.map((_, i) => start + i);
-        const fullPositions = pickUsersCommand.getFullPositions(data.positionData, data.pickedUsers, pageIndices);
-
-        slice.forEach((nickname, i) => {
-          const globalIdx = start + i;
-          const d = data.positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+        LANES.forEach((lane) => {
+          // 재시도 시엔 직전에 고른 값(laneDraft)을, 아니면 현재 배정을 prefill
+          const selected = (data.laneDraft && data.laneDraft[lane])
+            || pickUsersCommand.laneDefaults(data.pickedUsers, data.positionData, lane);
           const select = new StringSelectMenuBuilder()
-            .setCustomId(`pos_${globalIdx}`)
-            .setMinValues(1)
-            .setMaxValues(1)
-            .addOptions(pickUsersCommand.buildPositionOnlyOptions(d.position, fullPositions));
+            .setCustomId(`lane_${lane}`)
+            .setMinValues(0)
+            .setMaxValues(maxPerLane)
+            .addOptions(pickUsersCommand.buildLaneOptions(data.pickedUsers, selected));
           const label = new LabelBuilder()
-            .setLabel(`${globalIdx + 1}. ${nickname}`.slice(0, 45))
+            .setLabel(`${POSITION_EMOJI[lane]} ${lane} (최대 2명)`)
             .setStringSelectMenuComponent(select);
           modal.addComponents(label);
         });
+
+        // draft는 1회성 — 모달 열면서 소비
+        if (data.laneDraft) {
+          delete data.laneDraft;
+          pickUsersData.set(timeKey, data);
+        }
 
         await interaction.showModal(modal);
         return;
@@ -1583,10 +1578,9 @@ module.exports = async (app) => {
         return;
       }
 
-      // posPosModal 제출 (포지션 일괄 입력 — 5명씩 페이지)
+      // posPosModal 제출 (포지션 입력 — 포지션별 5칸)
       if (split[0] === 'posPosModal') {
         const timeKey = split[1];
-        const page = Number(split[2]) || 0;
         const data = pickUsersData.get(timeKey);
 
         if (!data) {
@@ -1594,66 +1588,44 @@ module.exports = async (app) => {
           return;
         }
 
-        const PAGE_SIZE = 5;
-        const start = page * PAGE_SIZE;
-        const slice = data.pickedUsers.slice(start, start + PAGE_SIZE);
-        const totalPages = Math.ceil(data.pickedUsers.length / PAGE_SIZE);
-
-        // 이 페이지의 포지션 셀렉트 값 수집
-        const valuesByIndex = {};
-        slice.forEach((nickname, i) => {
-          const globalIdx = start + i;
-          const vals = interaction.fields.getStringSelectValues(`pos_${globalIdx}`);
-          if (vals && vals.length) valuesByIndex[globalIdx] = vals[0];
+        const LANES = ['탑', '정글', '미드', '원딜', '서폿'];
+        const laneValues = {};
+        LANES.forEach((lane) => {
+          laneValues[lane] = interaction.fields.getStringSelectValues(`lane_${lane}`) || [];
         });
 
         const commandList = await commandListLoader();
         const pickUsersCommand = commandList.get('인원뽑기');
 
-        // 정원(2명) 초과 검사 — 같은 페이지 내 중복은 실시간 차단이 안 되므로 제출 시 잡는다
-        const overfull = pickUsersCommand.findOverfullPosition(data.positionData, data.pickedUsers, valuesByIndex);
-        if (overfull) {
+        // 같은 사람이 두 포지션에 든 충돌 검사 (모달은 실시간 차단 불가 → 제출 시 잡음)
+        const conflict = pickUsersCommand.findLaneConflict(data.pickedUsers, laneValues);
+        if (conflict) {
+          data.laneDraft = laneValues; // 고른 값 보존
+          pickUsersData.set(timeKey, data);
           const retryRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setCustomId(`posPosEdit|${timeKey}|${page}`)
-              .setLabel(`${start + 1}~${start + slice.length}번 다시 입력`)
+              .setCustomId(`posPosEdit|${timeKey}`)
+              .setLabel('다시 입력')
               .setStyle(ButtonStyle.Primary),
           );
           await interaction.reply({
-            content: `⚠️ **${overfull}** 포지션에 3명 이상입니다. 한 포지션은 최대 2명(양 팀 1명씩)까지 가능합니다. 다시 입력해주세요.`,
+            content: `⚠️ **${conflict.nickname}**님이 ${conflict.lanes.join('·')}에 중복 배정됐습니다. 한 명은 한 포지션만 가능합니다. 다시 입력해주세요. (고른 값은 유지됩니다)`,
             components: [retryRow],
             ephemeral: true,
           });
           return;
         }
 
-        pickUsersCommand.applyPositionPageValues(data.positionData, data.pickedUsers, valuesByIndex);
+        pickUsersCommand.applyLaneSelection(data.positionData, data.pickedUsers, laneValues);
+        delete data.laneDraft;
         pickUsersData.set(timeKey, data);
 
-        // 메인 임베드 갱신
         const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
         if (data.mainMessage) {
           await data.mainMessage.edit(mainUI);
-        }
-
-        // 다음 페이지가 있으면 "다음" 버튼, 없으면 완료 안내 (모달→모달 직접 연결 불가)
-        const nextPage = page + 1;
-        if (nextPage < totalPages) {
-          const nextStart = nextPage * PAGE_SIZE;
-          const nextEnd = Math.min(nextStart + PAGE_SIZE, data.pickedUsers.length);
-          const nextRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`posPosEdit|${timeKey}|${nextPage}`)
-              .setLabel(`다음 (${nextStart + 1}~${nextEnd}번) 입력`)
-              .setStyle(ButtonStyle.Primary),
-          );
-          await interaction.reply({
-            content: `✅ ${start + 1}~${start + slice.length}번 포지션 반영 완료. 아래 버튼으로 다음 페이지를 입력하세요.`,
-            components: [nextRow],
-            ephemeral: true,
-          });
+          await interaction.reply({ content: '✅ 포지션을 반영했습니다.', ephemeral: true });
         } else {
-          await interaction.reply({ content: '✅ 포지션을 모두 반영했습니다.', ephemeral: true });
+          await interaction.update(mainUI);
         }
         return;
       }

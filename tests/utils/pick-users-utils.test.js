@@ -21,12 +21,12 @@ jest.mock('../../src/db/models', () => mockModels);
 const {
   buildFakeOptions,
   buildPlayerDataMap,
-  buildPositionOnlyOptions,
   buildTeamSelectOptions,
   applyTeamSelection,
-  applyPositionPageValues,
-  getFullPositions,
-  findOverfullPosition,
+  buildLaneOptions,
+  laneDefaults,
+  applyLaneSelection,
+  findLaneConflict,
 } = require('../../src/utils/pick-users-utils');
 
 beforeEach(() => {
@@ -245,79 +245,36 @@ describe('buildPlayerDataMap', () => {
   });
 });
 
-describe('buildPositionOnlyOptions', () => {
-  test('6개 옵션(탑/정글/미드/원딜/서폿/상관X) + 이모지 라벨', () => {
-    const opts = buildPositionOnlyOptions('탑');
-    expect(opts.map((o) => o.value)).toEqual(['탑', '정글', '미드', '원딜', '서폿', '상관X']);
-    expect(opts[0].label).toBe('⚔️ 탑');
-    expect(opts[5].label).toBe('🎲 상관없음'); // 상관X는 "상관없음"으로 표기
+describe('buildLaneOptions', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('value=인덱스, 라벨=번호+닉네임, selectedIndices가 default', () => {
+    const opts = buildLaneOptions(pickedUsers, ['1', '3']);
+    expect(opts.map((o) => o.value)).toEqual(['0', '1', '2', '3']);
+    expect(opts[0].label).toBe('1. 닉A');
+    expect(opts.filter((o) => o.default).map((o) => o.value)).toEqual(['1', '3']);
   });
 
-  test('현재 포지션만 default=true', () => {
-    const opts = buildPositionOnlyOptions('미드');
-    const defaults = opts.filter((o) => o.default);
-    expect(defaults).toHaveLength(1);
-    expect(defaults[0].value).toBe('미드');
-  });
-
-  test('꽉 찬 포지션은 제외, 단 본인 현재 포지션·상관X는 유지', () => {
-    const opts = buildPositionOnlyOptions('탑', ['정글', '미드', '탑']);
-    const values = opts.map((o) => o.value);
-    expect(values).not.toContain('정글'); // 꽉 참 → 제외
-    expect(values).not.toContain('미드');
-    expect(values).toContain('탑'); // 본인 현재 포지션 → 유지
-    expect(values).toContain('상관X'); // 항상 유지
-    expect(values).toContain('원딜'); // 안 찬 포지션 유지
+  test('selectedIndices 없으면 default 없음', () => {
+    const opts = buildLaneOptions(pickedUsers);
+    expect(opts.every((o) => !o.default)).toBe(true);
   });
 });
 
-describe('getFullPositions', () => {
-  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
+describe('laneDefaults', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E'];
 
-  test('현재 페이지(excludeIndices) 제외하고 2명 찬 포지션 반환', () => {
+  test('해당 레인 배정 유저 인덱스를 최대 2명까지 반환', () => {
     const positionData = {
       '닉A': { team: '랜덤팀', position: '탑' },
-      '닉B': { team: '랜덤팀', position: '탑' }, // 탑 2명 → 꽉 참
-      '닉C': { team: '랜덤팀', position: '정글' },
-      '닉D': { team: '랜덤팀', position: '미드' },
+      '닉B': { team: '랜덤팀', position: '정글' },
+      '닉C': { team: '랜덤팀', position: '탑' },
+      '닉D': { team: '랜덤팀', position: '탑' }, // 정원 초과분은 잘림
       '닉E': { team: '랜덤팀', position: '상관X' },
-      '닉F': { team: '랜덤팀', position: '상관X' },
     };
-    // 페이지 = 0~4번. 닉F(5)만 페이지 밖. → 닉F는 상관X라 꽉 찬 포지션 없음
-    expect(getFullPositions(positionData, pickedUsers, [0, 1, 2, 3, 4])).toEqual([]);
-    // 페이지 밖 전체(아무도 제외 안 함) → 탑이 2명
-    expect(getFullPositions(positionData, pickedUsers, [])).toEqual(['탑']);
-  });
-});
-
-describe('findOverfullPosition', () => {
-  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
-  const base = {
-    '닉A': { team: '랜덤팀', position: '탑' },
-    '닉B': { team: '랜덤팀', position: '탑' },
-    '닉C': { team: '랜덤팀', position: '상관X' },
-    '닉D': { team: '랜덤팀', position: '정글' },
-  };
-
-  test('제출값 반영 후 3명이면 해당 포지션 반환', () => {
-    // 닉C를 탑으로 → 탑 3명
-    expect(findOverfullPosition(base, pickedUsers, { 2: '탑' })).toBe('탑');
-  });
-
-  test('2명까지는 통과(null)', () => {
-    expect(findOverfullPosition(base, pickedUsers, { 2: '정글' })).toBeNull();
-  });
-
-  test('교차 페이지: 1페이지 탑 1명 + 2페이지에서 탑 2명 → 합산 3명 에러', () => {
-    const sixUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
-    // 1페이지(0~?)에서 닉A만 탑으로 이미 저장된 상태
-    const positionData = {};
-    sixUsers.forEach((n) => { positionData[n] = { team: '랜덤팀', position: '상관X' }; });
-    positionData['닉A'] = { team: '랜덤팀', position: '탑' };
-    // 2페이지 제출에서 닉E(4), 닉F(5) 둘 다 탑 → 저장된 닉A 포함 탑 3명
-    expect(findOverfullPosition(positionData, sixUsers, { 4: '탑', 5: '탑' })).toBe('탑');
-    // 한 명만 탑이면 합산 2명 → 통과
-    expect(findOverfullPosition(positionData, sixUsers, { 4: '탑', 5: '정글' })).toBeNull();
+    expect(laneDefaults(pickedUsers, positionData, '탑')).toEqual(['0', '2']);
+    expect(laneDefaults(pickedUsers, positionData, '정글')).toEqual(['1']);
+    expect(laneDefaults(pickedUsers, positionData, '미드')).toEqual([]);
   });
 });
 
@@ -363,33 +320,35 @@ describe('applyTeamSelection', () => {
   });
 });
 
-describe('applyPositionPageValues', () => {
+describe('applyLaneSelection', () => {
   const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
 
   const makeData = () => {
     const d = {};
-    pickedUsers.forEach((n) => { d[n] = { team: '1팀', position: '상관X' }; });
+    pickedUsers.forEach((n) => { d[n] = { team: '1팀', position: '미드' }; }); // 기존 포지션 있음
     return d;
   };
 
-  test('인덱스 기준으로 포지션만 반영, 팀은 유지', () => {
+  test('레인 배정대로 포지션 설정, 팀은 유지, 미배정자는 상관X로 초기화', () => {
     const positionData = makeData();
-    applyPositionPageValues(positionData, pickedUsers, { 0: '탑', 2: '서폿' });
+    applyLaneSelection(positionData, pickedUsers, { 탑: ['0', '1'], 서폿: ['2'] });
     expect(positionData['닉A']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉B']).toEqual({ team: '1팀', position: '탑' });
     expect(positionData['닉C']).toEqual({ team: '1팀', position: '서폿' });
-    // 언급되지 않은 유저는 그대로
-    expect(positionData['닉B']).toEqual({ team: '1팀', position: '상관X' });
+    // 어느 레인에도 없는 유저는 상관X로 (팀 유지)
+    expect(positionData['닉D']).toEqual({ team: '1팀', position: '상관X' });
+  });
+});
+
+describe('findLaneConflict', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('같은 사람이 두 레인에 있으면 충돌 정보 반환', () => {
+    const conflict = findLaneConflict(pickedUsers, { 탑: ['0', '1'], 정글: ['0', '2'] });
+    expect(conflict).toEqual({ nickname: '닉A', lanes: ['탑', '정글'] });
   });
 
-  test('두 번째 페이지 인덱스(5~)도 정상 반영', () => {
-    const positionData = makeData();
-    applyPositionPageValues(positionData, pickedUsers, { 5: '미드' });
-    expect(positionData['닉F']).toEqual({ team: '1팀', position: '미드' });
-  });
-
-  test('빈 값/범위 밖 인덱스는 무시', () => {
-    const positionData = makeData();
-    applyPositionPageValues(positionData, pickedUsers, { 0: '', 99: '탑' });
-    expect(positionData['닉A']).toEqual({ team: '1팀', position: '상관X' });
+  test('중복 없으면 null', () => {
+    expect(findLaneConflict(pickedUsers, { 탑: ['0', '1'], 정글: ['2', '3'] })).toBeNull();
   });
 });
