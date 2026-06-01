@@ -480,6 +480,83 @@ module.exports = async (app) => {
         return;
       }
 
+      // posTeamEdit 버튼 (팀 일괄 입력 모달 — 멀티셀렉트 1개로 1팀 인원 선택)
+      if (split[0] === 'posTeamEdit') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const { ModalBuilder, StringSelectMenuBuilder, LabelBuilder } = require('discord.js');
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const teamSize = Math.floor(data.pickedUsers.length / 2);
+
+        const select = new StringSelectMenuBuilder()
+          .setCustomId('team1')
+          .setMinValues(teamSize)
+          .setMaxValues(teamSize)
+          .addOptions(pickUsersCommand.buildTeamSelectOptions(data.pickedUsers, data.positionData, teamSize));
+        const label = new LabelBuilder()
+          .setLabel(`🔵 1팀에 넣을 ${teamSize}명 선택 (나머지 2팀)`.slice(0, 45))
+          .setStringSelectMenuComponent(select);
+
+        const modal = new ModalBuilder()
+          .setCustomId(`posTeamModal|${timeKey}`)
+          .setTitle('팀 일괄 입력')
+          .addComponents(label);
+
+        await interaction.showModal(modal);
+        return;
+      }
+
+      // posPosEdit 버튼 (포지션 입력 모달 — 포지션별 5칸, 한 모달)
+      if (split[0] === 'posPosEdit') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const { ModalBuilder, StringSelectMenuBuilder, LabelBuilder } = require('discord.js');
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const LANES = ['탑', '정글', '미드', '원딜', '서폿'];
+        const maxPerLane = Math.min(2, data.pickedUsers.length);
+
+        const modal = new ModalBuilder()
+          .setCustomId(`posPosModal|${timeKey}`)
+          .setTitle('포지션 입력');
+
+        LANES.forEach((lane) => {
+          // 재시도 시엔 직전에 고른 값(laneDraft)을, 아니면 현재 배정을 prefill
+          const selected = (data.laneDraft && data.laneDraft[lane])
+            || pickUsersCommand.laneDefaults(data.pickedUsers, data.positionData, lane);
+          const select = new StringSelectMenuBuilder()
+            .setCustomId(`lane_${lane}`)
+            .setMinValues(0)
+            .setMaxValues(maxPerLane)
+            .setRequired(false) // min 0 허용하려면 required=false 필요 (모달 컴포넌트 기본 required)
+            .addOptions(pickUsersCommand.buildLaneOptions(data.pickedUsers, selected));
+          const label = new LabelBuilder()
+            .setLabel(`${POSITION_EMOJI[lane]} ${lane} (최대 2명)`)
+            .setStringSelectMenuComponent(select);
+          modal.addComponents(label);
+        });
+
+        // draft는 1회성 — 모달 열면서 소비
+        if (data.laneDraft) {
+          delete data.laneDraft;
+          pickUsersData.set(timeKey, data);
+        }
+
+        await interaction.showModal(modal);
+        return;
+      }
+
       // posEditUser 버튼 (유저별 설정 버튼, customId에 인덱스 사용)
       if (split[0] === 'posEditUser') {
         const timeKey = split[1];
@@ -1445,6 +1522,84 @@ module.exports = async (app) => {
       const split = interaction.customId.split('|');
       if (split[0] === 'onboard' || split[0] === 'onboardTest') {
         await handleOnboardModalSubmit(interaction, client);
+        return;
+      }
+
+      // posTeamModal 제출 (팀 일괄 입력)
+      if (split[0] === 'posTeamModal') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const selected = interaction.fields.getStringSelectValues('team1');
+        const commandList = await commandListLoader();
+        const pickUsersCommand = commandList.get('인원뽑기');
+        pickUsersCommand.applyTeamSelection(data.positionData, data.pickedUsers, selected);
+        pickUsersData.set(timeKey, data);
+
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        if (data.mainMessage) {
+          await data.mainMessage.edit(mainUI);
+          await interaction.reply({ content: '✅ 팀을 반영했습니다.', ephemeral: true });
+        } else {
+          await interaction.update(mainUI);
+        }
+        return;
+      }
+
+      // posPosModal 제출 (포지션 입력 — 포지션별 5칸)
+      if (split[0] === 'posPosModal') {
+        const timeKey = split[1];
+        const data = pickUsersData.get(timeKey);
+
+        if (!data) {
+          await interaction.reply({ content: '데이터가 만료되었습니다. 다시 인원뽑기를 해주세요.', ephemeral: true });
+          return;
+        }
+
+        const LANES = ['탑', '정글', '미드', '원딜', '서폿'];
+        const laneValues = {};
+        LANES.forEach((lane) => {
+          laneValues[lane] = interaction.fields.getStringSelectValues(`lane_${lane}`) || [];
+        });
+
+        const commandList = await commandListLoader();
+        const pickUsersCommand = commandList.get('인원뽑기');
+
+        // 같은 사람이 두 포지션에 든 충돌 검사 (모달은 실시간 차단 불가 → 제출 시 잡음)
+        const conflict = pickUsersCommand.findLaneConflict(data.pickedUsers, laneValues);
+        if (conflict) {
+          data.laneDraft = laneValues; // 고른 값 보존
+          pickUsersData.set(timeKey, data);
+          const retryRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`posPosEdit|${timeKey}`)
+              .setLabel('다시 입력')
+              .setStyle(ButtonStyle.Primary),
+          );
+          await interaction.reply({
+            content: `⚠️ **${conflict.nickname}**님이 ${conflict.lanes.join('·')}에 중복 배정됐습니다. 한 명은 한 포지션만 가능합니다. 다시 입력해주세요. (고른 값은 유지됩니다)`,
+            components: [retryRow],
+            ephemeral: true,
+          });
+          return;
+        }
+
+        pickUsersCommand.applyLaneSelection(data.positionData, data.pickedUsers, laneValues);
+        delete data.laneDraft;
+        pickUsersData.set(timeKey, data);
+
+        const mainUI = pickUsersCommand.buildPositionUI(data.pickedUsers, data.positionData, timeKey);
+        if (data.mainMessage) {
+          await data.mainMessage.edit(mainUI);
+          await interaction.reply({ content: '✅ 포지션을 반영했습니다.', ephemeral: true });
+        } else {
+          await interaction.update(mainUI);
+        }
         return;
       }
     } catch (e) {

@@ -21,6 +21,12 @@ jest.mock('../../src/db/models', () => mockModels);
 const {
   buildFakeOptions,
   buildPlayerDataMap,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  buildLaneOptions,
+  laneDefaults,
+  applyLaneSelection,
+  findLaneConflict,
 } = require('../../src/utils/pick-users-utils');
 
 beforeEach(() => {
@@ -236,5 +242,113 @@ describe('buildPlayerDataMap', () => {
 
     expect(error).toContain('미등록 유저');
     expect(unregisteredDiscordIds).toContain('d2');
+  });
+});
+
+describe('buildLaneOptions', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('value=인덱스, 라벨=번호+닉네임, selectedIndices가 default', () => {
+    const opts = buildLaneOptions(pickedUsers, ['1', '3']);
+    expect(opts.map((o) => o.value)).toEqual(['0', '1', '2', '3']);
+    expect(opts[0].label).toBe('1. 닉A');
+    expect(opts.filter((o) => o.default).map((o) => o.value)).toEqual(['1', '3']);
+  });
+
+  test('selectedIndices 없으면 default 없음', () => {
+    const opts = buildLaneOptions(pickedUsers);
+    expect(opts.every((o) => !o.default)).toBe(true);
+  });
+});
+
+describe('laneDefaults', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E'];
+
+  test('해당 레인 배정 유저 인덱스를 최대 2명까지 반환', () => {
+    const positionData = {
+      '닉A': { team: '랜덤팀', position: '탑' },
+      '닉B': { team: '랜덤팀', position: '정글' },
+      '닉C': { team: '랜덤팀', position: '탑' },
+      '닉D': { team: '랜덤팀', position: '탑' }, // 정원 초과분은 잘림
+      '닉E': { team: '랜덤팀', position: '상관X' },
+    };
+    expect(laneDefaults(pickedUsers, positionData, '탑')).toEqual(['0', '2']);
+    expect(laneDefaults(pickedUsers, positionData, '정글')).toEqual(['1']);
+    expect(laneDefaults(pickedUsers, positionData, '미드')).toEqual([]);
+  });
+});
+
+describe('buildTeamSelectOptions', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('value=인덱스, 라벨=번호+닉네임', () => {
+    const positionData = {};
+    pickedUsers.forEach((n) => { positionData[n] = { team: '랜덤팀', position: '상관X' }; });
+    const opts = buildTeamSelectOptions(pickedUsers, positionData, 2);
+    expect(opts.map((o) => o.value)).toEqual(['0', '1', '2', '3']);
+    expect(opts[0].label).toBe('1. 닉A');
+    expect(opts.every((o) => !o.default)).toBe(true);
+  });
+
+  test('현재 1팀 유저를 default로, teamSize까지만', () => {
+    const positionData = {
+      '닉A': { team: '1팀', position: '탑' },
+      '닉B': { team: '1팀', position: '정글' },
+      '닉C': { team: '1팀', position: '미드' }, // teamSize=2 초과분
+      '닉D': { team: '2팀', position: '원딜' },
+    };
+    const opts = buildTeamSelectOptions(pickedUsers, positionData, 2);
+    expect(opts.filter((o) => o.default).map((o) => o.value)).toEqual(['0', '1']);
+  });
+});
+
+describe('applyTeamSelection', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('선택 인덱스=1팀, 나머지=2팀, 포지션은 유지', () => {
+    const positionData = {
+      '닉A': { team: '랜덤팀', position: '탑' },
+      '닉B': { team: '랜덤팀', position: '정글' },
+      '닉C': { team: '랜덤팀', position: '미드' },
+      '닉D': { team: '랜덤팀', position: '원딜' },
+    };
+    applyTeamSelection(positionData, pickedUsers, ['0', '2']);
+    expect(positionData['닉A']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉C']).toEqual({ team: '1팀', position: '미드' });
+    expect(positionData['닉B']).toEqual({ team: '2팀', position: '정글' });
+    expect(positionData['닉D']).toEqual({ team: '2팀', position: '원딜' });
+  });
+});
+
+describe('applyLaneSelection', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D', '닉E', '닉F'];
+
+  const makeData = () => {
+    const d = {};
+    pickedUsers.forEach((n) => { d[n] = { team: '1팀', position: '미드' }; }); // 기존 포지션 있음
+    return d;
+  };
+
+  test('레인 배정대로 포지션 설정, 팀은 유지, 미배정자는 상관X로 초기화', () => {
+    const positionData = makeData();
+    applyLaneSelection(positionData, pickedUsers, { 탑: ['0', '1'], 서폿: ['2'] });
+    expect(positionData['닉A']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉B']).toEqual({ team: '1팀', position: '탑' });
+    expect(positionData['닉C']).toEqual({ team: '1팀', position: '서폿' });
+    // 어느 레인에도 없는 유저는 상관X로 (팀 유지)
+    expect(positionData['닉D']).toEqual({ team: '1팀', position: '상관X' });
+  });
+});
+
+describe('findLaneConflict', () => {
+  const pickedUsers = ['닉A', '닉B', '닉C', '닉D'];
+
+  test('같은 사람이 두 레인에 있으면 충돌 정보 반환', () => {
+    const conflict = findLaneConflict(pickedUsers, { 탑: ['0', '1'], 정글: ['0', '2'] });
+    expect(conflict).toEqual({ nickname: '닉A', lanes: ['탑', '정글'] });
+  });
+
+  test('중복 없으면 null', () => {
+    expect(findLaneConflict(pickedUsers, { 탑: ['0', '1'], 정글: ['2', '3'] })).toBeNull();
   });
 });

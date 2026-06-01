@@ -12,6 +12,12 @@ const {
   executePick,
   buildPositionUI,
   buildUserEditUI,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  buildLaneOptions,
+  laneDefaults,
+  applyLaneSelection,
+  findLaneConflict,
   createReactButtonHandler,
 } = utils;
 
@@ -56,6 +62,12 @@ exports.handleToggle = handleToggle;
 exports.executePick = executePick;
 exports.buildPositionUI = buildPositionUI;
 exports.buildUserEditUI = buildUserEditUI;
+exports.buildTeamSelectOptions = buildTeamSelectOptions;
+exports.applyTeamSelection = applyTeamSelection;
+exports.buildLaneOptions = buildLaneOptions;
+exports.laneDefaults = laneDefaults;
+exports.applyLaneSelection = applyLaneSelection;
+exports.findLaneConflict = findLaneConflict;
 
 exports.reactButton = createReactButtonHandler(matchMake, models, buildPositionUI);
 

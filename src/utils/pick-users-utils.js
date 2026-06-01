@@ -341,6 +341,14 @@ const buildPositionUI = (pickedUsers, positionData, timeKey) => {
 
   const confirmRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
+      .setCustomId(`posTeamEdit|${timeKey}`)
+      .setLabel('👥 팀 입력')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`posPosEdit|${timeKey}`)
+      .setLabel('🎯 포지션 입력')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId(`posConfirm|${timeKey}`)
       .setLabel('🎮 매칭 생성')
       .setStyle(ButtonStyle.Success),
@@ -397,6 +405,104 @@ const buildUserEditUI = (userIndex, nickname, positionData, timeKey) => {
     ],
     ephemeral: true,
   };
+};
+
+// 팀/포지션 일괄 입력 모달용 헬퍼
+
+// 한 포지션 정원(양 팀에 1명씩 → @포지션으로 갈림)
+const POSITION_CAPACITY = 2;
+
+/**
+ * 포지션별(레인) 멀티셀렉트 옵션 생성. selectedIndices에 든 유저를 default로 표시한다.
+ * value = pickedUsers 인덱스 문자열
+ */
+const buildLaneOptions = (pickedUsers, selectedIndices = []) => {
+  const selected = new Set(selectedIndices.map(Number));
+  return pickedUsers.map((nickname, idx) => ({
+    label: `${idx + 1}. ${nickname}`.slice(0, 100),
+    value: String(idx),
+    default: selected.has(idx),
+  }));
+};
+
+/**
+ * positionData에서 특정 레인(포지션)에 배정된 유저 인덱스를 최대 정원(2명)까지 반환. (모달 prefill용)
+ */
+const laneDefaults = (pickedUsers, positionData, lane) => {
+  const indices = [];
+  pickedUsers.forEach((nickname, idx) => {
+    if (indices.length >= POSITION_CAPACITY) return;
+    if (positionData[nickname] && positionData[nickname].position === lane) indices.push(String(idx));
+  });
+  return indices;
+};
+
+/**
+ * 팀 일괄 입력 멀티셀렉트 옵션 생성. 현재 1팀인 유저를 default로(최대 teamSize명) 표시한다.
+ * value = pickedUsers 인덱스 문자열
+ */
+const buildTeamSelectOptions = (pickedUsers, positionData, teamSize) => {
+  let defaultCount = 0;
+  return pickedUsers.map((nickname, idx) => {
+    const isTeam1 = positionData[nickname] && positionData[nickname].team === '1팀';
+    const useDefault = isTeam1 && defaultCount < teamSize;
+    if (useDefault) defaultCount += 1;
+    return {
+      label: `${idx + 1}. ${nickname}`.slice(0, 100),
+      value: String(idx),
+      default: useDefault,
+    };
+  });
+};
+
+/**
+ * 팀 멀티셀렉트 결과를 positionData에 반영한다.
+ * 선택된 인덱스 = 1팀, 나머지 = 2팀. 포지션은 그대로 유지.
+ */
+const applyTeamSelection = (positionData, pickedUsers, selectedIndices) => {
+  const selected = new Set((selectedIndices || []).map(Number));
+  pickedUsers.forEach((nickname, idx) => {
+    const cur = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+    positionData[nickname] = { team: selected.has(idx) ? '1팀' : '2팀', position: cur.position };
+  });
+  return positionData;
+};
+
+/**
+ * 레인 모달 제출값을 positionData에 반영한다 (팀은 유지, 포지션은 레인 기준으로 재설정).
+ * @param {Object} laneValues { 포지션: [pickedUsers 인덱스 문자열, ...] }
+ */
+const applyLaneSelection = (positionData, pickedUsers, laneValues) => {
+  // 포지션 초기화 (팀 유지) — 레인 모달이 포지션의 단일 소스
+  pickedUsers.forEach((nickname) => {
+    const cur = positionData[nickname] || { team: '랜덤팀', position: '상관X' };
+    positionData[nickname] = { team: cur.team, position: '상관X' };
+  });
+  Object.entries(laneValues).forEach(([lane, indices]) => {
+    (indices || []).forEach((idx) => {
+      const nickname = pickedUsers[Number(idx)];
+      if (nickname) positionData[nickname].position = lane;
+    });
+  });
+  return positionData;
+};
+
+/**
+ * 한 유저가 두 개 이상 레인에 배정됐는지 검사. 첫 충돌 유저 정보를 반환, 없으면 null.
+ * @returns {null | { nickname: string, lanes: string[] }}
+ */
+const findLaneConflict = (pickedUsers, laneValues) => {
+  const lanesByIndex = {};
+  Object.entries(laneValues).forEach(([lane, indices]) => {
+    (indices || []).forEach((idx) => {
+      const k = Number(idx);
+      (lanesByIndex[k] = lanesByIndex[k] || []).push(lane);
+    });
+  });
+  const dup = Object.keys(lanesByIndex).find((k) => lanesByIndex[k].length > 1);
+  if (dup === undefined) return null;
+  const idx = Number(dup);
+  return { nickname: pickedUsers[idx] || `#${idx + 1}`, lanes: lanesByIndex[idx] };
 };
 
 /**
@@ -819,6 +925,12 @@ module.exports = {
   buildToggleMessage,
   buildPositionUI,
   buildUserEditUI,
+  buildTeamSelectOptions,
+  applyTeamSelection,
+  buildLaneOptions,
+  laneDefaults,
+  applyLaneSelection,
+  findLaneConflict,
 
   // 데이터 빌더
   buildFakeOptions,
