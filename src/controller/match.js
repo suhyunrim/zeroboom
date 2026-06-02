@@ -37,7 +37,9 @@ module.exports.createMatchWithSnapshot = async ({ groupId, team1, team2, extra =
   const ratingMap = new Map(
     users.map((u) => [u.puuid, Math.round(u.defaultRating + u.additionalRating)]),
   );
-  const withRating = (arr) => arr.map(([puuid, name]) => [puuid, name, ratingMap.get(puuid) ?? 500]);
+  // 입력 원소가 position(3번째)을 실으면 저장 시 4번째 원소로 보존한다. 없으면 null.
+  const withRating = (arr) =>
+    arr.map(([puuid, name, position = null]) => [puuid, name, ratingMap.get(puuid) ?? 500, position]);
 
   const group = await models.group.findByPk(groupId, { attributes: ['settings'] });
   const currentSeason = (group?.settings && group.settings.currentSeason) || 1;
@@ -687,8 +689,9 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
     return { status: 404, result: { error: '해당 매치를 찾을 수 없습니다.' } };
   }
 
-  const team1 = originalMatch.team1.map(([puuid, name]) => [puuid, name]);
-  const team2 = originalMatch.team2.map(([puuid, name]) => [puuid, name]);
+  // 저장 포맷 [puuid, name, rating, position] 에서 position(4번째)을 보존해 재생성한다.
+  const team1 = originalMatch.team1.map(([puuid, name, , position = null]) => [puuid, name, position]);
+  const team2 = originalMatch.team2.map(([puuid, name, , position = null]) => [puuid, name, position]);
   const matchDate = new Date(date);
 
   const newMatch = await module.exports.createMatchWithSnapshot({

@@ -393,15 +393,16 @@ module.exports = async (app) => {
 
         const po = selectedMatch.positionOptimization;
 
-        // DB에 매치 생성
+        // DB에 매치 생성 (배정 포지션을 Riot 표준으로 정규화해 함께 저장)
+        const { normalizeToRiotPosition } = require('../utils/tierUtils');
         const teamsForDB = [[], []];
         for (const assignment of po.teamA.assignments) {
           const playerData = playerDataMap[assignment.playerName];
-          teamsForDB[0].push([playerData.puuid, assignment.playerName]);
+          teamsForDB[0].push([playerData.puuid, assignment.playerName, normalizeToRiotPosition(assignment.position)]);
         }
         for (const assignment of po.teamB.assignments) {
           const playerData = playerDataMap[assignment.playerName];
-          teamsForDB[1].push([playerData.puuid, assignment.playerName]);
+          teamsForDB[1].push([playerData.puuid, assignment.playerName, normalizeToRiotPosition(assignment.position)]);
         }
 
         const matchQueryResult = await matchController.createMatchWithSnapshot({
@@ -606,7 +607,9 @@ module.exports = async (app) => {
 
         // 팀/포지션 정보 기반으로 매칭 생성
         // discordId로 실제 소환사 이름을 조회하여 fakeOptions 생성
+        const { normalizeToRiotPosition } = require('../utils/tierUtils');
         const fakeOptions = [];
+        const positionMap = {}; // 소환사명 → 수동 지정 배정 포지션(Riot 표준), 매치 저장용
         for (let index = 0; index < data.pickedUsers.length; index++) {
           const parsedNickname = data.pickedUsers[index];
           const memberData = data.pickedMembersData ? data.pickedMembersData[index] : null;
@@ -628,6 +631,7 @@ module.exports = async (app) => {
           }
 
           const pData = data.positionData[parsedNickname] || { team: '랜덤팀', position: '상관X' };
+          positionMap[actualName] = normalizeToRiotPosition(pData.position);
           let value = actualName;
 
           if (pData.team === '1팀') {
@@ -661,6 +665,8 @@ module.exports = async (app) => {
         // matches Map에 데이터 저장 (1~3번 버튼 동작을 위해)
         if (result.match) {
           for (let i = 0; i < result.match.length; ++i) {
+            // 수동 지정 포지션을 플랜에 첨부 → reactButton 기록 시 매치에 저장됨
+            result.match[i].positionMap = positionMap;
             matches.set(`${group.groupName}/${result.time}/${i}`, result.match[i]);
           }
           // 컨셉 매칭용 데이터 저장
