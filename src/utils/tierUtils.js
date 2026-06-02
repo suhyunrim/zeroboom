@@ -155,3 +155,24 @@ exports.POSITION_ABBR = POSITION_ABBR;
  */
 const normalizePosition = (pos) => (pos === 'UTILITY' ? 'SUPPORT' : pos);
 exports.normalizePosition = normalizePosition;
+
+/**
+ * 다양한 포지션 표기(한글/영문/SUPPORT)를 Riot 표준(summoner.mainPosition과 동일:
+ * TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY)으로 정규화. 미지정/상관X/알 수 없는 값은 null.
+ * 매치에 저장하는 배정 포지션을 한 가지 vocabulary로 통일하기 위함.
+ */
+const RIOT_POSITION = {
+  TOP: 'TOP',
+  JUNGLE: 'JUNGLE',
+  MIDDLE: 'MIDDLE',
+  BOTTOM: 'BOTTOM',
+  UTILITY: 'UTILITY',
+  SUPPORT: 'UTILITY',
+  탑: 'TOP',
+  정글: 'JUNGLE',
+  미드: 'MIDDLE',
+  원딜: 'BOTTOM',
+  서폿: 'UTILITY',
+};
+const normalizeToRiotPosition = (pos) => RIOT_POSITION[pos] || null;
+exports.normalizeToRiotPosition = normalizeToRiotPosition;

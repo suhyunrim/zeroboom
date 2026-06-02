@@ -246,7 +246,9 @@ exports.reactButton = async (interaction, match) => {
         rating,
         puuid: summonerData.puuid,
       });
-      teamsForDB[i].push([summonerData.puuid, summonerData.name]);
+      // 수동 포지션 흐름(posConfirm)이 첨부한 배정 포지션이 있으면 함께 저장 (없으면 null)
+      const assignedPosition = (match.positionMap && match.positionMap[summonerData.name]) || null;
+      teamsForDB[i].push([summonerData.puuid, summonerData.name, assignedPosition]);
       teamDiscordIds[i].push(userData.discordId || null);
       teamRatings[i] += rating;
     }

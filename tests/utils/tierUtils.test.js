@@ -2,6 +2,7 @@ const {
   formatTierBadge,
   formatAvgTierBadge,
   normalizePosition,
+  normalizeToRiotPosition,
   POSITION_ABBR,
   getTierName,
   getTierStep,
@@ -80,6 +81,33 @@ describe('tierUtils', () => {
       expect(normalizePosition('MIDDLE')).toBe('MIDDLE');
       expect(normalizePosition('BOTTOM')).toBe('BOTTOM');
       expect(normalizePosition('SUPPORT')).toBe('SUPPORT');
+    });
+  });
+
+  describe('normalizeToRiotPosition', () => {
+    test('한글 표기 → Riot 표준', () => {
+      expect(normalizeToRiotPosition('탑')).toBe('TOP');
+      expect(normalizeToRiotPosition('정글')).toBe('JUNGLE');
+      expect(normalizeToRiotPosition('미드')).toBe('MIDDLE');
+      expect(normalizeToRiotPosition('원딜')).toBe('BOTTOM');
+      expect(normalizeToRiotPosition('서폿')).toBe('UTILITY');
+    });
+
+    test('영문/SUPPORT 표기 → Riot 표준 (SUPPORT는 UTILITY로)', () => {
+      expect(normalizeToRiotPosition('TOP')).toBe('TOP');
+      expect(normalizeToRiotPosition('JUNGLE')).toBe('JUNGLE');
+      expect(normalizeToRiotPosition('MIDDLE')).toBe('MIDDLE');
+      expect(normalizeToRiotPosition('BOTTOM')).toBe('BOTTOM');
+      expect(normalizeToRiotPosition('UTILITY')).toBe('UTILITY');
+      expect(normalizeToRiotPosition('SUPPORT')).toBe('UTILITY');
+    });
+
+    test('미지정/상관X/알 수 없는 값 → null', () => {
+      expect(normalizeToRiotPosition('상관X')).toBeNull();
+      expect(normalizeToRiotPosition(null)).toBeNull();
+      expect(normalizeToRiotPosition(undefined)).toBeNull();
+      expect(normalizeToRiotPosition('')).toBeNull();
+      expect(normalizeToRiotPosition('아무거나')).toBeNull();
     });
   });
 
