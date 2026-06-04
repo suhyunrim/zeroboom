@@ -7,6 +7,7 @@ const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const userController = require('../../controller/user');
+const { renewTokenIfNeeded } = require('../middlewares/auth');
 
 const route = Router();
 
@@ -158,6 +159,7 @@ module.exports = (app) => {
     try {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, config.jwtSecret);
+      renewTokenIfNeeded(res, decoded);
 
       let subPuuid = null;
       if (decoded.puuid) {
