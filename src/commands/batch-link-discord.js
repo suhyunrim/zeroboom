@@ -1,6 +1,7 @@
 const { AttachmentBuilder } = require('discord.js');
 const models = require('../db/models');
 const { getLOLNickname } = require('../utils/pick-users-utils');
+const { syncUserAdminRole } = require('../discord/adminSync');
 
 exports.run = async (groupName, interaction) => {
   await interaction.deferReply(); // 시간이 오래 걸릴 수 있으므로 defer
@@ -100,6 +101,8 @@ exports.run = async (groupName, interaction) => {
     // DB 업데이트 (dry_run이 false일 때만 실행)
     if (!dryRun) {
       await user.update({ discordId: memberId });
+      // 연결된 디스코드 계정 권한으로 role 즉시 동기화 (member는 위에서 봇 제외됨)
+      await syncUserAdminRole(member, group);
     }
 
     results.success.push({

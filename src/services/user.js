@@ -137,7 +137,7 @@ const registerUser = async (groupName, summonerName, tier, discordId = null, { a
     return { result: e.message, status: 501 };
   }
 
-  return { result: `[**${summonerName}**] - \`${tier}\` 로 등록되었습니다.`, status: 200 };
+  return { result: `[**${summonerName}**] - \`${tier}\` 로 등록되었습니다.`, status: 200, group };
 };
 
 exports.registerUser = registerUser;

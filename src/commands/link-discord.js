@@ -1,4 +1,6 @@
 const models = require('../db/models');
+const { syncUserAdminRole } = require('../discord/adminSync');
+const { logger } = require('../loaders/logger');
 
 exports.run = async (groupName, interaction) => {
   const discordUser = interaction.options.getUser('디스코드유저');
@@ -41,6 +43,16 @@ exports.run = async (groupName, interaction) => {
 
   // discordId 업데이트
   await user.update({ discordId: discordUser.id });
+
+  // 연결된 디스코드 계정 권한으로 role 즉시 동기화
+  if (interaction.guild) {
+    try {
+      const member = await interaction.guild.members.fetch(discordUser.id);
+      await syncUserAdminRole(member, group);
+    } catch (e) {
+      logger.warn(`디코연동 권한 동기화 실패: ${e.message}`);
+    }
+  }
 
   return `[**${summonerName}**] ↔ <@${discordUser.id}> 연결 완료!`;
 };
