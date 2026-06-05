@@ -6,6 +6,7 @@ const Sentry = require('@sentry/node');
 const { logMiddleWare } = require('./logger');
 const routes = require('../api');
 const config = require('../config');
+const { RENEWED_TOKEN_HEADER } = require('../api/middlewares/auth');
 
 module.exports = (app) => {
   app.use(logMiddleWare);
@@ -16,7 +17,8 @@ module.exports = (app) => {
     res.status(200).end();
   });
   app.enable('trust proxy');
-  app.use(cors());
+  // X-Renewed-Token: 슬라이딩 만료로 재발급된 JWT를 프론트가 읽을 수 있도록 노출
+  app.use(cors({ exposedHeaders: [RENEWED_TOKEN_HEADER] }));
   app.use(methodOverride());
   app.use(bodyParser.json());
   app.use(config.api.prefix, routes());
