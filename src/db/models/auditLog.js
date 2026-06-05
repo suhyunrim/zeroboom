@@ -12,8 +12,9 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       actorDiscordId: {
+        // 시스템/자동 액션은 디스코드 actor가 없으므로 nullable
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
       },
       actorName: {
         type: DataTypes.STRING,

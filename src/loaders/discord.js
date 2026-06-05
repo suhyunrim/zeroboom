@@ -32,17 +32,9 @@ const {
   handleOnboardModalSubmit,
 } = require('../discord/onboarding');
 const { initEmojis } = require('../discord/emoji-manager');
+const { isDiscordAdmin } = require('../discord/adminSync');
 
 const ADMINISTRATOR = BigInt(0x8);
-
-/**
- * Discord 멤버가 ADMINISTRATOR 권한을 가지고 있는지 확인
- * @param {GuildMember} member - Discord.js GuildMember
- * @returns {boolean}
- */
-function isDiscordAdmin(member) {
-  return member.permissions.has(PermissionFlagsBits.Administrator) || member.guild.ownerId === member.id;
-}
 
 /**
  * 그룹의 모든 유저에 대해 Discord 관리자 권한을 DB role에 동기화
