@@ -94,4 +94,5 @@ module.exports = {
   isGroupAdmin,
   renewTokenIfNeeded,
   RENEWED_TOKEN_HEADER,
+  TOKEN_TTL,
 };

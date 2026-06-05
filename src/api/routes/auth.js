@@ -7,7 +7,7 @@ const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const userController = require('../../controller/user');
-const { renewTokenIfNeeded } = require('../middlewares/auth');
+const { verifyToken, TOKEN_TTL } = require('../middlewares/auth');
 
 const route = Router();
 
@@ -135,7 +135,7 @@ module.exports = (app) => {
         groups,
       };
 
-      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
+      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: TOKEN_TTL });
 
       // 6. 프론트엔드로 리다이렉트 (토큰 전달)
       const frontendUrl = config.frontendUrl || 'http://localhost:5173';
@@ -150,17 +150,9 @@ module.exports = (app) => {
    * GET /api/auth/me
    * JWT로 현재 로그인 유저 정보 조회
    */
-  route.get('/me', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ result: '인증이 필요합니다.' });
-    }
-
+  route.get('/me', verifyToken, async (req, res) => {
+    const decoded = req.user;
     try {
-      const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, config.jwtSecret);
-      renewTokenIfNeeded(res, decoded);
-
       let subPuuid = null;
       if (decoded.puuid) {
         const subUser = await models.user.findOne({
