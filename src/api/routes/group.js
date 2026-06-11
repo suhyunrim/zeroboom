@@ -301,7 +301,7 @@ module.exports = (app) => {
 
     try {
       const tokenId = req.headers.riottokenid;
-      await tokenController.validateUserGroup(tokenId, groupName);
+      if (tokenId) await tokenController.validateUserGroup(tokenId, groupName);
 
       const rankings = await groupController.getRanking(groupName);
       const response = { result: rankings.result };
