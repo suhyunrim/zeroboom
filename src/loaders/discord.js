@@ -759,17 +759,20 @@ module.exports = async (app) => {
 
       // voiceMove 버튼 체크 (보이스 채널 이동)
       if (split[0] === 'voiceMove') {
+        // 채널 생성/이동이 3초를 넘기면 인터랙션 토큰이 만료되므로 먼저 defer
+        await interaction.deferReply({ ephemeral: true });
+
         const gameId = Number(split[1]);
         const matchData = await models.match.findOne({ where: { gameId } });
         if (!matchData) {
-          await interaction.reply({ content: '매치 데이터를 찾을 수 없습니다.', ephemeral: true });
+          await interaction.editReply({ content: '매치 데이터를 찾을 수 없습니다.' });
           return;
         }
 
         const freshMember = await interaction.guild.members.fetch(interaction.user.id);
         const voiceChannel = freshMember.voice ? freshMember.voice.channel : null;
         if (!voiceChannel) {
-          await interaction.reply({ content: '음성 채널에 접속한 상태에서 눌러주세요.', ephemeral: true });
+          await interaction.editReply({ content: '음성 채널에 접속한 상태에서 눌러주세요.' });
           return;
         }
 
@@ -800,10 +803,10 @@ module.exports = async (app) => {
             team2DiscordIds,
             channelName: interaction.channel ? interaction.channel.name : null,
           });
-          await interaction.reply({ content: '🔊 팀 보이스 채널로 이동했습니다!', ephemeral: true });
+          await interaction.editReply({ content: '🔊 팀 보이스 채널로 이동했습니다!' });
         } catch (e) {
           logger.error('팀 채널 생성/이동 오류:', e);
-          await interaction.reply({ content: '보이스 채널 이동 중 오류가 발생했습니다.', ephemeral: true });
+          await interaction.editReply({ content: '보이스 채널 이동 중 오류가 발생했습니다.' });
         }
         return;
       }
