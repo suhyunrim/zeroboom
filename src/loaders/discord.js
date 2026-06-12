@@ -23,7 +23,7 @@ const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
 const auditLog = require('../controller/audit-log');
-const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
+const { POSITION_EMOJI, TEAM_EMOJI, getMemberInfo } = require('../utils/pick-users-utils');
 const { withLock } = require('../utils/keyed-mutex');
 const {
   startOnboarding,
@@ -1601,6 +1601,47 @@ module.exports = async (app) => {
         } else {
           await interaction.update(mainUI);
         }
+        return;
+      }
+
+      // mmMemberModal 제출 (/매칭생성 멤버 선택 → 포지션 설정 UI로 연결)
+      if (split[0] === 'mmMemberModal') {
+        const timeKey = split[1];
+        const selectedUsers = interaction.fields.getSelectedUsers('members');
+
+        // 서버 멤버 정보로 LoL 닉네임 파싱 (인원뽑기와 동일한 규칙)
+        let membersById = new Map();
+        try {
+          membersById = await interaction.guild.members.fetch({ user: [...selectedUsers.keys()] });
+        } catch (e) {
+          logger.error('멤버 조회 실패:', e);
+        }
+
+        const pickedUsers = [];
+        const pickedMembersData = [];
+        for (const user of selectedUsers.values()) {
+          const member = membersById.get(user.id);
+          const info = member ? getMemberInfo(member) : { discordId: user.id, lolNickname: user.username };
+          pickedUsers.push(info.lolNickname);
+          pickedMembersData.push({ discordId: info.discordId, lolNickname: info.lolNickname });
+        }
+
+        const positionData = {};
+        pickedUsers.forEach((nickname) => {
+          positionData[nickname] = { team: '랜덤팀', position: '상관X' };
+        });
+
+        const commandList = await commandListLoader();
+        const pickUsersCommand = commandList.get('인원뽑기');
+        const ui = pickUsersCommand.buildPositionUI(pickedUsers, positionData, timeKey);
+        const reply = await interaction.reply(ui);
+        pickUsersData.set(timeKey, {
+          isPositionMode: true,
+          pickedUsers,
+          pickedMembersData,
+          positionData,
+          mainMessage: reply,
+        });
         return;
       }
     } catch (e) {

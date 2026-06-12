@@ -1,4 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { pickCount: PICK_COUNT } = require('../config');
 const matchController = require('../controller/match');
 const auditLog = require('../controller/audit-log');
 const { formatMatches, formatMatchWithRating } = require('../discord/embed-messages/matching-results');
@@ -9,6 +10,28 @@ const { selectAllConcepts } = require('../match-maker/concept-scorers');
 const MAX_MATCH_COUNT = 6;
 
 exports.run = async (groupName, interaction) => {
+  // 옵션 없이 실행 → 멤버 선택 모달 (제출 후 포지션 설정 UI로 연결)
+  if (!interaction.options.data || interaction.options.data.length === 0) {
+    const { ModalBuilder, UserSelectMenuBuilder, LabelBuilder } = require('discord.js');
+    const select = new UserSelectMenuBuilder()
+      .setCustomId('members')
+      .setMinValues(PICK_COUNT)
+      .setMaxValues(PICK_COUNT);
+    const label = new LabelBuilder()
+      .setLabel(`참가자 ${PICK_COUNT}명 선택`.slice(0, 45))
+      .setUserSelectMenuComponent(select);
+    const modal = new ModalBuilder()
+      .setCustomId(`mmMemberModal|${Date.now()}`)
+      .setTitle('매칭 멤버 선택')
+      .addComponents(label);
+    await interaction.showModal(modal);
+    return null;
+  }
+
+  if (interaction.options.data.length < PICK_COUNT) {
+    return `유저를 ${PICK_COUNT}명 모두 입력해주세요. (옵션 없이 실행하면 멤버 선택창이 열립니다)`;
+  }
+
   const userPool = new Array();
   const team1 = new Array();
   const team2 = new Array();
@@ -356,16 +379,16 @@ exports.conf = {
   requireGroup: true,
   aliases: ['매칭생성', '자동매칭', 'mm'],
   args: [
-    ['string', '유저1', '유저1 닉네임', true],
-    ['string', '유저2', '유저2 닉네임', true],
-    ['string', '유저3', '유저3 닉네임', true],
-    ['string', '유저4', '유저4 닉네임', true],
-    ['string', '유저5', '유저5 닉네임', true],
-    ['string', '유저6', '유저6 닉네임', true],
-    ['string', '유저7', '유저7 닉네임', true],
-    ['string', '유저8', '유저8 닉네임', true],
-    ['string', '유저9', '유저9 닉네임', true],
-    ['string', '유저10', '유저10 닉네임', true],
+    ['string', '유저1', '유저1 닉네임 (전부 비우면 멤버 선택창)', false],
+    ['string', '유저2', '유저2 닉네임', false],
+    ['string', '유저3', '유저3 닉네임', false],
+    ['string', '유저4', '유저4 닉네임', false],
+    ['string', '유저5', '유저5 닉네임', false],
+    ['string', '유저6', '유저6 닉네임', false],
+    ['string', '유저7', '유저7 닉네임', false],
+    ['string', '유저8', '유저8 닉네임', false],
+    ['string', '유저9', '유저9 닉네임', false],
+    ['string', '유저10', '유저10 닉네임', false],
   ],
 };
 
