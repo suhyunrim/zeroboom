@@ -27,11 +27,13 @@ class CommandList {
 			const slashCommand = new SlashCommandBuilder().setName(prefix + commandName).setDescription(command.help.description);
 			for (let argument of command.conf.args) {
 				const isRequired = argument[3] !== false; // 기본값은 true
+				const hasAutocomplete = argument[4] === 'autocomplete';
 				if (argument[0] == 'string') {
 					slashCommand.addStringOption(option =>
 						option.setName(argument[1])
 								.setDescription(argument[2])
-								.setRequired(isRequired));
+								.setRequired(isRequired)
+								.setAutocomplete(hasAutocomplete));
 				} else if (argument[0] == 'boolean') {
 					slashCommand.addBooleanOption(option =>
 						option.setName(argument[1])

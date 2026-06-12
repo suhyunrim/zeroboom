@@ -23,7 +23,7 @@ const matchController = require('../controller/match');
 const honorController = require('../controller/honor');
 const tempVoiceController = require('../controller/temp-voice');
 const auditLog = require('../controller/audit-log');
-const { POSITION_EMOJI, TEAM_EMOJI, getMemberInfo } = require('../utils/pick-users-utils');
+const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 const { withLock } = require('../utils/keyed-mutex');
 const {
   startOnboarding,
@@ -190,6 +190,23 @@ module.exports = async (app) => {
               new MatchVoteSession(participantDiscordIds, output.match.length, { blind: voteMode === 'blind' }),
             );
           }
+
+          // 포지션 정하기 진입 버튼 (입력 멤버 기반 포지션 설정 UI로 연결)
+          if (output.components && output.pickedUsers) {
+            const timeKey = String(output.time);
+            pickUsersData.set(timeKey, {
+              pickedUsers: output.pickedUsers,
+              pickedMembersData: output.pickedUsers.map((name) => ({ discordId: null, lolNickname: name })),
+            });
+            output.components.push(
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`pickUsers|${timeKey}|position`)
+                  .setLabel('🎯 포지션 정하기')
+                  .setStyle(ButtonStyle.Success),
+              ),
+            );
+          }
         }
 
         // 인원뽑기 관련 명령어 버튼 데이터 저장
@@ -229,6 +246,51 @@ module.exports = async (app) => {
     } catch (e) {
       logger.error(e);
       return `[Error] ${command.help.name}`;
+    }
+  });
+
+  // 슬래시 명령어 자동완성 (매칭생성 유저 옵션 — 등록 + 디코 연동 유저만 제안)
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isAutocomplete()) return;
+
+    try {
+      const commandList = await commandListLoader();
+      const command = commandList.get(interaction.commandName);
+      if (!command || command.conf.aliases[0] !== '매칭생성') return;
+
+      const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+      if (!group) {
+        await interaction.respond([]);
+        return;
+      }
+
+      const users = await models.user.findAll({
+        where: { groupId: group.id, primaryPuuid: null, discordId: { [Op.ne]: null } },
+        attributes: ['puuid'],
+      });
+      const summoners = await models.summoner.findAll({
+        where: { puuid: users.map((u) => u.puuid) },
+        attributes: ['name'],
+      });
+
+      // 다른 칸에 이미 입력된 유저는 제안에서 제외 (@접미사는 내부 문법이라 이름부만 비교)
+      const focused = interaction.options.getFocused(true);
+      const taken = new Set(
+        interaction.options.data
+          .filter((o) => o.name !== focused.name && o.value)
+          .map((o) => String(o.value).split('@')[0]),
+      );
+
+      const query = String(focused.value || '').trim().toLowerCase();
+      const names = summoners
+        .map((s) => s.name)
+        .filter((name) => !taken.has(name) && (!query || name.toLowerCase().includes(query)))
+        .sort((a, b) => a.localeCompare(b, 'ko'))
+        .slice(0, 25);
+
+      await interaction.respond(names.map((name) => ({ name: name.slice(0, 100), value: name.slice(0, 100) })));
+    } catch (e) {
+      logger.error('자동완성 처리 오류:', e);
     }
   });
 
@@ -1604,46 +1666,6 @@ module.exports = async (app) => {
         return;
       }
 
-      // mmMemberModal 제출 (/매칭생성 멤버 선택 → 포지션 설정 UI로 연결)
-      if (split[0] === 'mmMemberModal') {
-        const timeKey = split[1];
-        const selectedUsers = interaction.fields.getSelectedUsers('members');
-
-        // 서버 멤버 정보로 LoL 닉네임 파싱 (인원뽑기와 동일한 규칙)
-        let membersById = new Map();
-        try {
-          membersById = await interaction.guild.members.fetch({ user: [...selectedUsers.keys()] });
-        } catch (e) {
-          logger.error('멤버 조회 실패:', e);
-        }
-
-        const pickedUsers = [];
-        const pickedMembersData = [];
-        for (const user of selectedUsers.values()) {
-          const member = membersById.get(user.id);
-          const info = member ? getMemberInfo(member) : { discordId: user.id, lolNickname: user.username };
-          pickedUsers.push(info.lolNickname);
-          pickedMembersData.push({ discordId: info.discordId, lolNickname: info.lolNickname });
-        }
-
-        const positionData = {};
-        pickedUsers.forEach((nickname) => {
-          positionData[nickname] = { team: '랜덤팀', position: '상관X' };
-        });
-
-        const commandList = await commandListLoader();
-        const pickUsersCommand = commandList.get('인원뽑기');
-        const ui = pickUsersCommand.buildPositionUI(pickedUsers, positionData, timeKey);
-        const reply = await interaction.reply(ui);
-        pickUsersData.set(timeKey, {
-          isPositionMode: true,
-          pickedUsers,
-          pickedMembersData,
-          positionData,
-          mainMessage: reply,
-        });
-        return;
-      }
     } catch (e) {
       logger.error('모달 처리 오류:', e);
     }
