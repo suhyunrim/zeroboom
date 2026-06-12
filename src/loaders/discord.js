@@ -190,6 +190,23 @@ module.exports = async (app) => {
               new MatchVoteSession(participantDiscordIds, output.match.length, { blind: voteMode === 'blind' }),
             );
           }
+
+          // 포지션 정하기 진입 버튼 (입력 멤버 기반 포지션 설정 UI로 연결)
+          if (output.components && output.pickedUsers) {
+            const timeKey = String(output.time);
+            pickUsersData.set(timeKey, {
+              pickedUsers: output.pickedUsers,
+              pickedMembersData: output.pickedUsers.map((name) => ({ discordId: null, lolNickname: name })),
+            });
+            output.components.push(
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`pickUsers|${timeKey}|position`)
+                  .setLabel('🎯 포지션 정하기')
+                  .setStyle(ButtonStyle.Success),
+              ),
+            );
+          }
         }
 
         // 인원뽑기 관련 명령어 버튼 데이터 저장
@@ -229,6 +246,51 @@ module.exports = async (app) => {
     } catch (e) {
       logger.error(e);
       return `[Error] ${command.help.name}`;
+    }
+  });
+
+  // 슬래시 명령어 자동완성 (매칭생성 유저 옵션 — 등록 + 디코 연동 유저만 제안)
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isAutocomplete()) return;
+
+    try {
+      const commandList = await commandListLoader();
+      const command = commandList.get(interaction.commandName);
+      if (!command || command.conf.aliases[0] !== '매칭생성') return;
+
+      const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+      if (!group) {
+        await interaction.respond([]);
+        return;
+      }
+
+      const users = await models.user.findAll({
+        where: { groupId: group.id, primaryPuuid: null, discordId: { [Op.ne]: null } },
+        attributes: ['puuid'],
+      });
+      const summoners = await models.summoner.findAll({
+        where: { puuid: users.map((u) => u.puuid) },
+        attributes: ['name'],
+      });
+
+      // 다른 칸에 이미 입력된 유저는 제안에서 제외 (@접미사는 내부 문법이라 이름부만 비교)
+      const focused = interaction.options.getFocused(true);
+      const taken = new Set(
+        interaction.options.data
+          .filter((o) => o.name !== focused.name && o.value)
+          .map((o) => String(o.value).split('@')[0]),
+      );
+
+      const query = String(focused.value || '').trim().toLowerCase();
+      const names = summoners
+        .map((s) => s.name)
+        .filter((name) => !taken.has(name) && (!query || name.toLowerCase().includes(query)))
+        .sort((a, b) => a.localeCompare(b, 'ko'))
+        .slice(0, 25);
+
+      await interaction.respond(names.map((name) => ({ name: name.slice(0, 100), value: name.slice(0, 100) })));
+    } catch (e) {
+      logger.error('자동완성 처리 오류:', e);
     }
   });
 
@@ -1603,6 +1665,7 @@ module.exports = async (app) => {
         }
         return;
       }
+
     } catch (e) {
       logger.error('모달 처리 오류:', e);
     }

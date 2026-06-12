@@ -108,9 +108,6 @@ npm start
 
 # 테스트 실행
 npm test
-
-# 린트 검사
-npm run lint
 ```
 
 ## 프로젝트 구조

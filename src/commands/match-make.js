@@ -10,6 +10,7 @@ const MAX_MATCH_COUNT = 6;
 
 exports.run = async (groupName, interaction) => {
   const userPool = new Array();
+  const parsedNames = new Array();
   const team1 = new Array();
   const team2 = new Array();
   const groups = new Map();
@@ -20,6 +21,7 @@ exports.run = async (groupName, interaction) => {
   interaction.options.data.forEach(function(optionData) {
     const userInfo = optionData.value.split('@');
     const summonerName = userInfo[0];
+    parsedNames.push(summonerName);
 
     // optionData에 discordId가 있으면 매핑에 추가
     if (optionData.discordId) {
@@ -202,6 +204,7 @@ exports.run = async (groupName, interaction) => {
     allMatches,
     ratingCache,
     time,
+    pickedUsers: parsedNames,
   };
 };
 
@@ -356,16 +359,16 @@ exports.conf = {
   requireGroup: true,
   aliases: ['매칭생성', '자동매칭', 'mm'],
   args: [
-    ['string', '유저1', '유저1 닉네임', true],
-    ['string', '유저2', '유저2 닉네임', true],
-    ['string', '유저3', '유저3 닉네임', true],
-    ['string', '유저4', '유저4 닉네임', true],
-    ['string', '유저5', '유저5 닉네임', true],
-    ['string', '유저6', '유저6 닉네임', true],
-    ['string', '유저7', '유저7 닉네임', true],
-    ['string', '유저8', '유저8 닉네임', true],
-    ['string', '유저9', '유저9 닉네임', true],
-    ['string', '유저10', '유저10 닉네임', true],
+    ['string', '유저1', '유저1 닉네임', true, 'autocomplete'],
+    ['string', '유저2', '유저2 닉네임', true, 'autocomplete'],
+    ['string', '유저3', '유저3 닉네임', true, 'autocomplete'],
+    ['string', '유저4', '유저4 닉네임', true, 'autocomplete'],
+    ['string', '유저5', '유저5 닉네임', true, 'autocomplete'],
+    ['string', '유저6', '유저6 닉네임', true, 'autocomplete'],
+    ['string', '유저7', '유저7 닉네임', true, 'autocomplete'],
+    ['string', '유저8', '유저8 닉네임', true, 'autocomplete'],
+    ['string', '유저9', '유저9 닉네임', true, 'autocomplete'],
+    ['string', '유저10', '유저10 닉네임', true, 'autocomplete'],
   ],
 };
 
