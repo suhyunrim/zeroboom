@@ -249,6 +249,10 @@ module.exports = async (app) => {
     }
   });
 
+  // 자동완성용 등록 유저 이름 캐시 (guildId → { names, expires }) — 키 입력마다 쿼리하지 않도록
+  const autocompleteCache = new Map();
+  const AUTOCOMPLETE_CACHE_TTL = 90 * 1000;
+
   // 슬래시 명령어 자동완성 (매칭생성 유저 옵션 — 등록 + 디코 연동 유저만 제안)
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isAutocomplete()) return;
@@ -258,20 +262,31 @@ module.exports = async (app) => {
       const command = commandList.get(interaction.commandName);
       if (!command || command.conf.aliases[0] !== '매칭생성') return;
 
-      const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
-      if (!group) {
-        await interaction.respond([]);
-        return;
-      }
+      let cached = autocompleteCache.get(interaction.guildId);
+      if (!cached || cached.expires < Date.now()) {
+        const group = await models.group.findOne({ where: { discordGuildId: interaction.guildId } });
+        if (!group) {
+          await interaction.respond([]);
+          return;
+        }
 
-      const users = await models.user.findAll({
-        where: { groupId: group.id, primaryPuuid: null, discordId: { [Op.ne]: null } },
-        attributes: ['puuid'],
-      });
-      const summoners = await models.summoner.findAll({
-        where: { puuid: users.map((u) => u.puuid) },
-        attributes: ['name'],
-      });
+        const users = await models.user.findAll({
+          where: { groupId: group.id, primaryPuuid: null, discordId: { [Op.ne]: null } },
+          attributes: ['puuid'],
+        });
+        const summoners = await models.summoner.findAll({
+          where: { puuid: users.map((u) => u.puuid) },
+          attributes: ['name'],
+        });
+
+        cached = {
+          names: summoners
+            .map((s) => ({ name: s.name, lower: s.name.toLowerCase() }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+          expires: Date.now() + AUTOCOMPLETE_CACHE_TTL,
+        };
+        autocompleteCache.set(interaction.guildId, cached);
+      }
 
       // 다른 칸에 이미 입력된 유저는 제안에서 제외 (@접미사는 내부 문법이라 이름부만 비교)
       const focused = interaction.options.getFocused(true);
@@ -282,11 +297,10 @@ module.exports = async (app) => {
       );
 
       const query = String(focused.value || '').trim().toLowerCase();
-      const names = summoners
-        .map((s) => s.name)
-        .filter((name) => !taken.has(name) && (!query || name.toLowerCase().includes(query)))
-        .sort((a, b) => a.localeCompare(b, 'ko'))
-        .slice(0, 25);
+      const names = cached.names
+        .filter((e) => !taken.has(e.name) && (!query || e.lower.includes(query)))
+        .slice(0, 25)
+        .map((e) => e.name);
 
       await interaction.respond(names.map((name) => ({ name: name.slice(0, 100), value: name.slice(0, 100) })));
     } catch (e) {
