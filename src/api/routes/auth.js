@@ -7,7 +7,13 @@ const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const userController = require('../../controller/user');
-const { verifyToken, TOKEN_TTL } = require('../middlewares/auth');
+const {
+  verifyToken,
+  TOKEN_TTL,
+  signSessionToken,
+  setSessionCookie,
+  clearSessionCookie,
+} = require('../middlewares/auth');
 
 const route = Router();
 
@@ -162,9 +168,26 @@ module.exports = (app) => {
         if (subUser) subPuuid = subUser.puuid;
       }
 
-      return res.status(200).json({ result: { ...decoded, subPuuid } });
+      // 세션 쿠키를 발급/갱신한다(부팅마다 호출되므로 슬라이딩 만료 효과).
+      // ★ 응답 헤더엔 Set-Cookie(JWT) 하나만 둔다. X-Renewed-Token 등 다른 JWT 헤더를
+      //   같이 실으면 nginx proxy_buffer(기본 ~4k)를 초과해 502가 난다.
+      //   프론트가 localStorage 재시드에 쓸 토큰은 헤더가 아니라 body(result.token)로 전달한다.
+      const { iat, exp, ...payload } = decoded;
+      const token = signSessionToken(payload);
+      setSessionCookie(res, token);
+
+      return res.status(200).json({ result: { ...decoded, subPuuid, token } });
     } catch (e) {
       return res.status(401).json({ result: '유효하지 않은 토큰입니다.' });
     }
+  });
+
+  /**
+   * POST /api/auth/logout
+   * 세션 쿠키 제거. httpOnly 쿠키라 프론트 JS로는 못 지우므로 서버가 처리한다.
+   */
+  route.post('/logout', (req, res) => {
+    clearSessionCookie(res);
+    return res.status(200).json({ result: 'ok' });
   });
 };

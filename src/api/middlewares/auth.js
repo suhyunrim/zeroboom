@@ -2,25 +2,44 @@ const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const models = require('../../db/models');
 
-// JWT 슬라이딩 만료 설정
 const TOKEN_TTL = '7d';
-// 만료까지 남은 시간이 이 값(3.5일) 미만이면 토큰을 재발급한다.
-// 정상적으로 활동하는 동안에는 만료 전 갱신이 반복되어 사실상 만료되지 않는다.
-const RENEW_THRESHOLD_SEC = 3.5 * 24 * 60 * 60;
+// express.js의 CORS exposedHeaders가 참조 (현재 X-Renewed-Token 자체는 사용 안 함)
 const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
 
-/**
- * 디코딩된 payload로 토큰을 재발급해 응답 헤더에 실어준다.
- * 만료가 임박(RENEW_THRESHOLD_SEC 미만)했을 때만 갱신해 불필요한 재발급을 막는다.
- * 프론트는 응답에 이 헤더가 있으면 저장된 토큰을 교체한다.
- */
-const renewTokenIfNeeded = (res, decoded) => {
-  const now = Math.floor(Date.now() / 1000);
-  if (!decoded || !decoded.exp || decoded.exp - now > RENEW_THRESHOLD_SEC) return;
-  // iat/exp는 sign 옵션과 충돌하므로 제거 후 재발급
-  const { iat, exp, ...payload } = decoded;
-  const token = jwt.sign(payload, config.jwtSecret, { expiresIn: TOKEN_TTL });
-  res.setHeader(RENEWED_TOKEN_HEADER, token);
+// 세션 쿠키 설정
+// 모바일 Safari는 zeroboom.lol 도메인 패밀리(서브도메인 graves.zeroboom.lol 포함)의
+// localStorage에 추적방지 만료 캡을 걸어 새로고침 시 토큰이 사라진다. 서버가 Set-Cookie로
+// 심는 httpOnly 쿠키는 script-writable 저장소가 아니라 이 캡 대상이 아니므로 세션이 유지된다.
+// graves.zeroboom.lol ↔ zeroboom.lol은 same-site라 SameSite=Lax 쿠키가 /api 요청에 실린다.
+//
+// ★ 헤더 크기 주의: nginx proxy_buffer_size(기본 ~4k)를 넘기면 502가 난다. JWT(~1.5KB)를
+//   응답 헤더에 2개 실으면 초과하므로, 한 응답에 큰 JWT 헤더는 최대 1개만 둔다.
+//   - 콜백: Location의 ?token= 만 (쿠키 안 심음)
+//   - /me: Set-Cookie 만 (프론트 재시드 토큰은 응답 body로 전달)
+const SESSION_COOKIE = 'zb_session';
+const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/',
+};
+
+const signSessionToken = (payload) => jwt.sign(payload, config.jwtSecret, { expiresIn: TOKEN_TTL });
+
+const setSessionCookie = (res, token) => {
+  res.cookie(SESSION_COOKIE, token, { ...SESSION_COOKIE_OPTIONS, maxAge: COOKIE_MAX_AGE_MS });
+};
+
+const clearSessionCookie = (res) => {
+  res.clearCookie(SESSION_COOKIE, SESSION_COOKIE_OPTIONS);
+};
+
+// Authorization 헤더(Bearer)를 우선 사용하고, 없으면 세션 쿠키로 폴백한다.
+const getTokenFromReq = (req) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.split(' ')[1];
+  return (req.cookies && req.cookies[SESSION_COOKIE]) || null;
 };
 
 /**
@@ -28,15 +47,13 @@ const renewTokenIfNeeded = (res, decoded) => {
  * req.user에 디코딩된 유저 정보를 설정
  */
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = getTokenFromReq(req);
+  if (!token) {
     return res.status(401).json({ result: '인증이 필요합니다.' });
   }
 
   try {
-    const token = authHeader.split(' ')[1];
     req.user = jwt.verify(token, config.jwtSecret);
-    renewTokenIfNeeded(res, req.user);
     return next();
   } catch (e) {
     return res.status(401).json({ result: '유효하지 않은 토큰입니다.' });
@@ -44,15 +61,14 @@ const verifyToken = (req, res, next) => {
 };
 
 /**
- * Authorization 헤더가 있으면 디코딩해서 req.user 세팅, 없거나 invalid면 그냥 통과.
+ * Authorization 헤더 또는 세션 쿠키가 있으면 디코딩해서 req.user 세팅, 없거나 invalid면 그냥 통과.
  * 비로그인도 허용해야 하는 엔드포인트용 (예: 방명록 댓글 목록).
  */
 const optionalAuth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
+  const token = getTokenFromReq(req);
+  if (!token) return next();
   try {
-    req.user = jwt.verify(authHeader.split(' ')[1], config.jwtSecret);
-    renewTokenIfNeeded(res, req.user);
+    req.user = jwt.verify(token, config.jwtSecret);
   } catch (e) {
     // 무효 토큰은 그냥 비로그인 취급
   }
@@ -92,7 +108,10 @@ module.exports = {
   optionalAuth,
   requireGroupAdmin,
   isGroupAdmin,
-  renewTokenIfNeeded,
   RENEWED_TOKEN_HEADER,
   TOKEN_TTL,
+  SESSION_COOKIE,
+  signSessionToken,
+  setSessionCookie,
+  clearSessionCookie,
 };
