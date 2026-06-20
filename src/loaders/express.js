@@ -1,4 +1,5 @@
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const methodOverride = require('method-override');
 const Sentry = require('@sentry/node');
@@ -29,6 +30,7 @@ module.exports = (app) => {
       exposedHeaders: [RENEWED_TOKEN_HEADER],
     }),
   );
+  app.use(cookieParser());
   app.use(methodOverride());
   app.use(bodyParser.json());
   app.use(config.api.prefix, routes());
