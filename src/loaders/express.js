@@ -18,8 +18,18 @@ module.exports = (app) => {
     res.status(200).end();
   });
   app.enable('trust proxy');
+  // 프론트(graves.zeroboom.lol)와 API(zeroboom.lol)는 같은 site의 다른 서브도메인이라
+  // cross-origin이다. 세션 쿠키를 cross-origin 요청에 실으려면 credentials 허용이 필요하고,
+  // 이때 Allow-Origin은 와일드카드(*)가 불가하므로 요청 Origin을 반사한다.
+  // (쿠키는 SameSite=Lax라 same-site인 zeroboom.lol 서브도메인에서만 전송된다)
   // X-Renewed-Token: 슬라이딩 만료로 재발급된 JWT를 프론트가 읽을 수 있도록 노출
-  app.use(cors({ exposedHeaders: [RENEWED_TOKEN_HEADER] }));
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+      exposedHeaders: [RENEWED_TOKEN_HEADER],
+    }),
+  );
   app.use(cookieParser());
   app.use(methodOverride());
   app.use(bodyParser.json());
