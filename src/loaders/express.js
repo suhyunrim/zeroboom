@@ -1,4 +1,5 @@
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const methodOverride = require('method-override');
 const Sentry = require('@sentry/node');
@@ -19,6 +20,7 @@ module.exports = (app) => {
   app.enable('trust proxy');
   // X-Renewed-Token: 슬라이딩 만료로 재발급된 JWT를 프론트가 읽을 수 있도록 노출
   app.use(cors({ exposedHeaders: [RENEWED_TOKEN_HEADER] }));
+  app.use(cookieParser());
   app.use(methodOverride());
   app.use(bodyParser.json());
   app.use(config.api.prefix, routes());

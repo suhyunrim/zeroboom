@@ -1,13 +1,18 @@
 const { Router } = require('express');
 const axios = require('axios');
-const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const models = require('../../db/models');
 const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const userController = require('../../controller/user');
-const { verifyToken, TOKEN_TTL } = require('../middlewares/auth');
+const {
+  verifyToken,
+  RENEWED_TOKEN_HEADER,
+  signSessionToken,
+  setSessionCookie,
+  clearSessionCookie,
+} = require('../middlewares/auth');
 
 const route = Router();
 
@@ -135,9 +140,13 @@ module.exports = (app) => {
         groups,
       };
 
-      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: TOKEN_TTL });
+      const token = signSessionToken(payload);
 
-      // 6. 프론트엔드로 리다이렉트 (토큰 전달)
+      // 세션 쿠키 설정: 모바일 Safari ITP가 localStorage(헤더 토큰)를 비워도
+      // 쿠키로 세션이 유지되어 새로고침 시 로그인이 풀리지 않는다.
+      setSessionCookie(res, token);
+
+      // 6. 프론트엔드로 리다이렉트 (토큰 전달 — 쿠키와 병행)
       const frontendUrl = config.frontendUrl || 'http://localhost:5173';
       res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
     } catch (e) {
@@ -162,9 +171,26 @@ module.exports = (app) => {
         if (subUser) subPuuid = subUser.puuid;
       }
 
+      // 부팅 시 프론트 localStorage가 비어있어도(모바일 ITP 등) 쿠키 세션으로 /me에 도달한다.
+      // 이때 새 토큰을 재발급해 헤더+쿠키로 내려주면 프론트가 localStorage를 다시 채워
+      // 디스코드 토큰에 의존하는 UI(예: 승부예측 게이트)가 정상 동작한다.
+      const { iat, exp, ...payload } = decoded;
+      const fresh = signSessionToken(payload);
+      res.setHeader(RENEWED_TOKEN_HEADER, fresh);
+      setSessionCookie(res, fresh);
+
       return res.status(200).json({ result: { ...decoded, subPuuid } });
     } catch (e) {
       return res.status(401).json({ result: '유효하지 않은 토큰입니다.' });
     }
+  });
+
+  /**
+   * POST /api/auth/logout
+   * 세션 쿠키 제거. httpOnly 쿠키라 프론트 JS로는 못 지우므로 서버가 처리한다.
+   */
+  route.post('/logout', (req, res) => {
+    clearSessionCookie(res);
+    return res.status(200).json({ result: 'ok' });
   });
 };
