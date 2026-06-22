@@ -64,6 +64,7 @@ module.exports = (app) => {
       }, {});
 
       const voiceMap = {};
+      const nicknameMap = {};
       if (group && group.discordGuildId && discordIds.length > 0) {
         const activities = await models.voice_activity.findAll({
           where: { guildId: group.discordGuildId, discordId: discordIds },
@@ -72,6 +73,20 @@ module.exports = (app) => {
         activities.forEach((a) => {
           voiceMap[a.discordId] = a.lastJoinedAt;
         });
+
+        // 디스코드 서버 닉네임 조회 (서버 닉네임 → 글로벌 표시명 → 유저네임 순). DB에 없으므로 봇 클라이언트에서 실시간 조회.
+        const client = req.app.discordClient;
+        const guild = client && client.guilds.cache.get(group.discordGuildId);
+        if (guild) {
+          try {
+            const guildMembers = await guild.members.fetch({ user: discordIds });
+            guildMembers.forEach((m) => {
+              nicknameMap[m.id] = m.displayName;
+            });
+          } catch (e) {
+            logger.warn(`디스코드 닉네임 조회 실패 (group ${groupId}): ${e.message}`);
+          }
+        }
       }
 
       const result = mainUsers.map((u) => {
@@ -80,6 +95,7 @@ module.exports = (app) => {
           puuid: u.puuid,
           discordId: u.discordId,
           name: nameMap[u.puuid] || '알 수 없음',
+          discordNickname: nicknameMap[u.discordId] || null,
           role: u.role,
           win: u.win,
           lose: u.lose,
