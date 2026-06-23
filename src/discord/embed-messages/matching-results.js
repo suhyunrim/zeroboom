@@ -106,13 +106,13 @@ module.exports.formatMatches = (matches) => {
     ) => {
       // 🎯 종합 포지션 적합도 배지 (플랜 비교용, 산출 가능할 때만)
       const posBadge = positionScore != null ? `  ·  🎯 포지션 적합도 ${positionScore}점` : '';
+      // 블록(플랜/컨셉) 사이를 빈 줄로 띄워, 헤더가 다음 블록의 시작임을 명확히
+      if (fields.length !== 0) {
+        fields.push({ name: '​', value: '​' });
+      }
       if (conceptDesc) {
-        if (fields.length !== 0) {
-          fields.push({ name: '​', value: '​' });
-        }
         fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}${posBadge}`, value: '​', inline: false });
       } else {
-        // 플랜 모드: 빈 구분줄 대신 점수 헤더로 각 안을 구분
         fields.push({ name: `Plan ${idx + 1}${posBadge}`, value: '​', inline: false });
       }
       // 플랜 리스트는 6안 × 2팀 × 10명 = 120줄까지 가능 → 줄당 링크 박으면 embed 6000자 한도 초과 (footer 링크로 대체)
