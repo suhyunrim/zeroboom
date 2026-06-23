@@ -2,6 +2,7 @@ const {
   computeMatchPositionScore,
   computeMatchPositionScores,
   computeTeamPositionScore,
+  positionGapWarning,
 } = require('../../src/match-maker/position-balance');
 
 // ratingCache 형태의 플레이어 헬퍼
@@ -89,5 +90,33 @@ describe('computeMatchPositionScores (팀별 + 종합)', () => {
   it('5명이 아니면 팀별/종합 모두 null', () => {
     const scores = computeMatchPositionScores([P('TOP', 100)], distinctTeam(100));
     expect(scores).toEqual({ team1: null, team2: null, overall: null });
+  });
+});
+
+describe('positionGapWarning (점수차 2단계 경고)', () => {
+  it('점수차 20 미만 → 경고 없음(null)', () => {
+    expect(positionGapWarning(90, 80)).toBeNull(); // gap 10
+    expect(positionGapWarning(80, 61)).toBeNull(); // gap 19 (경계 직전)
+  });
+
+  it('점수차 20~29 → ⚠️ 주의', () => {
+    expect(positionGapWarning(80, 60).level).toBe('warn'); // gap 20 (경계)
+    const w = positionGapWarning(95, 66); // gap 29
+    expect(w.level).toBe('warn');
+    expect(w.emoji).toBe('⚠️');
+    expect(w.gap).toBe(29);
+  });
+
+  it('점수차 30 이상 → 🔴 심한 쏠림', () => {
+    expect(positionGapWarning(100, 70).level).toBe('severe'); // gap 30 (경계)
+    const s = positionGapWarning(95, 50); // gap 45
+    expect(s.level).toBe('severe');
+    expect(s.emoji).toBe('🔴');
+  });
+
+  it('방향 무관(절댓값) + 점수 null이면 경고 없음', () => {
+    expect(positionGapWarning(60, 85).level).toBe('warn'); // 역방향(team2가 높음) gap 25
+    expect(positionGapWarning(null, 80)).toBeNull();
+    expect(positionGapWarning(80, null)).toBeNull();
   });
 });
