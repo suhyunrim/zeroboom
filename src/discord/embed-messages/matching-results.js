@@ -39,7 +39,7 @@ const frontendFooterField = () => {
 
 // team: 배열, 각 원소는 { display, puuid } 또는 문자열(레거시)
 // withLink=false면 프로필 링크 생략 (플랜 리스트처럼 줄 수 많아 embed 6000자 초과 우려 시)
-const format = (label, team, winRate, emoji, avgRating = 0, withLink = true) => {
+const format = (label, team, winRate, emoji, avgRating = 0, withLink = true, positionScore = null) => {
   let message = team
     .map((p) => {
       const display = typeof p === 'string' ? p : p.display;
@@ -51,8 +51,9 @@ const format = (label, team, winRate, emoji, avgRating = 0, withLink = true) => 
     })
     .join('\n');
   const avgTierStr = formatAvgTierBadge(avgRating);
+  const posStr = positionScore != null ? ` 🎯${positionScore}` : '';
   return {
-    name: `**${label}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}`,
+    name: `**${label}** \`${emoji}${formatPercentage(winRate)}\` ${avgTierStr}${posStr}`,
     value: message,
     inline: true,
   };
@@ -87,20 +88,37 @@ module.exports.formatMatches = (matches) => {
   const fields = [];
 
   matches.forEach(
-    ({ team1, team2, team1WinRate, team1AvgRating, team2AvgRating, conceptLabel, conceptEmoji, conceptDesc }, idx) => {
-      if (conceptDesc) {
-        if (fields.length !== 0) {
-          fields.push({ name: '​', value: '​' });
-        }
-        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}`, value: '​', inline: false });
-      } else if (fields.length !== 0) {
+    (
+      {
+        team1,
+        team2,
+        team1WinRate,
+        team1AvgRating,
+        team2AvgRating,
+        conceptLabel,
+        conceptEmoji,
+        conceptDesc,
+        positionScore,
+        team1PositionScore,
+        team2PositionScore,
+      },
+      idx,
+    ) => {
+      // 🎯 종합 포지션 적합도 배지 (플랜 비교용, 산출 가능할 때만)
+      const posBadge = positionScore != null ? `  ·  🎯 포지션 적합도 ${positionScore}점` : '';
+      // 블록(플랜/컨셉) 사이를 빈 줄로 띄워, 헤더가 다음 블록의 시작임을 명확히
+      if (fields.length !== 0) {
         fields.push({ name: '​', value: '​' });
       }
-      const label = conceptLabel ? `Team 1` : `Plan ${idx + 1}`;
-      const label2 = conceptLabel ? `Team 2` : `Plan ${idx + 1}`;
+      if (conceptDesc) {
+        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}${posBadge}`, value: '​', inline: false });
+      } else {
+        fields.push({ name: `Plan ${idx + 1}${posBadge}`, value: '​', inline: false });
+      }
       // 플랜 리스트는 6안 × 2팀 × 10명 = 120줄까지 가능 → 줄당 링크 박으면 embed 6000자 한도 초과 (footer 링크로 대체)
-      fields.push(format(label, team1, team1WinRate, '🐶', team1AvgRating, false));
-      fields.push(format(label2, team2, 1 - team1WinRate, '🐱', team2AvgRating, false));
+      // 팀 헤더 끝의 🎯N = 해당 팀의 포지션 적합도 (종합과 별개)
+      fields.push(format('Team 1', team1, team1WinRate, '🐶', team1AvgRating, false, team1PositionScore));
+      fields.push(format('Team 2', team2, 1 - team1WinRate, '🐱', team2AvgRating, false, team2PositionScore));
     },
   );
 

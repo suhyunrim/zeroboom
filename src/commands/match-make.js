@@ -5,6 +5,7 @@ const { formatMatches, formatMatchWithRating } = require('../discord/embed-messa
 const models = require('../db/models');
 const { formatTierBadge, POSITION_ABBR, normalizePosition } = require('../utils/tierUtils');
 const { selectAllConcepts } = require('../match-maker/concept-scorers');
+const { computeMatchPositionScores } = require('../match-maker/position-balance');
 
 const MAX_MATCH_COUNT = 6;
 
@@ -130,6 +131,12 @@ exports.run = async (groupName, interaction) => {
     // 원본 이름 보존 (버튼 클릭 시 사용)
     match.team1Names = team1WithRating.map(({ name }) => name);
     match.team2Names = team2WithRating.map(({ name }) => name);
+
+    // 포지션 적합도 점수 (0~100): 각 플랜이 낼 수 있는 최선 배정 기준 (팀별 + 종합)
+    const posScores = computeMatchPositionScores(team1WithRating, team2WithRating);
+    match.positionScore = posScores.overall;
+    match.team1PositionScore = posScores.team1;
+    match.team2PositionScore = posScores.team2;
   }
 
   result.result = result.result.filter((elem) => {
