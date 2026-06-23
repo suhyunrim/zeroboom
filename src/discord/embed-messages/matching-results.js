@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { formatAvgTierBadge } = require('../../utils/tierUtils');
+const { positionGapWarning } = require('../../match-maker/position-balance');
 
 const formatPercentage = (value) => `${(value * 100).toFixed(2)}%`;
 
@@ -106,14 +107,17 @@ module.exports.formatMatches = (matches) => {
     ) => {
       // 🎯 종합 포지션 적합도 배지 (플랜 비교용, 산출 가능할 때만)
       const posBadge = positionScore != null ? `  ·  🎯 포지션 적합도 ${positionScore}점` : '';
+      // ⚠️/🔴 양팀 점수차가 크면 불균형 경고 배지
+      const warn = positionGapWarning(team1PositionScore, team2PositionScore);
+      const warnBadge = warn ? `  ·  ${warn.emoji} ${warn.label}` : '';
       // 블록(플랜/컨셉) 사이를 빈 줄로 띄워, 헤더가 다음 블록의 시작임을 명확히
       if (fields.length !== 0) {
         fields.push({ name: '​', value: '​' });
       }
       if (conceptDesc) {
-        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}${posBadge}`, value: '​', inline: false });
+        fields.push({ name: `${conceptEmoji} ${conceptLabel} - ${conceptDesc}${posBadge}${warnBadge}`, value: '​', inline: false });
       } else {
-        fields.push({ name: `Plan ${idx + 1}${posBadge}`, value: '​', inline: false });
+        fields.push({ name: `Plan ${idx + 1}${posBadge}${warnBadge}`, value: '​', inline: false });
       }
       // 플랜 리스트는 6안 × 2팀 × 10명 = 120줄까지 가능 → 줄당 링크 박으면 embed 6000자 한도 초과 (footer 링크로 대체)
       // 팀 헤더 끝의 🎯N = 해당 팀의 포지션 적합도 (종합과 별개)

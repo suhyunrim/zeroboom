@@ -86,11 +86,34 @@ const computeMatchPositionScores = (team1, team2) => {
 // 종합 점수만 필요할 때의 단축 함수
 const computeMatchPositionScore = (team1, team2) => computeMatchPositionScores(team1, team2).overall;
 
+// 양팀 포지션 점수차 경고 임계값
+// (실측: 점수차 중앙값 ≈11 / 75퍼센타일 ≈18. 20+ = 상위 약 18%, 30+ = 상위 약 3%.
+//  승률 분석상 21~30 구간부터 높은 팀 승률이 뚜렷해짐 → 효과 크기에 맞춘 컷)
+const POSITION_GAP_WARN = 20; // ⚠️ 주의
+const POSITION_GAP_SEVERE = 30; // 🔴 심한 쏠림
+
+/**
+ * 양 팀 포지션 점수차에 대한 경고. 임계 미만이거나 점수 없으면 null.
+ * @param {number|null} team1Score
+ * @param {number|null} team2Score
+ * @returns {{ level: 'warn'|'severe', emoji: string, label: string, gap: number }|null}
+ */
+const positionGapWarning = (team1Score, team2Score) => {
+  if (team1Score == null || team2Score == null) return null;
+  const gap = Math.abs(team1Score - team2Score);
+  if (gap >= POSITION_GAP_SEVERE) return { level: 'severe', emoji: '🔴', label: '포지션 심한 쏠림', gap };
+  if (gap >= POSITION_GAP_WARN) return { level: 'warn', emoji: '⚠️', label: '포지션 불균형 주의', gap };
+  return null;
+};
+
 module.exports = {
   FIT_CEILING,
+  POSITION_GAP_WARN,
+  POSITION_GAP_SEVERE,
   computeTeamPositionScore,
   computeMatchPositionScores,
   computeMatchPositionScore,
+  positionGapWarning,
   comfortAt,
   offComfort,
 };
