@@ -27,6 +27,7 @@ const { POSITION_EMOJI, TEAM_EMOJI } = require('../utils/pick-users-utils');
 const { withLock } = require('../utils/keyed-mutex');
 const {
   startOnboarding,
+  sendOnboardingFallback,
   handleOnboardSelectMenu,
   handleOnboardButton,
   handleOnboardModalSubmit,
@@ -1694,7 +1695,7 @@ module.exports = async (app) => {
         return;
       }
 
-      await models.group.create({
+      const newGroup = await models.group.create({
         groupName: guild.name,
         discordGuildId: guild.id,
       });
@@ -1734,6 +1735,11 @@ module.exports = async (app) => {
 
         await defaultChannel.send({ embeds: [embed], components: [row] });
         logger.info(`봇 초대: [${guild.name}] 온보딩 공지 메시지 전송`);
+
+        // 폴백 안내가 동일 채널에 게시되도록 공지 채널 ID 저장
+        await newGroup.update({
+          settings: { ...(newGroup.settings || {}), onboardingChannelId: defaultChannel.id },
+        });
       }
     } catch (e) {
       logger.error('봇 초대 자동 등록 오류:', e);
@@ -1811,8 +1817,11 @@ module.exports = async (app) => {
       // 온보딩 활성화 확인 (기본값: false, 그룹 설정에서 명시적으로 켜야 동작)
       if (!group.settings?.onboardingEnabled) return;
 
-      // 온보딩 DM 전송
-      await startOnboarding(member, group);
+      // 온보딩 DM 전송 → 실패(DM 차단 등) 시 채널 폴백 안내
+      const sent = await startOnboarding(member, group);
+      if (!sent) {
+        await sendOnboardingFallback(member, group);
+      }
     } catch (e) {
       logger.error('서버 가입/온보딩 처리 오류:', e);
     }

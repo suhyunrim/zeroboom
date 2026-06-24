@@ -7,6 +7,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   EmbedBuilder,
+  ChannelType,
 } = require('discord.js');
 const { logger } = require('../loaders/logger');
 const models = require('../db/models');
@@ -278,15 +279,15 @@ async function handleOnboardButton(interaction) {
         return;
       }
 
-      const member = interaction.guild
-        ? await interaction.guild.members.fetch(interaction.user.id)
-        : interaction.member;
-
-      await startOnboarding(member, group);
-      await interaction.reply({ content: 'DM으로 등록 안내를 보냈습니다! 확인해주세요 📩', ephemeral: true });
+      // DM 대신 채널에서 본인에게만 보이는(ephemeral) 등록 UI로 진행 → DM 차단 유저도 등록 가능
+      const guildName = interaction.guild?.name ?? '';
+      await interaction.reply({
+        ...buildPositionView(guildId, 'onboard', guildName, group),
+        ephemeral: true,
+      });
     } catch (e) {
       logger.error('온보딩 시작 버튼 오류:', e);
-      await interaction.reply({ content: 'DM 전송에 실패했습니다. DM 설정을 확인해주세요.', ephemeral: true });
+      await interaction.reply({ content: '등록 화면을 여는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', ephemeral: true });
     }
     return;
   }
@@ -401,7 +402,8 @@ async function handleOnboardModalSubmit(interaction, client) {
   const summonerName = interaction.fields.getTextInputValue('summonerName').trim();
   const tierCategory = tier.split(' ')[0];
 
-  await interaction.deferReply();
+  // 채널(길드) ephemeral 흐름이면 결과도 본인에게만 보이게, DM 흐름이면 기존대로
+  await interaction.deferReply({ ephemeral: interaction.inGuild() });
 
   try {
     // 그룹 조회
@@ -525,8 +527,68 @@ async function assignDiscordRoles(client, guildId, discordId, group, position, t
   }
 }
 
+/**
+ * 온보딩 폴백을 게시할 채널 결정
+ * 우선순위: settings.onboardingChannelId → systemChannel → 봇이 글 쓸 수 있는 첫 텍스트 채널
+ */
+function resolveOnboardingChannel(guild, group) {
+  const me = guild.members.me;
+  const canSend = (ch) =>
+    ch && ch.isTextBased?.() && ch.permissionsFor(me)?.has('SendMessages');
+
+  const channelId = group.settings?.onboardingChannelId;
+  if (channelId) {
+    const ch = guild.channels.cache.get(channelId);
+    if (canSend(ch)) return ch;
+  }
+  if (canSend(guild.systemChannel)) return guild.systemChannel;
+  return guild.channels.cache.find((ch) => ch.type === ChannelType.GuildText && canSend(ch)) || null;
+}
+
+/**
+ * DM 전송 실패 시 채널에 등록 안내(버튼) 폴백 게시
+ * @returns {boolean} 게시 성공 여부
+ */
+async function sendOnboardingFallback(member, group) {
+  const guild = member.guild;
+  const channel = resolveOnboardingChannel(guild, group);
+  if (!channel) {
+    logger.warn(`온보딩 폴백 채널 없음: 그룹 ${group.id} (${guild.id})`);
+    return false;
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor('#0099ff')
+    .setTitle('🎮 소환사 등록 안내')
+    .setDescription(
+      `${member} 님, 환영합니다!\n\n`
+      + 'DM이 막혀 있어 등록 안내를 보내드리지 못했어요. 😢\n'
+      + '아래 **[소환사 등록하기]** 버튼을 누르면 이 채널에서 바로 등록할 수 있어요.\n\n'
+      + '※ DM으로 받고 싶다면 **서버 설정 → 개인정보 보호 → "서버 멤버가 보내는 DM 허용"** 을 켜주세요.'
+      + getCustomExtra(group, 'welcome'),
+    );
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`onboard|start|${guild.id}`)
+      .setLabel('소환사 등록하기')
+      .setEmoji('✏️')
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  try {
+    await channel.send({ content: `${member}`, embeds: [embed], components: [row] });
+    logger.info(`온보딩 폴백 채널 안내: ${member.displayName} (${member.id}) - 그룹 ${group.id} - #${channel.name}`);
+    return true;
+  } catch (e) {
+    logger.warn(`온보딩 폴백 채널 전송 실패: 그룹 ${group.id} - ${e.message}`);
+    return false;
+  }
+}
+
 module.exports = {
   startOnboarding,
+  sendOnboardingFallback,
   handleOnboardSelectMenu,
   handleOnboardButton,
   handleOnboardModalSubmit,
