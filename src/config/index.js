@@ -39,6 +39,13 @@ module.exports = {
   sentry: {
     dsn: process.env.SENTRY_DSN || '',
   },
+  ai: {
+    // 프로바이더 격리: 현재 anthropic 고정. 키 없으면 AI 기능만 비활성(앱은 정상 동작).
+    provider: process.env.AI_PROVIDER || 'anthropic',
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    model: process.env.AI_MODEL || 'claude-haiku-4-5',
+    maxRounds: Number(process.env.AI_MAX_ROUNDS) || 5,
+  },
   api: {
     prefix: '/api',
   },
