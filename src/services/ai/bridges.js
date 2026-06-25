@@ -105,6 +105,44 @@ function rankVeterans(players, { limit = 10 } = {}) {
 }
 
 /**
+ * "최근 N판" 플레이어별 승/패 집계 (순수).
+ * 윈도우(최근 매치 N개)의 각 매치에서 승리팀 전원에 1승, 패배팀 전원에 1패를 준다.
+ * "전체 누적"이 아니라 "최근 N판 안에서만" 센다는 점이 query_players와의 차이.
+ * @param {Array} matches - 윈도우 내 매치 [{ team1, team2, winTeam }] (team*=[[puuid,...], ...])
+ * @param {Object} nameByPuuid - { puuid: name }
+ * @param {{topN?:number}} opts
+ * @returns {Array<{rank,name,wins,losses,games,winRate}>}
+ */
+function tallyRecentWins(matches, nameByPuuid = {}, { topN = 5 } = {}) {
+  const puuidOf = (p) => (Array.isArray(p) ? p[0] : p);
+  const acc = {}; // puuid -> { wins, losses }
+  const bump = (puuid, key) => {
+    if (!puuid) return;
+    if (!acc[puuid]) acc[puuid] = { wins: 0, losses: 0 };
+    acc[puuid][key] += 1;
+  };
+  for (const m of matches || []) {
+    if (m.winTeam !== 1 && m.winTeam !== 2) continue; // 미완료 매치 제외
+    const winners = (m.winTeam === 1 ? m.team1 : m.team2) || [];
+    const losers = (m.winTeam === 1 ? m.team2 : m.team1) || [];
+    winners.forEach((p) => bump(puuidOf(p), 'wins'));
+    losers.forEach((p) => bump(puuidOf(p), 'losses'));
+  }
+  const rows = Object.entries(acc).map(([puuid, s]) => {
+    const games = s.wins + s.losses;
+    return {
+      name: nameByPuuid[puuid] || '알 수 없음',
+      wins: s.wins,
+      losses: s.losses,
+      games,
+      winRate: games > 0 ? Math.round((s.wins / games) * 1000) / 10 : 0,
+    };
+  });
+  rows.sort((a, b) => b.wins - a.wins || b.winRate - a.winRate || b.games - a.games);
+  return rows.slice(0, Math.min(topN || 5, 25)).map((r, i) => ({ rank: i + 1, ...r }));
+}
+
+/**
  * 업적 진행도/갭 계산 (순수). 정의(코드) + 획득(DB) + 진행도(DB)를 합친다.
  * @param {Array} defs - definitions
  * @param {Set<string>} unlockedIds - 이미 획득한 업적 id
@@ -220,6 +258,39 @@ async function queryVeterans(groupId, { limit = 10 } = {}) {
 }
 
 /**
+ * "최근 N판" 승리 순위. 그룹의 가장 최근 완료된 매치 N개를 모아 플레이어별 승/패를 집계한다.
+ * query_players(전체 누적)와 달리 최근성 윈도우를 적용한다. "최근 100판 중 승리왕?" 류에 사용.
+ * @param {{matches?:number, topN?:number}} opts - matches: 최근 매치 수(기본 100, 최대 500)
+ */
+async function queryRecentWins(groupId, { matches = 100, topN = 5 } = {}) {
+  const requested = Number(matches) || 100;
+  const windowSize = Math.min(Math.max(requested, 1), 500);
+  const rows = await models.match.findAll({
+    where: { groupId, winTeam: { [Op.ne]: null } },
+    attributes: ['team1', 'team2', 'winTeam', 'createdAt'],
+    order: [['createdAt', 'DESC']], // 최신순 → 윈도우 상한만큼만
+    limit: windowSize,
+    raw: true,
+  });
+  const safeParse = (v) => { try { return JSON.parse(v); } catch (e) { return []; } };
+  const parsed = rows.map((m) => ({ team1: safeParse(m.team1), team2: safeParse(m.team2), winTeam: m.winTeam }));
+
+  // 윈도우에 등장한 puuid → 소환사명 (한 번에 조회)
+  const puuids = new Set();
+  parsed.forEach((m) => [...m.team1, ...m.team2].forEach((p) => puuids.add(Array.isArray(p) ? p[0] : p)));
+  const summoners = puuids.size
+    ? await models.summoner.findAll({ where: { puuid: [...puuids] }, attributes: ['puuid', 'name'], raw: true })
+    : [];
+  const nameByPuuid = summoners.reduce((acc, s) => { acc[s.puuid] = s.name; return acc; }, {});
+
+  return {
+    matchesRequested: requested,
+    matchesConsidered: parsed.length, // 실제 집계된 매치 수(요청보다 적으면 그만큼만 존재)
+    players: tallyRecentWins(parsed, nameByPuuid, { topN }),
+  };
+}
+
+/**
  * 한 플레이어 상세. 민감 필드는 제외하고 요약 반환.
  */
 async function getPlayer(groupId, { name }) {
@@ -288,11 +359,13 @@ module.exports = {
   // 순수 코어 (테스트)
   rankPlayers,
   rankVeterans,
+  tallyRecentWins,
   computeAchievementProgress,
   METRICS,
   // 브릿지
   queryPlayers,
   queryVeterans,
+  queryRecentWins,
   getPlayer,
   getAchievementProgress,
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)
