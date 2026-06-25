@@ -73,13 +73,42 @@ FROM (
 ) t
 LEFT JOIN summoners s ON s.puuid = t.puuid;
 
+-- ───────── 대회(토너먼트) 트로피 — 우승팀 멤버 1행 ─────────
+-- 종료된 대회(status='finished', championTeamId 있음)의 우승팀 members(JSON [{puuid,position},...])를
+-- 펼쳐 한 행 = (대회, 트로피 보유자). 트로피 개수 = COUNT(*) GROUP BY player_name.
+-- trophy_type 예: worlds/lck/msi/kespa/first_stand (null일 수 있음). puuid는 노출 안 함.
+CREATE OR REPLACE VIEW ai_trophies AS
+SELECT
+  s.name            AS player_name,
+  x.trophy_type,
+  x.tournament_name,
+  x.won_at,
+  x.position
+FROM (
+  SELECT t.id AS tournament_id, t.name AS tournament_name, t.trophyType AS trophy_type,
+         COALESCE(t.heldAt, t.updatedAt) AS won_at,
+         jt.puuid AS puuid, jt.position AS position
+  FROM tournaments t
+  JOIN tournament_teams tm ON tm.id = t.championTeamId
+  JOIN JSON_TABLE(tm.members, '$[*]' COLUMNS (
+        puuid    VARCHAR(128) PATH '$.puuid',
+        position VARCHAR(16)  PATH '$.position'
+  )) jt ON 1 = 1
+  WHERE t.groupId = ai_current_group()
+    AND t.status = 'finished'
+    AND t.championTeamId IS NOT NULL
+) x
+LEFT JOIN summoners s ON s.puuid = x.puuid;
+
 -- ───────── 유저 생성/권한 (비밀번호 치환해 별도 실행) ─────────
 -- CREATE USER IF NOT EXISTS 'zeroboom_ai_ro'@'%' IDENTIFIED BY '<<RO_PASSWORD>>';
 -- ALTER USER 'zeroboom_ai_ro'@'%' IDENTIFIED BY '<<RO_PASSWORD>>';
 -- GRANT SELECT   ON zeroboom_bot.ai_players            TO 'zeroboom_ai_ro'@'%';
 -- GRANT SELECT   ON zeroboom_bot.ai_match_players      TO 'zeroboom_ai_ro'@'%';
+-- GRANT SELECT   ON zeroboom_bot.ai_trophies           TO 'zeroboom_ai_ro'@'%';
 -- GRANT EXECUTE  ON FUNCTION zeroboom_bot.ai_current_group       TO 'zeroboom_ai_ro'@'%';
 -- GRANT SELECT   ON zeroboom_bot_test.ai_players       TO 'zeroboom_ai_ro'@'%';
 -- GRANT SELECT   ON zeroboom_bot_test.ai_match_players TO 'zeroboom_ai_ro'@'%';
+-- GRANT SELECT   ON zeroboom_bot_test.ai_trophies      TO 'zeroboom_ai_ro'@'%';
 -- GRANT EXECUTE  ON FUNCTION zeroboom_bot_test.ai_current_group  TO 'zeroboom_ai_ro'@'%';
 -- FLUSH PRIVILEGES;
