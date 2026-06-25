@@ -46,6 +46,43 @@ function isConfigured() {
   return !!(config.aiSql && config.aiSql.user && config.aiSql.pass);
 }
 
+// information_schema 행([{t,c,dt}])을 뷰별로 묶어 LLM용 한 줄/뷰 설명으로 만든다 (순수, 테스트 대상).
+function formatSchemaDoc(rows) {
+  const byTable = {};
+  for (const r of rows || []) {
+    if (!r || !r.t || !r.c) continue;
+    (byTable[r.t] = byTable[r.t] || []).push(r.dt ? `${r.c} ${r.dt}` : r.c);
+  }
+  return Object.entries(byTable)
+    .map(([t, cols]) => `- ${t}(${cols.join(', ')})`)
+    .join('\n');
+}
+
+// ★ 스키마 자동 발견: information_schema에서 ai_* 뷰+컬럼을 읽어 LLM 스키마 설명을 만든다.
+// 읽기 전용 유저로 조회하므로 "LLM이 보는 뷰 = 실제 쿼리 가능한 뷰"가 자동으로 일치한다.
+// 새 뷰를 DB에 추가하면 코드 수정/배포 없이 TTL 내에 LLM이 인식한다.
+const SCHEMA_TTL_MS = 5 * 60 * 1000;
+let _schema = { text: '', at: 0 };
+async function getSchemaDoc() {
+  if (!isConfigured()) return '';
+  const now = Date.now();
+  if (_schema.text && now - _schema.at < SCHEMA_TTL_MS) return _schema.text;
+  try {
+    const rows = await conn().query(
+      "SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS dt "
+      + "FROM information_schema.columns "
+      + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ai\\_%' "
+      + 'ORDER BY TABLE_NAME, ORDINAL_POSITION',
+      { type: QueryTypes.SELECT },
+    );
+    _schema = { text: formatSchemaDoc(rows), at: now };
+    return _schema.text;
+  } catch (e) {
+    logger.error(`[ai.sql] 스키마 조회 실패: ${e.message}`);
+    return _schema.text || ''; // 실패 시 이전 캐시(있으면) 유지
+  }
+}
+
 let _ro = null;
 // 읽기 전용 전용 커넥션(앱 커넥션과 분리). DB 호스트/스키마는 메인과 같고 유저만 SELECT 전용.
 function conn() {
@@ -91,4 +128,4 @@ async function runReadonlyQuery(groupId, { sql } = {}) {
   }
 }
 
-module.exports = { validateSelect, isConfigured, runReadonlyQuery, MAX_ROWS };
+module.exports = { validateSelect, isConfigured, runReadonlyQuery, getSchemaDoc, formatSchemaDoc, MAX_ROWS };

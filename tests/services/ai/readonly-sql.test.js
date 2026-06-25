@@ -1,4 +1,4 @@
-const { validateSelect } = require('../../../src/services/ai/readonly-sql');
+const { validateSelect, formatSchemaDoc } = require('../../../src/services/ai/readonly-sql');
 
 describe('validateSelect (읽기 전용 SQL 가드 — 순수 코어)', () => {
   const ok = (sql) => expect(validateSelect(sql).ok).toBe(true);
@@ -51,5 +51,25 @@ describe('validateSelect (읽기 전용 SQL 가드 — 순수 코어)', () => {
 
   test('너무 긴 SQL 거부', () => {
     bad(`SELECT ${'a'.repeat(2100)}`);
+  });
+});
+
+describe('formatSchemaDoc (스키마 자동발견 — 순수 코어)', () => {
+  test('뷰별로 컬럼을 묶어 한 줄씩 만든다', () => {
+    const rows = [
+      { t: 'ai_players', c: 'name', dt: 'varchar' },
+      { t: 'ai_players', c: 'win', dt: 'int' },
+      { t: 'ai_trophies', c: 'player_name', dt: 'varchar' },
+      { t: 'ai_trophies', c: 'trophy_type', dt: 'varchar' },
+    ];
+    const doc = formatSchemaDoc(rows);
+    expect(doc).toContain('- ai_players(name varchar, win int)');
+    expect(doc).toContain('- ai_trophies(player_name varchar, trophy_type varchar)');
+  });
+
+  test('빈/잘못된 입력은 빈 문자열', () => {
+    expect(formatSchemaDoc([])).toBe('');
+    expect(formatSchemaDoc(null)).toBe('');
+    expect(formatSchemaDoc([{ t: '', c: 'x' }])).toBe('');
   });
 });
