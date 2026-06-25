@@ -40,9 +40,24 @@ function consume(key, nowMs = Date.now(), limit = config.ai.dailyLimit) {
   return { ok: true, used: rec.count, remaining: limit - rec.count, limit };
 }
 
+/**
+ * 한도 소비 없이 현재 사용량만 조회(읽기 전용). 페이지 진입 시 잔여 횟수 표시용.
+ * @param {string} key 식별자(puuid)
+ * @param {number} [nowMs] 현재 epoch(ms)
+ * @param {number} [limit] 한도 — 기본 config.ai.dailyLimit
+ * @returns {{ used:number, remaining:number, limit:number }}
+ */
+function peek(key, nowMs = Date.now(), limit = config.ai.dailyLimit) {
+  if (!limit || limit <= 0) return { used: 0, remaining: Infinity, limit: 0 }; // 무제한
+
+  const rec = buckets.get(key);
+  const used = rec && rec.day === kstDay(nowMs) ? rec.count : 0;
+  return { used, remaining: limit - used, limit };
+}
+
 // 테스트용 초기화
 function _reset() {
   buckets.clear();
 }
 
-module.exports = { consume, kstDay, _reset };
+module.exports = { consume, peek, kstDay, _reset };

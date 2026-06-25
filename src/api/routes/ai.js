@@ -14,6 +14,16 @@ module.exports = (app) => {
   app.use('/ai', route);
 
   /**
+   * GET /api/ai/quota
+   * 로그인 필수. 카운트를 소비하지 않고 오늘 사용/잔여/총 한도를 반환한다(페이지 진입 시 표시용).
+   * limit=0 이면 무제한(remaining은 직렬화 시 null).
+   */
+  route.get('/quota', verifyToken, (req, res) => {
+    const q = aiRateLimit.peek(req.user.puuid);
+    return res.status(200).json({ result: { used: q.used, remaining: q.remaining, limit: q.limit } });
+  });
+
+  /**
    * POST /api/ai/ask
    * body/query: { groupId, question, history }
    * 로그인 필수(verifyToken). 질문자 puuid로 "나/내" 컨텍스트 + 일일 호출 제한을 건다.
@@ -37,6 +47,9 @@ module.exports = (app) => {
           answer: `오늘 AI 질문 한도(${gate.limit}회)를 모두 사용했어요. 내일 다시 물어봐 주세요 🙏`,
           toolCalls: [],
           rateLimited: true,
+          used: gate.used,
+          remaining: gate.remaining,
+          limit: gate.limit,
         },
       });
     }
@@ -61,7 +74,9 @@ module.exports = (app) => {
         source: 'web',
       });
 
-      return res.status(200).json({ result: { answer, toolCalls } });
+      return res.status(200).json({
+        result: { answer, toolCalls, used: gate.used, remaining: gate.remaining, limit: gate.limit },
+      });
     } catch (e) {
       logger.error(`[ai.ask] ${e.stack || e.message}`);
       return res.status(500).json({ result: '답변 생성 중 오류가 발생했습니다.' });
