@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
-const { verifyToken } = require('../middlewares/auth');
+const { verifyToken, optionalAuth } = require('../middlewares/auth');
 const models = require('../../db/models');
 const { getGuildIconUrl } = require('../../utils/discordUtils');
 const route = Router();
@@ -43,9 +43,11 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/getGroupList', async (req, res) => {
+  route.get('/getGroupList', optionalAuth, async (req, res) => {
     try {
-      const puuid = req.headers.puuid;
+      // 세션(쿠키/JWT) puuid 우선, 없으면 puuid 헤더 폴백 (riotId 전용 비로그인 흐름 대비).
+      // 모바일은 localStorage가 비어 헤더를 못 붙이므로 쿠키 세션에서 puuid를 해석한다.
+      const puuid = (req.user && req.user.puuid) || req.headers.puuid;
       if (!puuid) {
         return res.status(400).json({ result: 'puuid가 필요합니다.' });
       }
@@ -307,10 +309,11 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/getInfo', async (req, res) => {
+  route.get('/getInfo', optionalAuth, async (req, res) => {
     const { groupId, puuid: queryPuuid } = req.query;
     try {
-      const puuid = queryPuuid || req.headers.puuid;
+      // 다른 유저 프로필 조회는 ?puuid= 우선, 본인은 세션(쿠키/JWT) → 헤더 순으로 해석.
+      const puuid = queryPuuid || (req.user && req.user.puuid) || req.headers.puuid;
       if (!puuid) {
         return res.status(400).json({ result: 'puuid가 필요합니다.' });
       }
