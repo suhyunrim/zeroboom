@@ -116,7 +116,9 @@ const RUN_SQL_TOOL = {
     + '- ai_players(name, solo_rank_tier, main_position, main_position_rate, sub_position, sub_position_rate, '
     + 'win, lose, games, rating, role, first_match_date, latest_match_date): 활성 멤버별 누적 전적·포지션·내전레이팅(raw).\n'
     + '- ai_match_players(game_id, played_at, team, won, player_name, position): 매치별 참가자 1행. '
-    + 'won=1/0(AVG(won)=승률). 최근 N판은 played_at DESC LIMIT N. 맞대결/포지션별/요일별 분석에 사용.',
+    + 'won=1/0(AVG(won)=승률). 최근 N판은 played_at DESC LIMIT N. 맞대결/포지션별/요일별 분석에 사용.\n'
+    + '- ai_trophies(player_name, trophy_type, tournament_name, won_at, position): 대회(토너먼트) 우승 트로피 1행. '
+    + '트로피 많은 사람 = COUNT(*) GROUP BY player_name. trophy_type 예: worlds/lck/msi 등.',
   input_schema: {
     type: 'object',
     properties: { sql: { type: 'string', description: '실행할 SELECT 문 (이 그룹으로 자동 필터됨)' } },
