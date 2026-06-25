@@ -54,6 +54,52 @@ function rankPlayers(players, { metric, order = 'desc', limit = 10, minGames = 1
 }
 
 /**
+ * "고인물" 종합 순위 (순수). 판수·가입기간을 코드가 합성해 종합 정렬한다.
+ *
+ * ★ 이 함수의 목적: "고인물 종합"을 코드가 결정한다. 예전엔 LLM이 판수 top-N과 가입 top-N
+ *   두 리스트를 머릿속에서 합치다 없는 순위를 지어냈다(환각). 여기서 grounded 표를 만들어
+ *   주면 모델은 읽어주기만 하면 된다.
+ * - 합성 = 정규화 평균: 각 지표를 로스터 최대값 대비 0~1로 환산해 평균(×100, 클수록 고인물).
+ *   ★ 랭크 합산이 아니라 값(magnitude) 기반이라, 가입일 하루 차이는 점수에 거의 영향이 없다.
+ *   (랭크합은 "164일=4위 vs 165일=2위"처럼 1일 차를 큰 순위차로 왜곡함)
+ * - gamesRank/tenureRank(competition ranking, 동점=같은 순위)도 투명성용으로 함께 반환.
+ * - score 동점이면 판수 많은 쪽을 앞에 둔다.
+ * @param {Array} players - [{ name, rankTier, win, lose, firstMatchDate }]
+ * @param {{limit?:number}} opts
+ */
+function rankVeterans(players, { limit = 10 } = {}) {
+  const base = players.map((p) => ({
+    name: p.name,
+    rankTier: p.rankTier || null,
+    games: (p.win || 0) + (p.lose || 0),
+    tenureDays: METRICS.tenureDays(p),
+  }));
+  if (!base.length) return [];
+
+  const maxGames = Math.max(1, ...base.map((p) => p.games));
+  const maxTenure = Math.max(1, ...base.map((p) => p.tenureDays));
+
+  // 값 → 순위(competition ranking). 같은 값은 같은 순위(165일 셋 → 모두 같은 가입순위).
+  const rankMapOf = (key) => {
+    const sorted = [...base].sort((a, b) => b[key] - a[key]);
+    const m = new Map();
+    sorted.forEach((p, i) => { if (!m.has(p[key])) m.set(p[key], i + 1); });
+    return m;
+  };
+  const gamesRankOf = rankMapOf('games');
+  const tenureRankOf = rankMapOf('tenureDays');
+
+  const scored = base.map((p) => ({
+    ...p,
+    gamesRank: gamesRankOf.get(p.games),
+    tenureRank: tenureRankOf.get(p.tenureDays),
+    score: Math.round((((p.games / maxGames) + (p.tenureDays / maxTenure)) / 2) * 1000) / 10, // 0~100
+  }));
+  scored.sort((a, b) => b.score - a.score || b.games - a.games);
+  return scored.slice(0, Math.min(limit || 10, 25)).map((p, i) => ({ rank: i + 1, ...p }));
+}
+
+/**
  * 업적 진행도/갭 계산 (순수). 정의(코드) + 획득(DB) + 진행도(DB)를 합친다.
  * @param {Array} defs - definitions
  * @param {Set<string>} unlockedIds - 이미 획득한 업적 id
@@ -160,6 +206,15 @@ async function queryPlayers(groupId, { metric = 'rating', order = 'desc', limit 
 }
 
 /**
+ * "고인물/올드비/짬" 종합 순위. 판수+가입기간을 코드가 합산해 종합 순위로 반환한다.
+ * "고인물 누구?" 류는 이 도구 하나로 답한다(query_players 두 번 합치기 금지).
+ */
+async function queryVeterans(groupId, { limit = 10 } = {}) {
+  const players = await fetchActivePlayers(groupId);
+  return { count: players.length, veterans: rankVeterans(players, { limit }) };
+}
+
+/**
  * 한 플레이어 상세. 민감 필드는 제외하고 요약 반환.
  */
 async function getPlayer(groupId, { name }) {
@@ -227,10 +282,12 @@ async function getAchievementProgress(groupId, { name }) {
 module.exports = {
   // 순수 코어 (테스트)
   rankPlayers,
+  rankVeterans,
   computeAchievementProgress,
   METRICS,
   // 브릿지
   queryPlayers,
+  queryVeterans,
   getPlayer,
   getAchievementProgress,
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)

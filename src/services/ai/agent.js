@@ -48,6 +48,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'query_veterans',
+    description:
+      '"고인물/올드비/짬" 종합 순위를 반환한다. 그룹 전체에 대해 판수·가입기간을 코드가 합성해 '
+      + '종합 순위로 정렬한 표를 준다(각 사람: games, gamesRank, tenureDays, tenureRank, '
+      + 'score(0~100 종합점수, 클수록 고인물), rank(종합순위)). score는 두 지표의 정규화 평균이라 '
+      + '가입일 하루 차이는 거의 영향이 없다. "고인물 누구?" 류 질문은 반드시 이 도구 하나로 답한다. '
+      + 'query_players를 두 번 호출해 직접 합치지 말 것.',
+    input_schema: {
+      type: 'object',
+      properties: { limit: { type: 'integer', description: '반환 인원수 (기본 10, 최대 25)' } },
+    },
+  },
+  {
     name: 'get_player',
     description:
       '한 플레이어의 상세 정보(티어, 메인/서브 포지션, 전적, 레이팅, 최근 승률, 최다 연승/연패, '
@@ -78,6 +91,7 @@ const TOOLS = [
 // 도구명 → 브릿지 (groupId는 서버가 주입)
 const DISPATCH = {
   query_players: (groupId, input) => bridges.queryPlayers(groupId, input),
+  query_veterans: (groupId, input) => bridges.queryVeterans(groupId, input),
   get_player: (groupId, input) => bridges.getPlayer(groupId, input),
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
 };
@@ -87,9 +101,11 @@ function buildSystem(askerName) {
     '너는 LoL 내전 커뮤니티 봇 "ZeroBoom"의 데이터 도우미다. 한국어로, 친근하고 간결하게 답한다.',
     '규칙:',
     '- 통계/사실은 반드시 제공된 도구로 조회해서 답한다. 수치를 추측하거나 지어내지 않는다.',
+    '- 순위·수치는 도구 결과에 "있는 값만" 말한다. 결과에 없는 사람의 순위를 "순위권 밖" 등으로 단정하지 않는다. 특정 인물이 궁금하면 limit를 늘리거나 get_player로 직접 확인한 뒤 답한다.',
+    '- 사람 이름은 도구 결과의 값을 글자 그대로 쓴다. 변형/축약하거나 특수문자(#태그 등)를 임의로 바꾸지 않는다.',
     '- 현재 그룹은 이미 고정돼 있다. "어느 그룹이냐" 되묻지 말고 바로 이 그룹 기준으로 답한다.',
     askerName ? `- 질문자는 "${askerName}" 이다. "나/내/제"는 이 사람을 가리킨다.` : '- 질문자가 "나/내"라고 하면 누구인지 이름을 물어본다.',
-    '- "고인물"은 총 판수+가입기간으로 종합 판단한다. 한 지표만 보지 말고 필요하면 도구를 여러 번 쓴다.',
+    '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
     '- puuid/디스코드ID 같은 내부 식별자는 절대 노출하지 않는다.',
     '- 도구 결과로 답할 수 없으면 솔직히 "그 정보는 아직 답하기 어렵다"고 말한다. 환각 금지.',
     '- 답은 핵심부터. 필요하면 짧은 근거(수치)를 덧붙인다.',

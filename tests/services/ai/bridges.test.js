@@ -1,8 +1,10 @@
-const { rankPlayers, computeAchievementProgress } = require('../../../src/services/ai/bridges');
+const { rankPlayers, rankVeterans, computeAchievementProgress } = require('../../../src/services/ai/bridges');
 
 const P = (name, win, lose, rating = 500, firstMatchDate = null) => ({
   name, win, lose, rating, firstMatchDate, rankTier: null, mainPosition: null,
 });
+
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
 
 describe('rankPlayers (순수 코어)', () => {
   const players = [
@@ -42,6 +44,49 @@ describe('rankPlayers (순수 코어)', () => {
   test('limit 적용 + 알 수 없는 metric은 throw', () => {
     expect(rankPlayers(players, { metric: 'games', limit: 2 })).toHaveLength(2);
     expect(() => rankPlayers(players, { metric: 'nope' })).toThrow();
+  });
+});
+
+describe('rankVeterans (고인물 종합 — 순수 코어)', () => {
+  // 스크린샷 시나리오 재현: 쥬티키스=판수 압도(326)·가입 164일, NO TOUCH=240·165일,
+  // 강빈=204·165일, 올드비=20판이지만 최고참(200일).
+  const roster = [
+    P('쥬티키스', 200, 126, 500, daysAgo(164)), // 326판
+    P('NO TOUCH', 140, 100, 500, daysAgo(165)), // 240판
+    P('강빈', 120, 84, 500, daysAgo(165)), // 204판
+    P('올드비', 10, 10, 500, daysAgo(200)), // 20판, 최고참
+  ];
+
+  test('판수 압도 + 가입 사실상 동급이면 종합 1위(정규화 합성, 하루 차 왜곡 없음)', () => {
+    const r = rankVeterans(roster);
+    expect(r[0].name).toBe('쥬티키스'); // 326판 + 164일 → 종합 1위
+    expect(r[0].rank).toBe(1);
+    // grounded 순위: 판수 1위, 가입은 4위지만 값(164일)도 함께 제공
+    expect(r[0].gamesRank).toBe(1);
+    expect(r[0].tenureDays).toBeGreaterThanOrEqual(163);
+    expect(r[0].score).toBeGreaterThan(r[1].score);
+  });
+
+  test('가입일 동점은 같은 순위(competition ranking)', () => {
+    const r = rankVeterans(roster);
+    const noTouch = r.find((p) => p.name === 'NO TOUCH');
+    const gangbin = r.find((p) => p.name === '강빈');
+    expect(noTouch.tenureRank).toBe(gangbin.tenureRank); // 둘 다 165일 → 같은 가입순위
+  });
+
+  test('모든 사람이 grounded 순위/값을 갖는다(누구도 누락=순위권밖 없음)', () => {
+    const r = rankVeterans(roster);
+    expect(r).toHaveLength(4);
+    r.forEach((p) => {
+      expect(p.gamesRank).toBeGreaterThanOrEqual(1);
+      expect(p.tenureRank).toBeGreaterThanOrEqual(1);
+      expect(typeof p.score).toBe('number');
+    });
+  });
+
+  test('limit 적용 / 빈 입력은 빈 배열', () => {
+    expect(rankVeterans(roster, { limit: 2 })).toHaveLength(2);
+    expect(rankVeterans([])).toEqual([]);
   });
 });
 
