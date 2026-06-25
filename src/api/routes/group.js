@@ -4,7 +4,7 @@ const route = Router();
 const { Op } = require('sequelize');
 const { logger } = require('../../loaders/logger');
 const models = require('../../db/models');
-const { verifyToken, requireGroupAdmin } = require('../middlewares/auth');
+const { verifyToken, requireGroupAdmin, optionalAuth } = require('../middlewares/auth');
 
 const { getGuildIconUrl } = require('../../utils/discordUtils');
 const { kstDayStart, kstDayEnd } = require('../../utils/timeUtils');
@@ -181,7 +181,7 @@ module.exports = (app) => {
     return res.json({ groupName });
   });
 
-  route.get('/ranking/period', async (req, res) => {
+  route.get('/ranking/period', optionalAuth, async (req, res) => {
     const { groupId, startDate, endDate } = req.query;
 
     if (!groupId || !startDate || !endDate) {
@@ -192,8 +192,8 @@ module.exports = (app) => {
       const result = await groupController.getRankingByPeriod(Number(groupId), kstDayStart(startDate), kstDayEnd(endDate));
       const response = { result: result.result };
 
-      // 요청자의 기간 랭킹 정보 추가 (puuid 헤더로 식별)
-      const myPuuid = req.headers.puuid;
+      // 요청자의 기간 랭킹 정보 추가 (세션 우선, 없으면 puuid 헤더로 식별)
+      const myPuuid = (req.user && req.user.puuid) || req.headers.puuid;
       if (myPuuid && result.status === 200) {
         response.myRanking = await groupController.getMyRankingByPeriod(Number(groupId), myPuuid, result.result);
       }
@@ -294,7 +294,7 @@ module.exports = (app) => {
     }
   });
 
-  route.get('/ranking', async (req, res) => {
+  route.get('/ranking', optionalAuth, async (req, res) => {
     const { groupName } = req.query;
 
     if (!groupName) return res.status(501).json({ result: 'invalid group name' });
@@ -306,8 +306,8 @@ module.exports = (app) => {
       const rankings = await groupController.getRanking(groupName);
       const response = { result: rankings.result };
 
-      // 요청자의 랭킹 정보 추가
-      const myPuuid = req.headers.puuid;
+      // 요청자의 랭킹 정보 추가 (세션 우선, 없으면 puuid 헤더로 식별)
+      const myPuuid = (req.user && req.user.puuid) || req.headers.puuid;
       if (myPuuid && rankings.status === 200) {
         response.myRanking = await groupController.getMyRanking(groupName, myPuuid, rankings.result);
       }
