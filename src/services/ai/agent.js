@@ -68,6 +68,10 @@ const TOOLS = [
       properties: { name: { type: 'string', description: '플레이어 이름(부분 일치 가능)' } },
       required: ['name'],
     },
+    // ★ 프롬프트 캐싱: 마지막 도구에 캐시 분기점을 두면 정적인 tools 정의 전체가 캐시된다.
+    // tool-use 루프는 매 라운드 tools를 재전송하는데, 2번째 라운드부터 캐시 읽기(입력 0.1배)로 처리.
+    // tools는 유저 무관 완전 정적이라 요청 간(같은 모델, 5분 TTL)에도 재사용된다.
+    cache_control: { type: 'ephemeral' },
   },
 ];
 
@@ -126,7 +130,9 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
     const resp = await client().messages.create({
       model: config.ai.model,
       max_tokens: MAX_TOKENS,
-      system,
+      // ★ system도 캐시 분기점. 멀티라운드 루프 안에서 동일 prefix(tools+system)가 반복되므로
+      //   2라운드부터 입력이 캐시 읽기로 처리된다. (system은 askerName 포함이라 유저 단위 캐시)
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       tools: TOOLS,
       messages,
     });

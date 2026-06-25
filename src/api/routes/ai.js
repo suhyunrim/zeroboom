@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
-const { optionalAuth } = require('../middlewares/auth');
+const { verifyToken } = require('../middlewares/auth');
+const aiRateLimit = require('../middlewares/ai-rate-limit');
 const models = require('../../db/models');
 const auditLog = require('../../controller/audit-log');
 const agent = require('../../services/ai/agent');
@@ -14,10 +15,10 @@ module.exports = (app) => {
 
   /**
    * POST /api/ai/ask
-   * body/query: { groupId, question }
-   * 세션이 있으면 질문자 이름을 해석해 "나/내" 컨텍스트로 넘긴다.
+   * body/query: { groupId, question, history }
+   * 로그인 필수(verifyToken). 질문자 puuid로 "나/내" 컨텍스트 + 일일 호출 제한을 건다.
    */
-  route.post('/ask', optionalAuth, async (req, res) => {
+  route.post('/ask', verifyToken, async (req, res) => {
     const groupId = Number(req.body.groupId || req.query.groupId);
     const question = (req.body.question || '').toString();
 
@@ -27,10 +28,22 @@ module.exports = (app) => {
       return res.status(400).json({ result: `질문은 ${QUESTION_MAX_LENGTH}자 이하로 해주세요.` });
     }
 
+    // 인당 일일 한도. 초과 시 에러가 아니라 안내 답변(200)으로 돌려 채팅에 그대로 표시되게 한다.
+    const askerPuuid = req.user.puuid;
+    const gate = aiRateLimit.consume(askerPuuid);
+    if (!gate.ok) {
+      return res.status(200).json({
+        result: {
+          answer: `오늘 AI 질문 한도(${gate.limit}회)를 모두 사용했어요. 내일 다시 물어봐 주세요 🙏`,
+          toolCalls: [],
+          rateLimited: true,
+        },
+      });
+    }
+
     try {
-      // 질문자 이름 해석 (세션 puuid → 소환사명). 없으면 익명.
+      // 질문자 이름 해석 (puuid → 소환사명). 없으면 이름만 미상으로 진행.
       let askerName = null;
-      const askerPuuid = req.user && req.user.puuid;
       if (askerPuuid) {
         const s = await models.summoner.findOne({ where: { puuid: askerPuuid }, attributes: ['name'], raw: true });
         askerName = s ? s.name : null;

@@ -45,6 +45,8 @@ module.exports = {
     apiKey: process.env.ANTHROPIC_API_KEY || '',
     model: process.env.AI_MODEL || 'claude-haiku-4-5',
     maxRounds: Number(process.env.AI_MAX_ROUNDS) || 5,
+    // 인당(puuid) 하루 질문 횟수 상한. 비용/어뷰징 방어. 0 이하면 무제한.
+    dailyLimit: Number(process.env.AI_DAILY_LIMIT) || 30,
   },
   api: {
     prefix: '/api',
