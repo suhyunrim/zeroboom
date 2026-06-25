@@ -11,6 +11,7 @@ const { Op } = require('sequelize');
 const models = require('../../db/models');
 const { definitions } = require('../achievement/definitions');
 const { resolveStatType } = require('../../controller/achievement');
+const { formatTier } = require('../../utils/tierUtils');
 
 // ───────────────────────── 순수 코어 (테스트 대상) ─────────────────────────
 
@@ -46,11 +47,15 @@ function rankPlayers(players, { metric, order = 'desc', limit = 10, minGames = 1
     games: (p.win || 0) + (p.lose || 0),
     win: p.win || 0,
     lose: p.lose || 0,
-    rating: p.rating || 0,
-    value: fn(p),
+    ratingTier: formatTier(p.rating || 0), // 내전 레이팅 → 티어. raw 점수는 LLM에 노출하지 않는다.
+    _sort: fn(p),
   }));
-  scored.sort((a, b) => (order === 'asc' ? a.value - b.value : b.value - a.value));
-  return scored.slice(0, Math.min(limit || 10, 25)).map((p, i) => ({ rank: i + 1, ...p }));
+  scored.sort((a, b) => (order === 'asc' ? a._sort - b._sort : b._sort - a._sort));
+  return scored.slice(0, Math.min(limit || 10, 25)).map((p, i) => {
+    const { _sort, ...rest } = p;
+    // 메트릭 값: rating이면 티어 문자열, 그 외엔 raw 수치(판수/승률% 등)
+    return { rank: i + 1, ...rest, value: metric === 'rating' ? rest.ratingTier : _sort };
+  });
 }
 
 /**
@@ -240,7 +245,7 @@ async function getPlayer(groupId, { name }) {
     subPositionRate: s.subPositionRate ?? null,
     win: u.win ?? null,
     lose: u.lose ?? null,
-    rating: (u.defaultRating || 0) + (u.additionalRating || 0),
+    ratingTier: formatTier((u.defaultRating || 0) + (u.additionalRating || 0)), // 내전 레이팅 → 티어 (raw 미노출)
     recentWinRate: d.recentWinRate ?? null,
     maxWinStreak: d.maxWinStreak ?? null,
     maxLoseStreak: d.maxLoseStreak ?? null,

@@ -45,6 +45,20 @@ describe('rankPlayers (순수 코어)', () => {
     expect(rankPlayers(players, { metric: 'games', limit: 2 })).toHaveLength(2);
     expect(() => rankPlayers(players, { metric: 'nope' })).toThrow();
   });
+
+  test('내전 레이팅은 티어로 환산하고 raw 점수는 노출하지 않는다', () => {
+    const r = rankPlayers(players, { metric: 'rating' });
+    expect(r[0].name).toBe('레이팅왕'); // 900 최고
+    expect(r[0].value).toBe('MASTER'); // 메트릭 값이 raw 숫자가 아니라 티어
+    expect(r[0].ratingTier).toBe('MASTER');
+    expect(r[0].rating).toBeUndefined(); // raw 점수 필드 없음
+  });
+
+  test('모든 엔트리에 ratingTier(내전 티어) 문자열 포함', () => {
+    const r = rankPlayers(players, { metric: 'games' });
+    expect(r.find((p) => p.name === '많이한사람').ratingTier).toBe('PLATINUM IV'); // 600
+    r.forEach((p) => expect(typeof p.ratingTier).toBe('string'));
+  });
 });
 
 describe('rankVeterans (고인물 종합 — 순수 코어)', () => {
