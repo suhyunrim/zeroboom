@@ -8,6 +8,7 @@
 const config = require('../../config');
 const { logger } = require('../../loaders/logger');
 const bridges = require('./bridges');
+const readonlySql = require('./readonly-sql');
 
 const MAX_ROUNDS = config.ai.maxRounds || 5;
 const MAX_TOKENS = 1024;
@@ -98,12 +99,37 @@ const TOOLS = [
       properties: { name: { type: 'string', description: '플레이어 이름(부분 일치 가능)' } },
       required: ['name'],
     },
-    // ★ 프롬프트 캐싱: 마지막 도구에 캐시 분기점을 두면 정적인 tools 정의 전체가 캐시된다.
-    // tool-use 루프는 매 라운드 tools를 재전송하는데, 2번째 라운드부터 캐시 읽기(입력 0.1배)로 처리.
-    // tools는 유저 무관 완전 정적이라 요청 간(같은 모델, 5분 TTL)에도 재사용된다.
-    cache_control: { type: 'ephemeral' },
   },
 ];
+
+// run_sql: 읽기 전용 SQL 탈출구. 전용 도구(query_*, get_*)로 답 못 하는 드문/복합 질문용.
+// SELECT 전용 유저가 설정된 환경에서만 노출한다(미설정 시 도구 목록에서 제외 → LLM이 헛호출 안 함).
+const RUN_SQL_TOOL = {
+  name: 'run_sql',
+  description:
+    '이 그룹 데이터를 읽기 전용 SQL(SELECT)로 직접 조회한다. 다른 전용 도구로 답할 수 없는 '
+    + '드물거나 복합적인 통계 질문에만 쓴다(예: 티어 분포, 특정 포지션 승률, 요일별 판수, 둘이 같은 팀일 때 승률 등). '
+    + '규칙: SELECT 또는 WITH 로 시작하는 한 문장만. 쓰기/DDL/세미콜론 다중문/주석/사용자변수(@)는 금지. '
+    + '그룹 필터는 서버가 자동 적용하니 groupId 조건을 직접 넣지 말 것. 결과는 최대 100행. '
+    + '내전 레이팅(rating)은 raw 점수이니 답변엔 티어로 환산해 말한다.\n'
+    + '사용 가능한 뷰(이미 이 그룹으로 필터됨):\n'
+    + '- ai_players(name, solo_rank_tier, main_position, main_position_rate, sub_position, sub_position_rate, '
+    + 'win, lose, games, rating, role, first_match_date, latest_match_date): 활성 멤버별 누적 전적·포지션·내전레이팅(raw).\n'
+    + '- ai_match_players(game_id, played_at, team, won, player_name, position): 매치별 참가자 1행. '
+    + 'won=1/0(AVG(won)=승률). 최근 N판은 played_at DESC LIMIT N. 맞대결/포지션별/요일별 분석에 사용.',
+  input_schema: {
+    type: 'object',
+    properties: { sql: { type: 'string', description: '실행할 SELECT 문 (이 그룹으로 자동 필터됨)' } },
+    required: ['sql'],
+  },
+};
+
+// SELECT 전용 유저가 설정돼 있으면 run_sql을 도구 목록에 추가한다.
+if (readonlySql.isConfigured()) TOOLS.push(RUN_SQL_TOOL);
+// ★ 프롬프트 캐싱: 마지막 도구에 캐시 분기점 → 정적 tools 전체가 캐시된다.
+// tool-use 루프는 매 라운드 tools를 재전송하지만 2라운드부터 캐시 읽기(입력 0.1배)로 처리되고,
+// tools는 유저 무관 완전 정적이라 요청 간(같은 모델, 5분 TTL)에도 재사용된다.
+TOOLS[TOOLS.length - 1].cache_control = { type: 'ephemeral' };
 
 // 도구명 → 브릿지 (groupId는 서버가 주입)
 const DISPATCH = {
@@ -112,6 +138,7 @@ const DISPATCH = {
   query_recent_wins: (groupId, input) => bridges.queryRecentWins(groupId, input),
   get_player: (groupId, input) => bridges.getPlayer(groupId, input),
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
+  run_sql: (groupId, input) => readonlySql.runReadonlyQuery(groupId, input),
 };
 
 function buildSystem(askerName) {
@@ -126,10 +153,13 @@ function buildSystem(askerName) {
     askerName ? `- 질문자는 "${askerName}" 이다. "나/내/제"는 이 사람을 가리킨다.` : '- 질문자가 "나/내"라고 하면 누구인지 이름을 물어본다.',
     '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
     '- "최근 N판/요즘/최근에" 처럼 최근성(기간)을 묻는 승리·승률 질문은 query_recent_wins를 쓴다. query_players의 승수는 전체 누적이므로 최근 N판엔 쓰지 말 것. 최근성 질문에 "전체 누적만 가능하다"고 답하지 말 것. 단 실제 집계된 매치 수(matchesConsidered)가 요청보다 적으면 그 수를 솔직히 밝힌다(예: "최근 80판 기준").',
+    readonlySql.isConfigured()
+      ? '- 위 전용 도구들로 답할 수 없는 드문/복합 통계 질문(티어 분포, 특정 포지션 승률, 요일별 판수, 맞대결 등)은 run_sql로 직접 SELECT해서 시도한다. "그건 못 한다"고 먼저 포기하지 말 것. run_sql 결과로도 답할 수 없을 때만 솔직히 모른다고 한다. SQL 오류가 나면 메시지를 보고 한 번 더 고쳐 시도한다.'
+      : null,
     '- puuid/디스코드ID 같은 내부 식별자는 절대 노출하지 않는다.',
     '- 도구 결과로 답할 수 없으면 솔직히 "그 정보는 아직 답하기 어렵다"고 말한다. 환각 금지.',
     '- 답은 핵심부터. 필요하면 짧은 근거(수치)를 덧붙인다.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function isConfigured() {

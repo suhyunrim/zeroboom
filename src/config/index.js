@@ -48,6 +48,11 @@ module.exports = {
     // 인당(puuid) 하루 질문 횟수 상한. 비용/어뷰징 방어. 0 이하면 무제한.
     dailyLimit: Number(process.env.AI_DAILY_LIMIT) || 30,
   },
+  // AI 읽기 전용 SQL 탈출구. 앱 DB 유저와 분리된 SELECT 전용 계정(미설정 시 run_sql 비활성).
+  aiSql: {
+    user: process.env.DATABASE_AI_RO_USER || '',
+    pass: process.env.DATABASE_AI_RO_PASS || '',
+  },
   api: {
     prefix: '/api',
   },
