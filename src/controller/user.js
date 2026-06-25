@@ -88,6 +88,8 @@ module.exports.getRating = async (groupId, puuid) => {
 const TOP_LIST_COUNT = 15; // 같은 팀/상대 팀 Top N명
 const TOP_N_FOR_BEST_STATS = 10; // 자주 만난 상위 N명 내에서 승률 기준 선정
 const RECENT_GAMES_COUNT = 10; // 최근 N판 승률 계산용
+const POSITION_KEYS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']; // 내전 포지션 전적 키 (Riot 표준)
+const VALID_POSITIONS = new Set(POSITION_KEYS);
 
 /**
  * 사용자별 상세 통계 계산
@@ -118,6 +120,8 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   const matchHistory = []; // [{ won: bool, createdAt }]
   // 레이팅 히스토리
   const ratingHistory = []; // [{ rating, createdAt, won }]
+  // 내전 포지션별 전적 (10명 전원 포지션이 지정된 매치만 집계)
+  const positionAcc = {}; // { POSITION: { games, wins, losses } }
 
   for (const match of matches) {
     const team1 = JSON.parse(match.team1);
@@ -140,13 +144,26 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     const myWon = winTeam === myTeam;
     matchHistory.push({ won: myWon, createdAt });
 
+    const myTeamData = myTeam === 1 ? team1 : team2;
+    const myPlayer = myTeamData.find(([puuid]) => puuid === myPuuid);
+
     // 레이팅 스냅샷에서 내 레이팅 추출
-    if (hasSnapshot) {
-      const myTeamData = myTeam === 1 ? team1 : team2;
-      const myPlayer = myTeamData.find(([puuid]) => puuid === myPuuid);
-      if (myPlayer) {
-        ratingHistory.push({ rating: myPlayer[2], createdAt, won: myWon });
-      }
+    if (hasSnapshot && myPlayer) {
+      ratingHistory.push({ rating: myPlayer[2], createdAt, won: myWon });
+    }
+
+    // 내전 포지션별 전적: 10명 전원 포지션이 지정된 매치만 집계
+    const allPositioned =
+      team1.length === 5 &&
+      team2.length === 5 &&
+      team1.every((p) => VALID_POSITIONS.has(p[3])) &&
+      team2.every((p) => VALID_POSITIONS.has(p[3]));
+    if (allPositioned && myPlayer) {
+      const myPosition = myPlayer[3];
+      if (!positionAcc[myPosition]) positionAcc[myPosition] = { games: 0, wins: 0, losses: 0 };
+      positionAcc[myPosition].games++;
+      if (myWon) positionAcc[myPosition].wins++;
+      else positionAcc[myPosition].losses++;
     }
 
     // 같은 팀 멤버 통계
@@ -333,6 +350,22 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     rating,
   }));
 
+  // 내전 포지션별 승패/승률 (10명 전원 지정 매치 기준, 5포지션 고정 키).
+  // 그런 매치가 한 판도 없으면 null — 프론트는 이 값이 없으면 UI 자체를 표시하지 않는다.
+  const hasPositionData = POSITION_KEYS.some((pos) => positionAcc[pos]);
+  const positionStats = hasPositionData
+    ? POSITION_KEYS.reduce((obj, pos) => {
+      const s = positionAcc[pos] || { games: 0, wins: 0, losses: 0 };
+      obj[pos] = {
+        games: s.games,
+        wins: s.wins,
+        losses: s.losses,
+        winRate: s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0,
+      };
+      return obj;
+    }, {})
+    : null;
+
   return {
     topTeammates,
     topOpponents,
@@ -345,6 +378,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     bestOpponents,
     worstOpponents,
     ratingHistory: dailyRatingHistory,
+    positionStats,
   };
 };
 
