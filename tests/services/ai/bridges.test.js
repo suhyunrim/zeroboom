@@ -1,4 +1,4 @@
-const { rankPlayers, rankVeterans, computeAchievementProgress } = require('../../../src/services/ai/bridges');
+const { rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress } = require('../../../src/services/ai/bridges');
 
 const P = (name, win, lose, rating = 500, firstMatchDate = null) => ({
   name, win, lose, rating, firstMatchDate, rankTier: null, mainPosition: null,
@@ -101,6 +101,48 @@ describe('rankVeterans (고인물 종합 — 순수 코어)', () => {
   test('limit 적용 / 빈 입력은 빈 배열', () => {
     expect(rankVeterans(roster, { limit: 2 })).toHaveLength(2);
     expect(rankVeterans([])).toEqual([]);
+  });
+});
+
+describe('tallyRecentWins (최근 N판 승리 집계 — 순수 코어)', () => {
+  // 매치 팀 요소는 [puuid, name, rating, position] 형태지만 집계는 puuid(0번)만 쓴다.
+  const M = (winTeam, t1, t2) => ({
+    winTeam,
+    team1: t1.map((puuid) => [puuid, 'n', 500, 'TOP']),
+    team2: t2.map((puuid) => [puuid, 'n', 500, 'TOP']),
+  });
+  const names = { a: '에이', b: '비이', c: '시이', d: '디이' };
+
+  test('승리팀 전원 1승·패배팀 전원 1패, 승수 내림차순 + 윈도우 안에서만 집계', () => {
+    const matches = [
+      M(1, ['a', 'b'], ['c', 'd']), // a,b 승 / c,d 패
+      M(2, ['a', 'c'], ['b', 'd']), // 승팀=team2(b,d) / 패팀=team1(a,c)
+      M(1, ['a', 'd'], ['b', 'c']), // a,d 승 / b,c 패
+    ];
+    const r = tallyRecentWins(matches, names, { topN: 5 });
+    const a = r.find((p) => p.name === '에이');
+    expect(a).toMatchObject({ wins: 2, losses: 1, games: 3 }); // 1·3번 승, 2번 패
+    expect(a.winRate).toBe(66.7);
+    expect(r[0].rank).toBe(1);
+    expect(r[0].wins).toBeGreaterThanOrEqual(r[1].wins); // 승수 정렬
+    expect(r.find((p) => p.name === '시이')).toMatchObject({ wins: 0, losses: 3 });
+  });
+
+  test('winTeam이 null이면 그 매치는 집계에서 제외', () => {
+    const matches = [M(1, ['a'], ['b']), { winTeam: null, team1: [['a']], team2: [['b']] }];
+    const r = tallyRecentWins(matches, names);
+    expect(r.find((p) => p.name === '에이').games).toBe(1); // null 매치 미집계
+  });
+
+  test('topN 제한 + 이름 없는 puuid는 "알 수 없음"', () => {
+    const matches = [M(1, ['a', 'x'], ['b', 'c'])];
+    expect(tallyRecentWins(matches, names, { topN: 2 })).toHaveLength(2);
+    expect(tallyRecentWins(matches, names).find((p) => p.name === '알 수 없음')).toBeDefined(); // x 매핑 없음
+  });
+
+  test('빈/누락 입력은 빈 배열', () => {
+    expect(tallyRecentWins([], names)).toEqual([]);
+    expect(tallyRecentWins(undefined)).toEqual([]);
   });
 });
 

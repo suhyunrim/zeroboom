@@ -72,6 +72,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'query_recent_wins',
+    description:
+      '"최근 N판" 기준 승리·승률 순위를 반환한다. 그룹의 가장 최근 완료된 매치 N개를 모아 그 안에서 '
+      + '플레이어별 승/패를 집계한 표를 준다(각 사람: wins, losses, games, winRate, rank). '
+      + '"최근 100판 중 승리 많은 사람?", "요즘 잘나가는 사람", "최근 폼 좋은 사람" 류에 쓴다. '
+      + 'query_players의 승수는 전체 누적이라 최근성 질문엔 쓰지 말 것. '
+      + 'matches=집계할 최근 매치 수(기본 100, 최대 500), topN=반환 인원(기본 5). '
+      + '응답의 matchesConsidered가 실제 집계된 매치 수이니(요청보다 적을 수 있음) 그 수를 근거로 답한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        matches: { type: 'integer', description: '집계할 최근 매치 수 (기본 100, 최대 500)' },
+        topN: { type: 'integer', description: '반환 인원수 (기본 5, 최대 25)' },
+      },
+    },
+  },
+  {
     name: 'get_achievement_progress',
     description:
       '한 플레이어의 업적 진행도를 반환한다. 획득한 업적 수, 그리고 "달성에 가장 가까운 미획득 업적"을 '
@@ -92,6 +109,7 @@ const TOOLS = [
 const DISPATCH = {
   query_players: (groupId, input) => bridges.queryPlayers(groupId, input),
   query_veterans: (groupId, input) => bridges.queryVeterans(groupId, input),
+  query_recent_wins: (groupId, input) => bridges.queryRecentWins(groupId, input),
   get_player: (groupId, input) => bridges.getPlayer(groupId, input),
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
 };
@@ -107,6 +125,7 @@ function buildSystem(askerName) {
     '- 현재 그룹은 이미 고정돼 있다. "어느 그룹이냐" 되묻지 말고 바로 이 그룹 기준으로 답한다.',
     askerName ? `- 질문자는 "${askerName}" 이다. "나/내/제"는 이 사람을 가리킨다.` : '- 질문자가 "나/내"라고 하면 누구인지 이름을 물어본다.',
     '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
+    '- "최근 N판/요즘/최근에" 처럼 최근성(기간)을 묻는 승리·승률 질문은 query_recent_wins를 쓴다. query_players의 승수는 전체 누적이므로 최근 N판엔 쓰지 말 것. 최근성 질문에 "전체 누적만 가능하다"고 답하지 말 것. 단 실제 집계된 매치 수(matchesConsidered)가 요청보다 적으면 그 수를 솔직히 밝힌다(예: "최근 80판 기준").',
     '- puuid/디스코드ID 같은 내부 식별자는 절대 노출하지 않는다.',
     '- 도구 결과로 답할 수 없으면 솔직히 "그 정보는 아직 답하기 어렵다"고 말한다. 환각 금지.',
     '- 답은 핵심부터. 필요하면 짧은 근거(수치)를 덧붙인다.',
