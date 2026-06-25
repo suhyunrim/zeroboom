@@ -10,7 +10,12 @@ const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
 // 모바일 Safari는 zeroboom.lol 도메인 패밀리(서브도메인 graves.zeroboom.lol 포함)의
 // localStorage에 추적방지 만료 캡을 걸어 새로고침 시 토큰이 사라진다. 서버가 Set-Cookie로
 // 심는 httpOnly 쿠키는 script-writable 저장소가 아니라 이 캡 대상이 아니므로 세션이 유지된다.
-// graves.zeroboom.lol ↔ zeroboom.lol은 same-site라 SameSite=Lax 쿠키가 /api 요청에 실린다.
+//
+// ★ SameSite: 프론트(graves.zeroboom.lol)와 API(zeroboom.lol)는 cross-origin이다.
+//   SameSite=Lax는 same-site 판정이어도 모바일 브라우저에서 cross-origin XHR(특히 POST)에
+//   쿠키를 안 싣는 경우가 있어, 인증 POST(/visit, 댓글, 한마디 등)가 401 → 프론트 강제 로그아웃이
+//   발생했다. cross-origin 자격증명 요청에 쿠키를 확실히 싣기 위해 SameSite=None; Secure를 쓴다.
+//   None은 Secure(HTTPS)가 필수라, secure 불가한 로컬(HTTP)에서는 Lax로 폴백한다.
 //
 // ★ 헤더 크기 주의: nginx proxy_buffer_size(기본 ~4k)를 넘기면 502가 난다. JWT(~1.5KB)를
 //   응답 헤더에 2개 실으면 초과하므로, 한 응답에 큰 JWT 헤더는 최대 1개만 둔다.
@@ -18,10 +23,11 @@ const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
 //   - /me: Set-Cookie 만 (프론트 재시드 토큰은 응답 body로 전달)
 const SESSION_COOKIE = 'zb_session';
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const IS_SECURE_ENV = process.env.NODE_ENV === 'production';
 const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
+  secure: IS_SECURE_ENV,
+  sameSite: IS_SECURE_ENV ? 'none' : 'lax',
   path: '/',
 };
 
