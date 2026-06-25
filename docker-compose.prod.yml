@@ -32,6 +32,11 @@ services:
       COMMAND_PREFIX: ${COMMAND_PREFIX:-}
       FRONTEND_URL: ${FRONTEND_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      AI_MODEL: ${AI_MODEL:-claude-haiku-4-5}
+      AI_MAX_ROUNDS: ${AI_MAX_ROUNDS:-5}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-30}
     depends_on:
       db:
         condition: service_healthy

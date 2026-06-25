@@ -25,6 +25,11 @@ services:
       FRONTEND_URL: ${FRONTEND_URL_TEST:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       PICK_COUNT: ${PICK_COUNT:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      AI_MODEL: ${AI_MODEL:-claude-haiku-4-5}
+      AI_MAX_ROUNDS: ${AI_MAX_ROUNDS:-5}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-30}
     networks:
       - live_network
 

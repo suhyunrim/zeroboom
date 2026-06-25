@@ -29,6 +29,7 @@
     "prettier": "^1.19.1"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0",
     "@hapi/joi": "^17.1.1",
     "@sentry/node": "^10.48.0",
     "@whipping-cream/thresh": "^1.2.0",
