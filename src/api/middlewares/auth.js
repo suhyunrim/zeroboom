@@ -15,7 +15,9 @@ const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
 //   SameSite=Lax는 same-site 판정이어도 모바일 브라우저에서 cross-origin XHR(특히 POST)에
 //   쿠키를 안 싣는 경우가 있어, 인증 POST(/visit, 댓글, 한마디 등)가 401 → 프론트 강제 로그아웃이
 //   발생했다. cross-origin 자격증명 요청에 쿠키를 확실히 싣기 위해 SameSite=None; Secure를 쓴다.
-//   None은 Secure(HTTPS)가 필수라, secure 불가한 로컬(HTTP)에서는 Lax로 폴백한다.
+//   ★ HTTPS 판정은 req.secure로 한다(라이브 NODE_ENV는 unset이라 신뢰 불가). nginx가
+//   X-Forwarded-Proto=$scheme를 넘기고 app은 trust proxy라 HTTPS 요청에서 req.secure=true가 된다.
+//   None은 Secure(HTTPS) 필수 → HTTPS면 None+Secure, HTTP(로컬)면 Lax 폴백.
 //
 // ★ 헤더 크기 주의: nginx proxy_buffer_size(기본 ~4k)를 넘기면 502가 난다. JWT(~1.5KB)를
 //   응답 헤더에 2개 실으면 초과하므로, 한 응답에 큰 JWT 헤더는 최대 1개만 둔다.
@@ -23,22 +25,27 @@ const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
 //   - /me: Set-Cookie 만 (프론트 재시드 토큰은 응답 body로 전달)
 const SESSION_COOKIE = 'zb_session';
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const IS_SECURE_ENV = process.env.NODE_ENV === 'production';
-const SESSION_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: IS_SECURE_ENV,
-  sameSite: IS_SECURE_ENV ? 'none' : 'lax',
-  path: '/',
+
+// 요청 프로토콜(req.secure)로 쿠키 보안 속성 결정. HTTPS면 SameSite=None; Secure(cross-origin
+// XHR에 쿠키 전송), HTTP(로컬)면 Lax. set/clear가 같은 속성이어야 쿠키가 정상 제거된다.
+const sessionCookieOptions = (req) => {
+  const isHttps = !!(req && req.secure);
+  return {
+    httpOnly: true,
+    path: '/',
+    secure: isHttps,
+    sameSite: isHttps ? 'none' : 'lax',
+  };
 };
 
 const signSessionToken = (payload) => jwt.sign(payload, config.jwtSecret, { expiresIn: TOKEN_TTL });
 
 const setSessionCookie = (res, token) => {
-  res.cookie(SESSION_COOKIE, token, { ...SESSION_COOKIE_OPTIONS, maxAge: COOKIE_MAX_AGE_MS });
+  res.cookie(SESSION_COOKIE, token, { ...sessionCookieOptions(res.req), maxAge: COOKIE_MAX_AGE_MS });
 };
 
 const clearSessionCookie = (res) => {
-  res.clearCookie(SESSION_COOKIE, SESSION_COOKIE_OPTIONS);
+  res.clearCookie(SESSION_COOKIE, sessionCookieOptions(res.req));
 };
 
 // Authorization 헤더(Bearer)를 우선 사용하고, 없으면 세션 쿠키로 폴백한다.
