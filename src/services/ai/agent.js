@@ -11,6 +11,23 @@ const bridges = require('./bridges');
 
 const MAX_ROUNDS = config.ai.maxRounds || 5;
 const MAX_TOKENS = 1024;
+const HISTORY_MAX_TURNS = 12; // 멀티턴 컨텍스트로 유지할 직전 대화 수
+const HISTORY_MAX_CHARS = 2000; // 각 메시지 길이 상한
+
+// 클라이언트가 보낸 이전 대화 기록을 Anthropic messages 형식으로 안전하게 정규화.
+// role은 user/assistant만, content는 문자열, 최근 N턴만, 첫 메시지는 user여야 함.
+function sanitizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  let turns = history
+    .map((h) => ({
+      role: h && (h.role === 'assistant' || h.role === 'ai') ? 'assistant' : 'user',
+      content: h && typeof h.content === 'string' ? h.content.trim().slice(0, HISTORY_MAX_CHARS) : '',
+    }))
+    .filter((h) => h.content);
+  turns = turns.slice(-HISTORY_MAX_TURNS);
+  while (turns.length && turns[0].role === 'assistant') turns.shift();
+  return turns;
+}
 
 // LLM에 노출하는 도구 정의 (브릿지와 1:1). groupId는 여기에 없음 — 서버가 주입.
 const TOOLS = [
@@ -89,10 +106,11 @@ function client() {
 
 /**
  * 질문에 답한다.
- * @param {{ groupId:number, question:string, askerName?:string }} params
+ * @param {{ groupId:number, question:string, askerName?:string, history?:Array }} params
+ *   history: 이전 대화 [{ role:'user'|'assistant'|'ai', content:string }, ...] (멀티턴 컨텍스트)
  * @returns {Promise<{ answer:string, toolCalls:Array<{name:string,input:object}> }>}
  */
-async function ask({ groupId, question, askerName = null }) {
+async function ask({ groupId, question, askerName = null, history = [] }) {
   if (!groupId) throw new Error('groupId가 필요합니다.');
   if (!question || !question.trim()) throw new Error('question이 필요합니다.');
   if (!isConfigured()) {
@@ -100,7 +118,7 @@ async function ask({ groupId, question, askerName = null }) {
   }
 
   const system = buildSystem(askerName);
-  const messages = [{ role: 'user', content: question.trim() }];
+  const messages = [...sanitizeHistory(history), { role: 'user', content: question.trim() }];
   const toolCalls = [];
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
@@ -149,4 +167,4 @@ async function ask({ groupId, question, askerName = null }) {
   return { answer: '질문이 복잡해서 정리하지 못했어요. 조금 더 구체적으로 물어봐 주세요.', toolCalls };
 }
 
-module.exports = { ask, isConfigured, TOOLS };
+module.exports = { ask, isConfigured, TOOLS, sanitizeHistory };

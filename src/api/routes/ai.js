@@ -36,7 +36,8 @@ module.exports = (app) => {
         askerName = s ? s.name : null;
       }
 
-      const { answer, toolCalls } = await agent.ask({ groupId, question, askerName });
+      // history: 클라이언트가 보낸 이전 대화(멀티턴 컨텍스트). 에이전트가 정규화/상한 처리.
+      const { answer, toolCalls } = await agent.ask({ groupId, question, askerName, history: req.body.history });
 
       auditLog.log({
         groupId,
