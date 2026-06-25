@@ -57,4 +57,31 @@ describe('ai-rate-limit (인당 일일 호출 제한)', () => {
       expect(rl.consume('puuidA', now, 0).ok).toBe(true);
     }
   });
+
+  describe('peek (소비 없이 조회)', () => {
+    test('카운트를 올리지 않고 현재 사용/잔여를 반환한다', () => {
+      const now = Date.UTC(2026, 5, 25, 3, 0, 0);
+      // 호출 전: used 0, remaining = limit
+      expect(rl.peek('puuidA', now, 5)).toMatchObject({ used: 0, remaining: 5, limit: 5 });
+      rl.consume('puuidA', now, 5);
+      rl.consume('puuidA', now, 5);
+      // peek를 여러 번 해도 카운트는 그대로 2
+      expect(rl.peek('puuidA', now, 5)).toMatchObject({ used: 2, remaining: 3, limit: 5 });
+      expect(rl.peek('puuidA', now, 5)).toMatchObject({ used: 2, remaining: 3, limit: 5 });
+      // 이어서 consume하면 3이 되어야 한다(peek가 소비하지 않았음을 보장)
+      expect(rl.consume('puuidA', now, 5)).toMatchObject({ used: 3, remaining: 2 });
+    });
+
+    test('KST 자정이 지나면 사용량이 0으로 보인다', () => {
+      const t1 = Date.UTC(2026, 5, 25, 3, 0, 0);
+      rl.consume('puuidA', t1, 5);
+      expect(rl.peek('puuidA', t1, 5)).toMatchObject({ used: 1, remaining: 4 });
+      expect(rl.peek('puuidA', t1 + DAY, 5)).toMatchObject({ used: 0, remaining: 5 });
+    });
+
+    test('limit<=0이면 무제한(limit 0)', () => {
+      const now = Date.UTC(2026, 5, 25, 3, 0, 0);
+      expect(rl.peek('puuidA', now, 0)).toMatchObject({ used: 0, limit: 0 });
+    });
+  });
 });
