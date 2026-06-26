@@ -166,6 +166,16 @@ function isConfigured() {
   return !!(config.ai && config.ai.apiKey);
 }
 
+// Anthropic 크레딧 소진(잔액 부족) 에러 판별 — 일반 오류와 구분해 유저에게 명시적으로 안내하기 위함.
+// 크레딧 부족은 보통 400 "Your credit balance is too low..." 또는 type=billing_error 로 온다.
+function isCreditError(e) {
+  if (!e) return false;
+  const type = (e.error && e.error.type) || e.type;
+  if (type === 'billing_error') return true;
+  const msg = `${e.message || ''} ${(e.error && e.error.message) || ''}`.toLowerCase();
+  return msg.includes('credit balance') || (msg.includes('credit') && msg.includes('low'));
+}
+
 let _client = null;
 function client() {
   if (_client) return _client;
@@ -194,16 +204,26 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
   const toolCalls = [];
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const resp = await client().messages.create({
-      model: config.ai.model,
-      max_tokens: MAX_TOKENS,
-      // ★ system도 캐시 분기점. 멀티라운드 루프 안에서 동일 prefix(tools+system)가 반복되므로
-      //   2라운드부터 입력이 캐시 읽기로 처리된다. (system은 askerName 포함이라 유저 단위 캐시)
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      tools: TOOLS,
-      messages,
-    });
+    let resp;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      resp = await client().messages.create({
+        model: config.ai.model,
+        max_tokens: MAX_TOKENS,
+        // ★ system도 캐시 분기점. 멀티라운드 루프 안에서 동일 prefix(tools+system)가 반복되므로
+        //   2라운드부터 입력이 캐시 읽기로 처리된다. (system은 askerName 포함이라 유저 단위 캐시)
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+        tools: TOOLS,
+        messages,
+      });
+    } catch (e) {
+      // ★ 크레딧 소진은 유저에게 명시적으로 안내(일반 "오류 발생"으로 묻히지 않게). 그 외 에러는 라우트가 처리.
+      if (isCreditError(e)) {
+        logger.error(`[ai.agent] Anthropic 크레딧 소진: ${e.message}`);
+        return { answer: '⚠️ 지금 AI 크레딧이 다 떨어져서 답변을 드릴 수 없어요. 관리자가 크레딧을 충전하면 다시 이용할 수 있어요 🙏', toolCalls };
+      }
+      throw e;
+    }
 
     if (resp.stop_reason !== 'tool_use') {
       const answer = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
@@ -241,4 +261,4 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
   return { answer: '질문이 복잡해서 정리하지 못했어요. 조금 더 구체적으로 물어봐 주세요.', toolCalls };
 }
 
-module.exports = { ask, isConfigured, TOOLS, sanitizeHistory };
+module.exports = { ask, isConfigured, isCreditError, TOOLS, sanitizeHistory };
