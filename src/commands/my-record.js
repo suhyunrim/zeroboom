@@ -3,6 +3,7 @@ const models = require('../db/models');
 const groupController = require('../controller/group');
 const { getRatingTier } = require('../services/user');
 const { getLOLNickname } = require('../utils/pick-users-utils');
+const { findGroupSummoner } = require('../utils/summoner-lookup');
 
 // URL에 프로토콜이 없으면 자동으로 http:// 추가
 const rawUrl = process.env.FRONTEND_URL;
@@ -40,11 +41,9 @@ exports.run = async (groupName, interaction) => {
         where: { puuid: userInfo.puuid },
       });
     } else {
-      // 2. discordId로 못 찾으면 기존 방식 (롤 닉네임으로)
-      summoner = await models.summoner.findOne({
-        where: {
-          simplifiedName: lolNickname.toLowerCase().replace(/ /g, ''),
-        },
+      // 2. discordId로 못 찾으면 롤 닉네임으로 — 그룹 멤버 중에서만(타그룹/orphan 동명이인 방지)
+      summoner = await findGroupSummoner(models, group.id, {
+        simplifiedName: lolNickname.toLowerCase().replace(/ /g, ''),
       });
 
       if (summoner) {

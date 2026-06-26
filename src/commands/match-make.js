@@ -6,6 +6,7 @@ const models = require('../db/models');
 const { formatTierBadge, POSITION_ABBR, normalizePosition } = require('../utils/tierUtils');
 const { selectAllConcepts } = require('../match-maker/concept-scorers');
 const { computeMatchPositionScores } = require('../match-maker/position-balance');
+const { findGroupSummoner } = require('../utils/summoner-lookup');
 
 const MAX_MATCH_COUNT = 6;
 
@@ -62,7 +63,7 @@ exports.run = async (groupName, interaction) => {
   const getRatingInfo = async (summonerName) => {
     if (ratingCache[summonerName]) return ratingCache[summonerName];
 
-    const summonerData = await models.summoner.findOne({ where: { name: summonerName } });
+    const summonerData = await findGroupSummoner(models, group.id, { name: summonerName });
     if (!summonerData)
       return {
         name: summonerName,
@@ -235,9 +236,7 @@ exports.reactButton = async (interaction, match) => {
 
   for (let i = 0; i < 2; ++i) {
     for (const memberName of teamMembers[i]) {
-      const summonerData = await models.summoner.findOne({
-        where: { name: memberName },
-      });
+      const summonerData = await findGroupSummoner(models, group.id, { name: memberName });
       if (!summonerData) {
         return { content: `소환사 정보를 찾을 수 없습니다: ${memberName}`, ephemeral: true };
       }

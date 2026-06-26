@@ -2,6 +2,7 @@ const { AttachmentBuilder } = require('discord.js');
 const models = require('../db/models');
 const { getLOLNickname } = require('../utils/pick-users-utils');
 const { syncUserAdminRole } = require('../discord/adminSync');
+const { findGroupSummoner } = require('../utils/summoner-lookup');
 
 exports.run = async (groupName, interaction) => {
   await interaction.deferReply(); // 시간이 오래 걸릴 수 있으므로 defer
@@ -34,11 +35,9 @@ exports.run = async (groupName, interaction) => {
     const nickname = member.nickname || member.user.username;
     const lolNickname = getLOLNickname(nickname);
 
-    // summoner 검색 (simplifiedName으로 검색)
+    // summoner 검색 — 그룹 멤버 중 simplifiedName 일치자(타그룹/orphan 동명이인 방지)
     const simplifiedName = lolNickname.toLowerCase().replace(/ /g, '');
-    let summoner = await models.summoner.findOne({
-      where: { simplifiedName },
-    });
+    let summoner = await findGroupSummoner(models, group.id, { simplifiedName });
 
     let user = null;
 

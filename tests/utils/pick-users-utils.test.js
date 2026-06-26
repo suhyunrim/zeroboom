@@ -13,7 +13,7 @@ jest.mock('discord.js', () => ({
 
 const mockModels = {
   user: { findOne: jest.fn() },
-  summoner: { findOne: jest.fn() },
+  summoner: { findOne: jest.fn(), findAll: jest.fn() },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
@@ -185,14 +185,13 @@ describe('buildPlayerDataMap', () => {
     const summoner = makeSummoner('p1', '닉1');
     const user = makeUser('p1', 1, { defaultRating: 500, additionalRating: 0 });
 
-    // discordId 조회 실패
+    // discordId 조회 실패 → 이름 fallback(그룹 스코프 검증 + 재조회)
     mockModels.user.findOne
-      .mockResolvedValueOnce(null)
-      // 이름 fallback으로 user 조회
-      .mockResolvedValueOnce(user);
-    mockModels.summoner.findOne
-      // 이름으로 summoner 조회
-      .mockResolvedValueOnce(summoner);
+      .mockResolvedValueOnce(null) // discordId 조회 실패
+      .mockResolvedValueOnce(user) // 헬퍼: 후보 puuid가 이 그룹 user인지
+      .mockResolvedValueOnce(user); // fallback으로 user 재조회
+    mockModels.summoner.findAll.mockResolvedValueOnce([{ puuid: 'p1' }]); // 이름 매칭 후보
+    mockModels.summoner.findOne.mockResolvedValueOnce(summoner); // 그룹 멤버 summoner
 
     const { playerDataMap, error } = await buildPlayerDataMap(
       ['닉1'],
@@ -209,6 +208,7 @@ describe('buildPlayerDataMap', () => {
   test('유저 정보 못 찾으면 에러 반환', async () => {
     mockModels.user.findOne.mockResolvedValue(null);
     mockModels.summoner.findOne.mockResolvedValue(null);
+    mockModels.summoner.findAll.mockResolvedValue([]); // 이름 매칭 후보 없음
 
     const { playerDataMap, fakeOptions, error } = await buildPlayerDataMap(
       ['없는유저'],
@@ -232,6 +232,7 @@ describe('buildPlayerDataMap', () => {
     mockModels.summoner.findOne
       .mockResolvedValueOnce(summoner1)
       .mockResolvedValueOnce(null);
+    mockModels.summoner.findAll.mockResolvedValue([]); // 두 번째 유저 이름 fallback 후보 없음
 
     const { error, unregisteredDiscordIds } = await buildPlayerDataMap(
       ['닉1', '없는유저'],

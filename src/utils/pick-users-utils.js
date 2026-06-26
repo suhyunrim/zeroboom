@@ -3,6 +3,7 @@
  */
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, EmbedBuilder } = require('discord.js');
 const { normalizePosition } = require('./tierUtils');
+const { findGroupSummoner } = require('./summoner-lookup');
 
 // 공통 상수
 const { pickCount: PICK_COUNT } = require('../config');
@@ -524,11 +525,9 @@ const lookupUserAndSummoner = async (parsedName, discordId, groupId, models) => 
     }
   }
 
-  // discordId로 못 찾으면 이름으로 조회
+  // discordId로 못 찾으면 이름으로 조회 — 그룹 멤버 중에서만(타그룹/orphan 동명이인 방지)
   if (!summonerData && parsedName) {
-    summonerData = await models.summoner.findOne({
-      where: { name: parsedName },
-    });
+    summonerData = await findGroupSummoner(models, groupId, { name: parsedName });
     if (summonerData) {
       userData = await models.user.findOne({
         where: { groupId, puuid: summonerData.puuid },
