@@ -10,6 +10,8 @@
 --  - 민감 컬럼(puuid/discordId/accountId 등)은 절대 노출하지 않는다.
 --  - 뷰는 DEFINER 권한으로 base 테이블을 읽고, 읽기 전용 유저에겐 "뷰 SELECT + 함수 EXECUTE" 만 GRANT 한다
 --    → 읽기 전용 유저는 base 테이블·타그룹·민감 컬럼에 접근할 수 없다.
+--  - is_active_member(1=현재 그룹 잔류 멤버, 0=탈퇴/추방/외부인): 사람이 등장하는 뷰에 붙인다. 행은 지우지 않고
+--    표식만 둬서, 사람 순위/리스트는 WHERE is_active_member=1 로 거르고(LIMIT보다 먼저), 특정 인물·경기 분석은 전원 포함.
 
 -- ───────── 그룹 격리용 함수 (세션변수 @ai_group_id 반환) ─────────
 -- DETERMINISTIC NO SQL 로 선언해 binlog 신뢰 검사(log_bin_trust_function_creators)도 통과한다.
@@ -19,6 +21,7 @@ CREATE FUNCTION ai_current_group() RETURNS INT UNSIGNED DETERMINISTIC NO SQL
 
 -- ───────── 활성 멤버별 누적 전적·포지션·내전레이팅 ─────────
 -- rating은 raw 점수(정렬/비교용). 답변에는 티어로 환산해 노출하도록 프롬프트가 강제한다.
+-- ★ 이 뷰는 "현재 멤버 명단" 전용 → 원래부터 활성 본캐만(탈퇴/외부인/부캐 제외). is_active_member 불필요.
 CREATE OR REPLACE VIEW ai_players AS
 SELECT
   s.name              AS name,
@@ -44,6 +47,7 @@ WHERE u.groupId = ai_current_group()
 -- ───────── 매치별 참가자 1행(승패/포지션/시각) ─────────
 -- team1/team2 JSON([[puuid,name,rating,position], ...])을 펼쳐 한 행 = (매치, 참가자).
 -- won = 1/0 이라 AVG(won)=승률. 최근 N판은 played_at DESC. puuid는 노출하지 않는다(이름만).
+-- ★ 과거 경기 기록이라 탈퇴자도 그 경기엔 있었으므로 전원 유지. 사람 순위 뽑을 땐 is_active_member=1로 거른다.
 CREATE OR REPLACE VIEW ai_match_players AS
 SELECT
   t.game_id,
@@ -51,7 +55,8 @@ SELECT
   t.team,
   (t.win_team = t.team) AS won,
   s.name                AS player_name,
-  t.position
+  t.position,
+  CASE WHEN u.puuid IS NOT NULL AND u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM (
   SELECT m.gameId AS game_id, m.createdAt AS played_at, m.winTeam AS win_team,
          1 AS team, jt.puuid AS puuid, jt.position AS position
@@ -71,19 +76,22 @@ FROM (
   )) jt ON 1 = 1
   WHERE m.groupId = ai_current_group() AND m.winTeam IS NOT NULL
 ) t
-LEFT JOIN summoners s ON s.puuid = t.puuid;
+LEFT JOIN summoners s ON s.puuid = t.puuid
+LEFT JOIN users u ON u.puuid = t.puuid AND u.groupId = ai_current_group();
 
 -- ───────── 대회(토너먼트) 트로피 — 우승팀 멤버 1행 ─────────
 -- 종료된 대회(status='finished', championTeamId 있음)의 우승팀 members(JSON [{puuid,position},...])를
 -- 펼쳐 한 행 = (대회, 트로피 보유자). 트로피 개수 = COUNT(*) GROUP BY player_name.
 -- trophy_type 예: worlds/lck/msi/kespa/first_stand (null일 수 있음). puuid는 노출 안 함.
+-- ★ 역대 기록이라 탈퇴자도 유지(그때 우승한 건 사실). 현재 멤버만 보려면 is_active_member=1.
 CREATE OR REPLACE VIEW ai_trophies AS
 SELECT
   s.name            AS player_name,
   x.trophy_type,
   x.tournament_name,
   x.won_at,
-  x.position
+  x.position,
+  CASE WHEN u.puuid IS NOT NULL AND u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM (
   SELECT t.id AS tournament_id, t.name AS tournament_name, t.trophyType AS trophy_type,
          COALESCE(t.heldAt, t.updatedAt) AS won_at,
@@ -98,7 +106,8 @@ FROM (
     AND t.status = 'finished'
     AND t.championTeamId IS NOT NULL
 ) x
-LEFT JOIN summoners s ON s.puuid = x.puuid;
+LEFT JOIN summoners s ON s.puuid = x.puuid
+LEFT JOIN users u ON u.puuid = x.puuid AND u.groupId = ai_current_group();
 
 -- ───────── 명예/추천(honor) — 추천 1표 = 1행 ─────────
 -- honor_votes: 경기 후 추천. target=받은 사람. "명예 많이 받은 사람" = COUNT(*) GROUP BY target_name.
@@ -108,9 +117,11 @@ SELECT
   st.name       AS target_name,
   hv.gameId     AS game_id,
   hv.teamNumber AS team,
-  hv.createdAt  AS voted_at
+  hv.createdAt  AS voted_at,
+  CASE WHEN ut.puuid IS NOT NULL AND ut.leftGuildAt IS NULL AND ut.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM honor_votes hv
 LEFT JOIN summoners st ON st.puuid = hv.targetPuuid
+LEFT JOIN users ut ON ut.puuid = hv.targetPuuid AND ut.groupId = ai_current_group()
 WHERE hv.groupId = ai_current_group();
 
 -- ───────── 시즌 스냅샷 레이팅 — 시즌 종료 시점 멤버별 레이팅 ─────────
@@ -119,9 +130,11 @@ CREATE OR REPLACE VIEW ai_season_ratings AS
 SELECT
   s.name    AS name,
   ss.season AS season,
-  (COALESCE(ss.defaultRating, 0) + COALESCE(ss.additionalRating, 0)) AS rating
+  (COALESCE(ss.defaultRating, 0) + COALESCE(ss.additionalRating, 0)) AS rating,
+  CASE WHEN u.puuid IS NOT NULL AND u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM season_snapshots ss
 LEFT JOIN summoners s ON s.puuid = ss.puuid
+LEFT JOIN users u ON u.puuid = ss.puuid AND u.groupId = ai_current_group()
 WHERE ss.groupId = ai_current_group();
 
 -- ───────── 업적 획득 내역 — 획득 1건 = 1행 ─────────
@@ -131,9 +144,11 @@ CREATE OR REPLACE VIEW ai_achievements AS
 SELECT
   s.name           AS player_name,
   ua.achievementId AS achievement_id,
-  ua.unlockedAt    AS unlocked_at
+  ua.unlockedAt    AS unlocked_at,
+  CASE WHEN u.puuid IS NOT NULL AND u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM user_achievements ua
 LEFT JOIN summoners s ON s.puuid = ua.puuid
+LEFT JOIN users u ON u.puuid = ua.puuid AND u.groupId = ai_current_group()
 WHERE ua.groupId = ai_current_group();
 
 -- ───────── 업적 진행 통계 — (사람, 통계종류, 값) ─────────
@@ -142,26 +157,32 @@ CREATE OR REPLACE VIEW ai_achievement_stats AS
 SELECT
   s.name       AS player_name,
   uas.statType AS stat_type,
-  uas.value    AS value
+  uas.value    AS value,
+  CASE WHEN u.puuid IS NOT NULL AND u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM user_achievement_stats uas
 LEFT JOIN summoners s ON s.puuid = uas.puuid
+LEFT JOIN users u ON u.puuid = uas.puuid AND u.groupId = ai_current_group()
 WHERE uas.groupId = ai_current_group();
 
 -- ───────── 보이스(음성채널) 활동 — 일자별 체류시간 ─────────
 -- 원본은 discordId+guildId 기준이라, 그룹의 길드(groups.discordGuildId)로 한정 + 그 그룹의 본캐 user로 이름 해석.
 -- duration_seconds = 그 날 음성채널 체류 초. "음챗 오래한 사람" = SUM(duration_seconds) GROUP BY player_name.
+-- ★ 탈퇴자도 과거 활동은 유지(is_active_member=0). "음챗 죽돌이 TOP"은 is_active_member=1로 거른다.
 CREATE OR REPLACE VIEW ai_voice_activity AS
 SELECT
   s.name       AS player_name,
   vad.date     AS activity_date,
-  vad.duration AS duration_seconds
+  vad.duration AS duration_seconds,
+  CASE WHEN u.leftGuildAt IS NULL AND u.role <> 'outsider' THEN 1 ELSE 0 END AS is_active_member
 FROM voice_activity_dailies vad
 JOIN `groups` g ON g.id = ai_current_group() AND g.discordGuildId = vad.guildId
 JOIN users u    ON u.discordId = vad.discordId AND u.groupId = ai_current_group()
-               AND u.primaryPuuid IS NULL AND u.leftGuildAt IS NULL
+               AND u.primaryPuuid IS NULL
 JOIN summoners s ON s.puuid = u.puuid;
 
 -- ───────── 유저 생성/권한 (비밀번호 치환해 별도 실행) ─────────
+-- ★ 새 뷰 추가 시 GRANT SELECT 뿐 아니라 함수 EXECUTE(ai_current_group)도 반드시 확인할 것.
+--   (미부여 시 뷰가 "execute command denied for routine ai_current_group" 으로 전체 실패)
 -- CREATE USER IF NOT EXISTS 'zeroboom_ai_ro'@'%' IDENTIFIED BY '<<RO_PASSWORD>>';
 -- ALTER USER 'zeroboom_ai_ro'@'%' IDENTIFIED BY '<<RO_PASSWORD>>';
 -- GRANT SELECT   ON zeroboom_bot.ai_players            TO 'zeroboom_ai_ro'@'%';

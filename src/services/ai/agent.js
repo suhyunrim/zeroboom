@@ -156,6 +156,15 @@ function buildSystem(askerName, schemaDoc = '') {
     schemaDoc
       ? `- run_sql로 조회 가능한 뷰(이미 이 그룹으로 자동 필터됨, 컬럼명으로 의미 추론):\n${schemaDoc}`
       : null,
+    schemaDoc
+      ? '- 일부 뷰에 is_active_member 컬럼이 있다(1=현재 그룹에 남아있는 멤버, 0=탈퇴/추방/외부인). '
+        + '"누가 제일 ~한 사람", 순위·TOP N·리스트처럼 사람 목록을 뽑을 땐 반드시 WHERE is_active_member=1 로 현재 멤버만 집계한다. '
+        + '★이 필터는 반드시 WHERE 절에 넣어 LIMIT보다 먼저 적용한다 — 예: '
+        + '`SELECT player_name, AVG(won) FROM ai_match_players WHERE is_active_member=1 GROUP BY player_name ORDER BY 2 DESC LIMIT 10`. '
+        + '상위 N을 먼저 뽑은 뒤 탈퇴자를 빼면 N명이 안 채워지니 그렇게 하지 말 것. '
+        + '단 ①특정 인물 한 명을 콕 집어 묻거나(내 전적/승률, OO의 기록) ②경기 구성·페어링·최근 N판 분석(둘이 같은 팀 승률, 최근 100판 구성)은 '
+        + 'is_active_member로 거르지 말고 전원 포함한다(이미 나간 사람도 그 경기엔 함께 있었으므로).'
+      : null,
     '- puuid/디스코드ID 같은 내부 식별자는 절대 노출하지 않는다.',
     '- 도구 결과로 답할 수 없으면 솔직히 "그 정보는 아직 답하기 어렵다"고 말한다. 환각 금지.',
     '- 답은 핵심부터. 필요하면 짧은 근거(수치)를 덧붙인다.',
