@@ -1,4 +1,4 @@
-const { sanitizeHistory } = require('../../../src/services/ai/agent');
+const { sanitizeHistory, isCreditError } = require('../../../src/services/ai/agent');
 
 describe('sanitizeHistory (멀티턴 컨텍스트 정규화)', () => {
   test('ai → assistant 매핑, 빈 내용 제거', () => {
@@ -33,5 +33,24 @@ describe('sanitizeHistory (멀티턴 컨텍스트 정규화)', () => {
     const r = sanitizeHistory(many);
     expect(r).toHaveLength(12);
     expect(r[0].content).toBe('q8'); // 마지막 12개
+  });
+});
+
+describe('isCreditError (크레딧 소진 판별)', () => {
+  test('credit balance too low 메시지 감지', () => {
+    expect(isCreditError({ status: 400, message: 'Your credit balance is too low to access the Claude API.' })).toBe(true);
+    expect(isCreditError({ error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } })).toBe(true);
+  });
+
+  test('billing_error 타입 감지', () => {
+    expect(isCreditError({ status: 403, error: { type: 'billing_error', message: 'x' } })).toBe(true);
+    expect(isCreditError({ type: 'billing_error' })).toBe(true);
+  });
+
+  test('일반 에러는 false', () => {
+    expect(isCreditError({ status: 400, message: 'messages: roles must alternate' })).toBe(false);
+    expect(isCreditError({ status: 429, error: { type: 'rate_limit_error' } })).toBe(false);
+    expect(isCreditError(new Error('network down'))).toBe(false);
+    expect(isCreditError(null)).toBe(false);
   });
 });
