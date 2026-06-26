@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const models = require('../../db/models');
-const { logger } = require('../../loaders/logger');
 
 const TOKEN_TTL = '7d';
 // express.js의 CORS exposedHeaders가 참조 (현재 X-Renewed-Token 자체는 사용 안 함)
@@ -68,20 +67,13 @@ const getCandidateTokens = (req) => {
  */
 const verifyToken = (req, res, next) => {
   const tokens = getCandidateTokens(req);
-  let lastError = null;
   for (const token of tokens) {
     try {
       req.user = jwt.verify(token, config.jwtSecret);
       return next();
     } catch (e) {
-      lastError = e; // 다음 후보 시도
+      // 다음 후보 시도
     }
-  }
-  // ★ 임시 진단(AI 경로만): 어떤 자격증명이 실렸는지/검증 결과를 값 노출 없이 기록.
-  if (req.originalUrl && req.originalUrl.includes('/api/ai')) {
-    const hasBearer = !!(req.headers.authorization && req.headers.authorization.startsWith('Bearer '));
-    const hasCookie = !!(req.cookies && req.cookies[SESSION_COOKIE]);
-    logger.warn(`[auth.diag] ${req.method} ${req.originalUrl} 401 hasBearer=${hasBearer} hasCookie=${hasCookie} err=${lastError ? lastError.name : 'none'}`);
   }
   return res.status(401).json({ result: tokens.length ? '유효하지 않은 토큰입니다.' : '인증이 필요합니다.' });
 };
