@@ -1,6 +1,7 @@
 const models = require('../db/models');
 const { syncUserAdminRole } = require('../discord/adminSync');
 const { logger } = require('../loaders/logger');
+const { findGroupSummoner } = require('../utils/summoner-lookup');
 
 exports.run = async (groupName, interaction) => {
   const discordUser = interaction.options.getUser('디스코드유저');
@@ -22,11 +23,9 @@ exports.run = async (groupName, interaction) => {
     return '그룹 정보를 찾을 수 없습니다.';
   }
 
-  // 소환사 찾기 (simplifiedName으로 검색)
+  // 소환사 찾기 — 그룹 멤버 중 simplifiedName 일치자(타그룹/orphan 동명이인 방지)
   const simplifiedName = summonerName.toLowerCase().replace(/ /g, '');
-  const summoner = await models.summoner.findOne({
-    where: { simplifiedName },
-  });
+  const summoner = await findGroupSummoner(models, group.id, { simplifiedName });
 
   if (!summoner) {
     return `[${summonerName}] 소환사를 찾을 수 없습니다.`;
