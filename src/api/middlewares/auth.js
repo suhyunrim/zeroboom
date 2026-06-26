@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const models = require('../../db/models');
+const { logger } = require('../../loaders/logger');
 
 const TOKEN_TTL = '7d';
 // express.js의 CORS exposedHeaders가 참조 (현재 X-Renewed-Token 자체는 사용 안 함)
@@ -48,29 +49,41 @@ const clearSessionCookie = (res) => {
   res.clearCookie(SESSION_COOKIE, sessionCookieOptions(res.req));
 };
 
-// Authorization 헤더(Bearer)를 우선 사용하고, 없으면 세션 쿠키로 폴백한다.
-const getTokenFromReq = (req) => {
+// 인증 토큰 후보들을 우선순위대로 모은다: Authorization(Bearer) 먼저, 그다음 세션 쿠키.
+// ★ 둘 다 후보로 반환해, 하나(예: 모바일 localStorage에 남은 낡은 Bearer)가 무효여도
+//   다른 하나(유효한 세션 쿠키)로 통과시킨다. 이전엔 Bearer가 있으면 그것만 검증해서,
+//   무효 Bearer가 유효 쿠키를 가려 401이 났다(모바일 AI 채팅 등에서 발생).
+const getCandidateTokens = (req) => {
+  const tokens = [];
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.split(' ')[1];
-  return (req.cookies && req.cookies[SESSION_COOKIE]) || null;
+  if (authHeader && authHeader.startsWith('Bearer ')) tokens.push(authHeader.split(' ')[1]);
+  const cookieToken = req.cookies && req.cookies[SESSION_COOKIE];
+  if (cookieToken) tokens.push(cookieToken);
+  return tokens;
 };
 
 /**
  * JWT 토큰 검증 미들웨어
- * req.user에 디코딩된 유저 정보를 설정
+ * Bearer/쿠키 후보를 순서대로 검증해 하나라도 유효하면 통과(req.user 설정).
  */
 const verifyToken = (req, res, next) => {
-  const token = getTokenFromReq(req);
-  if (!token) {
-    return res.status(401).json({ result: '인증이 필요합니다.' });
+  const tokens = getCandidateTokens(req);
+  let lastError = null;
+  for (const token of tokens) {
+    try {
+      req.user = jwt.verify(token, config.jwtSecret);
+      return next();
+    } catch (e) {
+      lastError = e; // 다음 후보 시도
+    }
   }
-
-  try {
-    req.user = jwt.verify(token, config.jwtSecret);
-    return next();
-  } catch (e) {
-    return res.status(401).json({ result: '유효하지 않은 토큰입니다.' });
+  // ★ 임시 진단(AI 경로만): 어떤 자격증명이 실렸는지/검증 결과를 값 노출 없이 기록.
+  if (req.originalUrl && req.originalUrl.includes('/api/ai')) {
+    const hasBearer = !!(req.headers.authorization && req.headers.authorization.startsWith('Bearer '));
+    const hasCookie = !!(req.cookies && req.cookies[SESSION_COOKIE]);
+    logger.warn(`[auth.diag] ${req.method} ${req.originalUrl} 401 hasBearer=${hasBearer} hasCookie=${hasCookie} err=${lastError ? lastError.name : 'none'}`);
   }
+  return res.status(401).json({ result: tokens.length ? '유효하지 않은 토큰입니다.' : '인증이 필요합니다.' });
 };
 
 /**
@@ -78,12 +91,14 @@ const verifyToken = (req, res, next) => {
  * 비로그인도 허용해야 하는 엔드포인트용 (예: 방명록 댓글 목록).
  */
 const optionalAuth = (req, res, next) => {
-  const token = getTokenFromReq(req);
-  if (!token) return next();
-  try {
-    req.user = jwt.verify(token, config.jwtSecret);
-  } catch (e) {
-    // 무효 토큰은 그냥 비로그인 취급
+  const tokens = getCandidateTokens(req);
+  for (const token of tokens) {
+    try {
+      req.user = jwt.verify(token, config.jwtSecret);
+      break; // 유효 토큰 찾으면 중단
+    } catch (e) {
+      // 다음 후보 시도
+    }
   }
   return next();
 };
