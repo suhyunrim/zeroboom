@@ -1802,7 +1802,7 @@ module.exports = async (app) => {
       });
       if (main) {
         await models.user.update(
-          { leftGuildAt: null },
+          { leftGuildAt: null, discordNickname: member.displayName },
           {
             where: {
               groupId: group.id,
@@ -1830,14 +1830,22 @@ module.exports = async (app) => {
   // 역할/권한 변경 감지 → DB admin role 동기화
   client.on('guildMemberUpdate', async (oldMember, newMember) => {
     try {
-      // 역할이 변경되지 않았으면 스킵
+      const group = await models.group.findOne({ where: { discordGuildId: newMember.guild.id } });
+      if (!group) return;
+
+      // 닉네임(표시명) 변경 동기화 — DB 캐시(users.discordNickname) 갱신. 멤버 목록이 이 값을 읽는다.
+      if (oldMember.displayName !== newMember.displayName) {
+        await models.user.update(
+          { discordNickname: newMember.displayName },
+          { where: { groupId: group.id, discordId: newMember.id } },
+        );
+      }
+
+      // 역할이 변경되지 않았으면 권한 동기화 스킵
       if (oldMember.roles.cache.size === newMember.roles.cache.size
         && oldMember.roles.cache.every((r) => newMember.roles.cache.has(r.id))) {
         return;
       }
-
-      const group = await models.group.findOne({ where: { discordGuildId: newMember.guild.id } });
-      if (!group) return;
 
       // 부캐는 항상 member 유지. 본캐 행만 권한 동기화 대상.
       const user = await models.user.findOne({
@@ -1934,6 +1942,29 @@ module.exports = async (app) => {
         const { promoted, demoted } = await syncAdminRoles(members, group);
         if (promoted > 0 || demoted > 0) {
           logger.info(`관리자 동기화: 그룹 ${group.id} - ${promoted}명 승격, ${demoted}명 해제`);
+        }
+
+        // 디스코드 닉네임 동기화 — 길드 표시명을 DB(users.discordNickname)에 캐시.
+        // 멤버 목록 API가 매 요청 fetch 안 하도록 함(부팅 백필 + 이후 guildMemberAdd/Update가 실시간 유지).
+        // 바뀐 행만 UPDATE. 떠난 멤버는 길드에 없으니 갱신 안 됨 → 마지막 닉 유지.
+        const nickRows = await models.user.findAll({
+          where: { groupId: group.id, discordId: { [Op.ne]: null } },
+          attributes: ['puuid', 'discordId', 'discordNickname'],
+        });
+        let nickChanged = 0;
+        for (const u of nickRows) {
+          const gm = members.get(u.discordId);
+          if (gm && gm.displayName !== u.discordNickname) {
+            // eslint-disable-next-line no-await-in-loop
+            await models.user.update(
+              { discordNickname: gm.displayName },
+              { where: { groupId: group.id, puuid: u.puuid } },
+            );
+            nickChanged += 1;
+          }
+        }
+        if (nickChanged > 0) {
+          logger.info(`디스코드 닉네임 동기화: 그룹 ${group.id} - ${nickChanged}명 갱신`);
         }
       }
       logger.info('서버 멤버 동기화 완료');

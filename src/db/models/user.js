@@ -61,6 +61,12 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // 디스코드 서버 표시명(닉네임). 봇 이벤트/부팅 정합성 루프로 동기화한다.
+      // 멤버 관리 목록 등에서 매 요청 guild.members.fetch 하지 않고 이 값을 읽는다(100개 fetch 제한 회피).
+      discordNickname: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       indexes: [
