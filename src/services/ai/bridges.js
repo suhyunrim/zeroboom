@@ -219,20 +219,25 @@ async function fetchActivePlayers(groupId) {
   }));
 }
 
-// 그룹 내 이름(부분일치)으로 본캐 puuid 찾기
+// 그룹 내 이름(부분일치)으로 puuid 찾기.
+// ★ 같은 이름의 소환사가 여러 그룹에 있을 수 있다(예: 쥬티키스#kr1=타그룹 / 쥬티키스#kr2=이 그룹).
+//   이름 매칭 소환사들 중 "이 그룹에 속한" 사람을 고른다. 이전엔 전역 findOne이 타그룹 동명이인을
+//   먼저 집어 그룹 멤버를 못 찾고 null을 반환하는 버그가 있었다(부분 이름 검색이 통째로 실패).
 async function resolvePuuid(groupId, name) {
-  const summoner = await models.summoner.findOne({
+  const summoners = await models.summoner.findAll({
     where: { name: { [Op.like]: `%${name}%` } },
     attributes: ['puuid', 'name'],
     raw: true,
   });
-  if (!summoner) return null;
+  if (!summoners.length) return null;
   const user = await models.user.findOne({
-    where: { groupId, puuid: summoner.puuid },
+    where: { groupId, puuid: { [Op.in]: summoners.map((s) => s.puuid) } },
     attributes: ['puuid'],
     raw: true,
   });
-  return user ? { puuid: summoner.puuid, name: summoner.name } : null;
+  if (!user) return null;
+  const matched = summoners.find((s) => s.puuid === user.puuid);
+  return { puuid: matched.puuid, name: matched.name };
 }
 
 // ───────────────────────── 브릿지 (AI가 호출) ─────────────────────────
