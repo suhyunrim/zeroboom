@@ -26,6 +26,7 @@ module.exports = (app) => {
           'puuid',
           'primaryPuuid',
           'discordId',
+          'discordNickname',
           'role',
           'win',
           'lose',
@@ -63,8 +64,10 @@ module.exports = (app) => {
         return acc;
       }, {});
 
+      // 디스코드 닉네임은 DB(users.discordNickname)에 캐시된 값을 쓴다. 봇이 이벤트/부팅 정합성 루프로 동기화.
+      // (과거엔 매 요청 guild.members.fetch({user})로 실시간 조회했으나, user_ids 100개 제한에 걸려
+      //  연동·잔류 멤버라도 100번째 이후는 닉네임이 누락됐다.)
       const voiceMap = {};
-      const nicknameMap = {};
       if (group && group.discordGuildId && discordIds.length > 0) {
         const activities = await models.voice_activity.findAll({
           where: { guildId: group.discordGuildId, discordId: discordIds },
@@ -73,20 +76,6 @@ module.exports = (app) => {
         activities.forEach((a) => {
           voiceMap[a.discordId] = a.lastJoinedAt;
         });
-
-        // 디스코드 서버 닉네임 조회 (서버 닉네임 → 글로벌 표시명 → 유저네임 순). DB에 없으므로 봇 클라이언트에서 실시간 조회.
-        const client = req.app.discordClient;
-        const guild = client && client.guilds.cache.get(group.discordGuildId);
-        if (guild) {
-          try {
-            const guildMembers = await guild.members.fetch({ user: discordIds });
-            guildMembers.forEach((m) => {
-              nicknameMap[m.id] = m.displayName;
-            });
-          } catch (e) {
-            logger.warn(`디스코드 닉네임 조회 실패 (group ${groupId}): ${e.message}`);
-          }
-        }
       }
 
       const result = mainUsers.map((u) => {
@@ -95,7 +84,7 @@ module.exports = (app) => {
           puuid: u.puuid,
           discordId: u.discordId,
           name: nameMap[u.puuid] || '알 수 없음',
-          discordNickname: nicknameMap[u.discordId] || null,
+          discordNickname: u.discordNickname || null,
           role: u.role,
           win: u.win,
           lose: u.lose,
