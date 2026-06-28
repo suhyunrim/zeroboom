@@ -710,7 +710,7 @@ module.exports.duplicateMatch = async (groupId, matchId, date, winTeam) => {
   return { status: 200, result: { gameId: newMatch.gameId } };
 };
 
-module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, search = null) => {
+module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, search = null, puuid = null) => {
   const group = await models.group.findByPk(groupId);
   if (!group) {
     return { status: 404, result: { error: 'Group not found' } };
@@ -722,9 +722,19 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
     winTeam: { [Op.ne]: null },
   };
 
+  // search(팀 텍스트 검색)와 puuid(참가자 필터)는 서로 AND로 결합
+  const andConditions = [];
   if (search) {
     const likeSearch = `%${search}%`;
-    whereCondition[Op.or] = [{ team1: { [Op.like]: likeSearch } }, { team2: { [Op.like]: likeSearch } }];
+    andConditions.push({ [Op.or]: [{ team1: { [Op.like]: likeSearch } }, { team2: { [Op.like]: likeSearch } }] });
+  }
+  if (puuid) {
+    // puuid는 78자 UUID라 이름 필드에 우연히 포함될 일이 없어 LIKE로 충분
+    const likePuuid = `%${puuid}%`;
+    andConditions.push({ [Op.or]: [{ team1: { [Op.like]: likePuuid } }, { team2: { [Op.like]: likePuuid } }] });
+  }
+  if (andConditions.length > 0) {
+    whereCondition[Op.and] = andConditions;
   }
 
   // 전체 매치 수 조회
