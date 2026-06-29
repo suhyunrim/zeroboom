@@ -15,3 +15,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: zeroboom-redis
+    restart: unless-stopped
+    # 순수 캐시: 영속화 off(--save "" / appendonly no), 64MB 캡 + TTL 키 우선 제거.
+    # 포트 미공개 → 도커 네트워크 내부에서 zeroboom-redis 로만 접근(외부 노출 없음).
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - volatile-ttl

@@ -1,36 +1,51 @@
-const redis = require('redis');
+const { createClient } = require('redis');
 const { logger } = require('../loaders/logger');
 
-const client = redis.createClient({
-  host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT,
-  password: process.env.REDIS_PASS,
-  retry_strategy: function(options) {
-    if (options.error && options.error.code === 'ECONNREFUSED') {
-      // End reconnecting on a specific error and flush all commands with
-      // a individual error
-      return new Error('The server refused the connection');
-    }
-    if (options.total_retry_time > 1000 * 60 * 60) {
-      // End reconnecting after a specific timeout and flush all commands
-      // with a individual error
-      return new Error('Retry time exhausted');
-    }
-    if (options.attempt > 10) {
-      // End reconnecting with built in error
-      return new Error('Retry attempt exceed');
-    }
-    // reconnect after
-    return Math.min(options.attempt * 100, 3000);
+// node-redis v4 클라이언트. Redis는 best-effort 캐시로만 사용하며, 연결 실패/장애 시에도
+// 봇 기능이 죽지 않도록 호출부는 반드시 isReady() 가드 + try/catch로 감싼다.
+let ready = false;
+let loggedError = false;
+
+const client = createClient({
+  socket: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: Number(process.env.REDIS_PORT) || 6379,
+    // 무한 재연결(백오프). 캐시라 끊겨도 봇은 인메모리로 계속 동작한다.
+    reconnectStrategy: (retries) => Math.min(retries * 200, 5000),
   },
+  password: process.env.REDIS_PASS || undefined,
+  database: Number(process.env.REDIS_DB) || 0,
 });
 
-client.on('error', (error) => {
-  logger.error(error);
+client.on('ready', () => {
+  ready = true;
+  loggedError = false;
+  logger.info('Redis 연결됨');
+});
+client.on('end', () => {
+  ready = false;
+});
+client.on('error', (err) => {
+  ready = false;
+  // 연결 실패 시 error 이벤트가 반복 발생하므로 최초 1회만 로깅(스팸 방지)
+  if (!loggedError) {
+    loggedError = true;
+    logger.warn(`Redis 오류(인메모리 폴백): ${err.message}`);
+  }
 });
 
-const { promisify } = require('util');
-client.getAsync = promisify(client.get).bind(client);
-client.hgetAsync = promisify(client.hget).bind(client);
+// 부팅 시 1회 호출. REDIS_HOST 미설정이면 연결을 시도하지 않는다(로컬/비활성 환경).
+async function connect() {
+  if (!process.env.REDIS_HOST) {
+    logger.info('REDIS_HOST 미설정 — Redis 비활성(인메모리 캐시만 사용)');
+    return;
+  }
+  try {
+    await client.connect();
+  } catch (e) {
+    // 초기 연결 실패해도 reconnectStrategy로 백그라운드 재시도. 봇은 계속 동작.
+    logger.warn(`Redis 연결 실패(인메모리 폴백): ${e.message}`);
+  }
+}
 
-module.exports = client;
+module.exports = { client, connect, isReady: () => ready };

@@ -32,6 +32,9 @@ services:
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-30}
       DATABASE_AI_RO_USER: ${DATABASE_AI_RO_USER:-}
       DATABASE_AI_RO_PASS: ${DATABASE_AI_RO_PASS:-}
+      REDIS_HOST: zeroboom-redis
+      REDIS_PORT: 6379
+      REDIS_DB: 1
     networks:
       - live_network
 
