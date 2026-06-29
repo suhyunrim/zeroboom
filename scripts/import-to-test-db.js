@@ -44,6 +44,22 @@ if (!PASSWORD) {
     multipleStatements: false,
   });
 
+  // import는 groups 테이블을 통째로 덮어쓴다. 테섭의 기존 온보딩 설정을 보존하기 위해
+  // import 전에 현재 onboardingEnabled 값을 그룹별로 읽어둔다. (라이브 봇과 테섭 봇이 같은
+  // 디코 서버라, 라이브의 onboardingEnabled가 덮어써져 켜지면 테섭 봇도 guildMemberAdd에
+  // 반응해 신규 유저가 온보딩 DM을 두 번 받게 됨)
+  const prevOnboarding = new Map(); // groupId -> bool (테섭 원래 값)
+  try {
+    const [grpRows] = await conn.query('SELECT id, settings FROM `groups`');
+    for (const g of grpRows) {
+      const s = typeof g.settings === 'string' ? JSON.parse(g.settings || '{}') : g.settings || {};
+      prevOnboarding.set(g.id, s.onboardingEnabled === true);
+    }
+    console.log(`  기존 온보딩 설정 캡처: groups ${grpRows.length}행`);
+  } catch (e) {
+    console.log(`  (기존 groups 온보딩 값 읽기 생략: ${e.message})`);
+  }
+
   let done = 0;
   let lastTable = '';
   for (const stmt of stmts) {
@@ -77,6 +93,25 @@ if (!PASSWORD) {
       console.log(`  → TRUNCATE 실행`);
       await conn.query(`TRUNCATE \`${t}\``);
     }
+  }
+
+  // 온보딩 설정 보존: import로 덮어쓴 라이브 값 대신, 위에서 캡처한 테섭의 원래 값으로 되돌린다.
+  // 테섭에 없던(라이브에만 있는) 신규 그룹은 기본 false로 둬서 중복 DM을 막는다.
+  // (대상이 라이브면 건드리지 않음 — 실서비스 온보딩 설정 보존)
+  if (DATABASE !== 'zeroboom_bot') {
+    const [grpRows] = await conn.query('SELECT id FROM `groups`');
+    let restored = 0;
+    for (const g of grpRows) {
+      const desired = prevOnboarding.get(g.id) === true ? 'true' : 'false';
+      await conn.query(
+        "UPDATE `groups` SET settings = JSON_SET(COALESCE(settings, JSON_OBJECT()), '$.onboardingEnabled', CAST(? AS JSON)) WHERE id = ?",
+        [desired, g.id],
+      );
+      restored++;
+    }
+    console.log(`  온보딩 설정 보존: groups ${restored}행 (테섭 원래 값 유지, 신규 그룹은 false)`);
+  } else {
+    console.log('  ⚠️ 대상이 라이브(zeroboom_bot) — 온보딩 설정 그대로 유지');
   }
 
   // import 검증

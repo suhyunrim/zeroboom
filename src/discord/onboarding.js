@@ -15,6 +15,7 @@ const { registerUser } = require('../services/user');
 const auditLog = require('../controller/audit-log');
 const { getEmojiObject } = require('./emoji-manager');
 const { getCustomExtra } = require('./onboarding-messages');
+const { isDiscordAdmin } = require('./adminSync');
 
 // 포지션 폴백 이모지 (커스텀 이모지 없을 때)
 const POSITION_FALLBACK_EMOJI = {
@@ -203,6 +204,31 @@ function buildTierStepView(guildId, position, tierCategory, prefix, group) {
 // 온보딩 진행 중인 유저 추적 (discordId Set)
 const onboardingInProgress = new Set();
 
+// 관리자 대행 등록 추적: `${guildId}:${actorDiscordId}` -> { targetId, timer }
+// 채널 폴백에서 관리자가 신규 유저 대신 등록을 진행할 때, 최종 등록 대상을 기억한다.
+const onBehalfTargets = new Map();
+const ON_BEHALF_TTL = 30 * 60 * 1000;
+
+function setOnBehalf(guildId, actorId, targetId) {
+  const key = `${guildId}:${actorId}`;
+  const prev = onBehalfTargets.get(key);
+  if (prev?.timer) clearTimeout(prev.timer);
+  const timer = setTimeout(() => onBehalfTargets.delete(key), ON_BEHALF_TTL);
+  if (timer.unref) timer.unref();
+  onBehalfTargets.set(key, { targetId, timer });
+}
+
+function clearOnBehalf(guildId, actorId) {
+  const key = `${guildId}:${actorId}`;
+  const prev = onBehalfTargets.get(key);
+  if (prev?.timer) clearTimeout(prev.timer);
+  onBehalfTargets.delete(key);
+}
+
+function getOnBehalfTarget(guildId, actorId) {
+  return onBehalfTargets.get(`${guildId}:${actorId}`)?.targetId || null;
+}
+
 /**
  * 온보딩 DM 전송 시작
  * @param {Object} options
@@ -260,9 +286,10 @@ async function handleOnboardButton(interaction) {
   const prefix = split[0]; // 'onboard' 또는 'onboardTest'
   const step = split[1];
 
-  // 채널 공지에서 "소환사 등록하기" 버튼 클릭 → DM으로 온보딩 시작
+  // 채널 공지에서 "소환사 등록하기" 버튼 클릭 → 채널 ephemeral로 온보딩 진행
   if (step === 'start') {
     const guildId = split[2];
+    const targetId = split[3] || interaction.user.id; // 폴백 메시지의 신규 유저 (구버전 메시지는 클릭자)
     try {
       const group = await models.group.findOne({ where: { discordGuildId: guildId } });
       if (!group) {
@@ -270,18 +297,37 @@ async function handleOnboardButton(interaction) {
         return;
       }
 
-      // 이미 등록된 유저인지 확인
-      const existingUser = await models.user.findOne({
-        where: { groupId: group.id, discordId: interaction.user.id },
-      });
-      if (existingUser) {
-        await interaction.reply({ content: '이미 등록되어 있습니다! 🎮', ephemeral: true });
+      // 본인 또는 관리자만 진행 가능 (관리자는 신규 유저 대신 진행)
+      const isSelf = interaction.user.id === targetId;
+      const isAdmin = interaction.member ? isDiscordAdmin(interaction.member) : false;
+      if (!isSelf && !isAdmin) {
+        await interaction.reply({
+          content: `🔒 이 등록 안내는 <@${targetId}> 님을 위한 거예요. 본인 또는 관리자만 진행할 수 있어요.`,
+          ephemeral: true,
+        });
         return;
       }
+
+      // 이미 등록된 유저인지 확인 (대행 시 대상 기준)
+      const existingUser = await models.user.findOne({
+        where: { groupId: group.id, discordId: targetId },
+      });
+      if (existingUser) {
+        await interaction.reply({
+          content: isSelf ? '이미 등록되어 있습니다! 🎮' : `<@${targetId}> 님은 이미 등록되어 있습니다! 🎮`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // 관리자 대행이면 최종 등록 대상 기억, 본인 진행이면 기존 대행정보 제거
+      if (!isSelf) setOnBehalf(guildId, interaction.user.id, targetId);
+      else clearOnBehalf(guildId, interaction.user.id);
 
       // DM 대신 채널에서 본인에게만 보이는(ephemeral) 등록 UI로 진행 → DM 차단 유저도 등록 가능
       const guildName = interaction.guild?.name ?? '';
       await interaction.reply({
+        content: isSelf ? undefined : `👮 <@${targetId}> 님 대신 등록을 진행합니다.`,
         ...buildPositionView(guildId, 'onboard', guildName, group),
         ephemeral: true,
       });
@@ -402,6 +448,12 @@ async function handleOnboardModalSubmit(interaction, client) {
   const summonerName = interaction.fields.getTextInputValue('summonerName').trim();
   const tierCategory = tier.split(' ')[0];
 
+  // 관리자 대행이면 등록 대상은 클릭자가 아니라 신규 유저. (대행 정보 없으면 본인)
+  // 대행 매핑은 채널(길드) 흐름에서만 생기므로, DM 흐름에선 참조하지 않는다(잔여 매핑 오염 방지).
+  const registrantId =
+    (!isTestMode && interaction.inGuild() && getOnBehalfTarget(guildId, interaction.user.id)) || interaction.user.id;
+  const onBehalf = registrantId !== interaction.user.id;
+
   // 채널(길드) ephemeral 흐름이면 결과도 본인에게만 보이게, DM 흐름이면 기존대로
   await interaction.deferReply({ ephemeral: interaction.inGuild() });
 
@@ -429,23 +481,26 @@ async function handleOnboardModalSubmit(interaction, client) {
       return;
     }
 
-    // 유저 등록 (기존 서비스 재사용)
-    const result = await registerUser(group.groupName, summonerName, tier, interaction.user.id);
+    // 유저 등록 (기존 서비스 재사용) — 대행이면 신규 유저(registrantId)로 등록
+    const result = await registerUser(group.groupName, summonerName, tier, registrantId);
 
     if (result.status === 200) {
-      onboardingInProgress.delete(interaction.user.id);
+      onboardingInProgress.delete(registrantId);
+      clearOnBehalf(guildId, interaction.user.id);
 
       const rawUrl = process.env.FRONTEND_URL;
       const frontendUrl = rawUrl && !rawUrl.startsWith('http') ? `http://${rawUrl}` : rawUrl;
       const frontendLine = frontendUrl
         ? `\n\n🌐 전적·프로필·랭킹은 여기서: ${frontendUrl}`
         : '';
+      const onBehalfLine = onBehalf ? `👮 <@${registrantId}> 님 등록을 대신 완료했어요.\n\n` : '';
 
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
         .setTitle('✅ 등록 완료!')
         .setDescription(
-          `${result.result}\n\n`
+          onBehalfLine
+          + `${result.result}\n\n`
           + `포지션: ${getPositionDisplayEmoji(position)} **${position}**\n`
           + `티어: ${getTierDisplayEmoji(tierCategory)} **${formatTierForDisplay(tier)}**\n\n`
           + '내전에서 만나요! 🎮'
@@ -455,16 +510,16 @@ async function handleOnboardModalSubmit(interaction, client) {
 
       await interaction.editReply({ embeds: [embed] });
 
-      // Discord Role 부여 (기본 역할 + 포지션 역할 + 티어 역할)
-      await assignDiscordRoles(client, guildId, interaction.user.id, group, position, tierCategory);
+      // Discord Role 부여 (기본 역할 + 포지션 역할 + 티어 역할) — 대상은 registrantId
+      await assignDiscordRoles(client, guildId, registrantId, group, position, tierCategory);
 
-      // 감사 로그
+      // 감사 로그 (수행자=클릭자, 대상=registrantId)
       auditLog.log({
         groupId: group.id,
         actorDiscordId: interaction.user.id,
         actorName: interaction.user.displayName,
         action: 'user.onboard',
-        details: { summonerName, position, tier },
+        details: { summonerName, position, tier, onboardedDiscordId: registrantId, onBehalf },
         source: 'discord',
       });
     } else {
@@ -570,7 +625,7 @@ async function sendOnboardingFallback(member, group) {
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`onboard|start|${guild.id}`)
+      .setCustomId(`onboard|start|${guild.id}|${member.id}`)
       .setLabel('소환사 등록하기')
       .setEmoji('✏️')
       .setStyle(ButtonStyle.Primary),
