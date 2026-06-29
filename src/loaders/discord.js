@@ -34,6 +34,8 @@ const {
 } = require('../discord/onboarding');
 const { initEmojis } = require('../discord/emoji-manager');
 const { isDiscordAdmin } = require('../discord/adminSync');
+const matchCache = require('../redis/match-cache');
+const redisClient = require('../redis/redis');
 
 const ADMINISTRATOR = BigInt(0x8);
 
@@ -124,8 +126,9 @@ module.exports = async (app) => {
     partials: [Partials.Channel],
   });
 
-  const matches = new Map();
-  const conceptData = new Map(); // 컨셉 매칭용 데이터 (allMatches, ratingCache)
+  // 매칭생성 플랜/컨셉 데이터는 matchCache(인메모리 Map + Redis 백스토어)로 관리 →
+  // 봇 재시작 후에도 플랜 버튼이 살아있다. (Redis 연결은 best-effort)
+  redisClient.connect();
   const pickUsersData = new Map();
   const honorVoteSessions = new Map();
   const matchVoteSessions = new Map(); // 매칭 투표 세션
@@ -166,11 +169,11 @@ module.exports = async (app) => {
       if (output) {
         if (command.conf.aliases[0] == '매칭생성') {
           for (let i = 0; i < output.match.length; ++i) {
-            matches.set(`${groupName}/${output.time}/${i}`, output.match[i]);
+            await matchCache.setMatch(`${groupName}/${output.time}/${i}`, output.match[i]);
           }
           // 컨셉 매칭용 데이터 저장
           if (output.allMatches && output.ratingCache) {
-            conceptData.set(`${groupName}/${output.time}`, {
+            await matchCache.setConcept(`${groupName}/${output.time}`, {
               allMatches: output.allMatches,
               ratingCache: output.ratingCache,
               groupName,
@@ -396,7 +399,7 @@ module.exports = async (app) => {
             } else if (output.isConceptMatch && output.conceptMatches) {
               // 컨셉 매칭 버튼 결과
               for (let i = 0; i < output.conceptMatches.length; i++) {
-                matches.set(`${output.groupName}/${output.time}/concept_${i}`, output.conceptMatches[i]);
+                await matchCache.setMatch(`${output.groupName}/${output.time}/concept_${i}`, output.conceptMatches[i]);
               }
               await interaction.reply(output);
             } else {
@@ -407,11 +410,11 @@ module.exports = async (app) => {
                 });
                 if (group) {
                   for (let i = 0; i < output.match.length; ++i) {
-                    matches.set(`${group.groupName}/${output.time}/${i}`, output.match[i]);
+                    await matchCache.setMatch(`${group.groupName}/${output.time}/${i}`, output.match[i]);
                   }
                   // 컨셉 매칭용 데이터 저장
                   if (output.allMatches && output.ratingCache) {
-                    conceptData.set(`${group.groupName}/${output.time}`, {
+                    await matchCache.setConcept(`${group.groupName}/${output.time}`, {
                       allMatches: output.allMatches,
                       ratingCache: output.ratingCache,
                       groupName: group.groupName,
@@ -736,11 +739,11 @@ module.exports = async (app) => {
           for (let i = 0; i < result.match.length; ++i) {
             // 수동 지정 포지션을 플랜에 첨부 → reactButton 기록 시 매치에 저장됨
             result.match[i].positionMap = positionMap;
-            matches.set(`${group.groupName}/${result.time}/${i}`, result.match[i]);
+            await matchCache.setMatch(`${group.groupName}/${result.time}/${i}`, result.match[i]);
           }
           // 컨셉 매칭용 데이터 저장
           if (result.allMatches && result.ratingCache) {
-            conceptData.set(`${group.groupName}/${result.time}`, {
+            await matchCache.setConcept(`${group.groupName}/${result.time}`, {
               allMatches: result.allMatches,
               ratingCache: result.ratingCache,
               groupName: group.groupName,
@@ -1098,7 +1101,7 @@ module.exports = async (app) => {
         if (slashSplit[0] === 'conceptMatch') {
           const groupName = slashSplit[1];
           const time = slashSplit[2];
-          const data = conceptData.get(`${groupName}/${time}`);
+          const data = await matchCache.getConcept(`${groupName}/${time}`);
           if (!data) {
             await interaction.reply({
               content: '매칭 데이터가 만료되었습니다. 다시 매칭생성을 해주세요.',
@@ -1115,14 +1118,14 @@ module.exports = async (app) => {
             }
             // 컨셉 매치 데이터를 matches Map에 저장
             for (let i = 0; i < output.conceptMatches.length; i++) {
-              matches.set(`${groupName}/${time}/concept_${i}`, output.conceptMatches[i]);
+              await matchCache.setMatch(`${groupName}/${time}/concept_${i}`, output.conceptMatches[i]);
             }
             await interaction.update({ embeds: output.embeds, components: output.components });
             return;
           }
         }
 
-        const match = matches.get(interaction.customId);
+        const match = await matchCache.getMatch(interaction.customId);
         if (match) {
           const customSplit = interaction.customId.split('/');
           const sessionKey = `${customSplit[0]}/${customSplit[1]}`;
@@ -1182,7 +1185,7 @@ module.exports = async (app) => {
 
             if (voteResult.confirmed) {
               const leadPlan = voteResult.confirmedPlan;
-              const winnerMatch = matches.get(`${sessionKey}/${leadPlan}`);
+              const winnerMatch = await matchCache.getMatch(`${sessionKey}/${leadPlan}`);
               const matchMakeCommand = commandList.get('매칭생성');
               if (matchMakeCommand && winnerMatch) {
                 interaction.customId = `${sessionKey}/${leadPlan}`;
