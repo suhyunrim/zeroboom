@@ -199,23 +199,27 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   // 시간순 정렬
   matchHistory.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-  // outsider 제외
-  const outsiders = await models.user.findAll({
-    where: { groupId, role: 'outsider' },
+  // 닉네임이 표시되는 리스트(자주 함께한 팀원/맞선 상대)에서 제외할 대상:
+  // 외부인(outsider) + 서버를 나갔거나 강퇴/밴된 멤버(leftGuildAt).
+  // 집계(teammateStats/opponentStats)는 그대로 두고 리스트 선정 단계에서만 거른다.
+  // (내 승률/연승 등 개인 통계는 matchHistory 기반이라 떠난 사람과의 경기도 그대로 포함됨)
+  const excludedUsers = await models.user.findAll({
+    where: {
+      groupId,
+      [Op.or]: [{ role: 'outsider' }, { leftGuildAt: { [Op.ne]: null } }],
+    },
     attributes: ['puuid'],
     raw: true,
   });
-  const outsiderSet = new Set(outsiders.map((u) => u.puuid));
-  outsiderSet.forEach((puuid) => {
-    delete teammateStats[puuid];
-    delete opponentStats[puuid];
-  });
+  const excludedFromList = new Set(excludedUsers.map((u) => u.puuid));
 
-  // Top 리스트 및 best/worst 후보 미리 계산
+  // Top 리스트 및 best/worst 후보 미리 계산 (제외 대상 필터 후 게임 수 순)
   const topTeammateEntries = Object.entries(teammateStats)
+    .filter(([puuid]) => !excludedFromList.has(puuid))
     .sort((a, b) => b[1].games - a[1].games)
     .slice(0, TOP_LIST_COUNT);
   const topOpponentEntries = Object.entries(opponentStats)
+    .filter(([puuid]) => !excludedFromList.has(puuid))
     .sort((a, b) => b[1].games - a[1].games)
     .slice(0, TOP_LIST_COUNT);
 
