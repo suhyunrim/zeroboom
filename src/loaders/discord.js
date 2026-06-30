@@ -1911,18 +1911,18 @@ module.exports = async (app) => {
 
         const members = await guild.members.fetch();
 
-        // 탈퇴 동기화 — 본캐만 검사하고, 탈퇴 시 본캐 + 부캐 일괄 처리
+        // 탈퇴/재입장 동기화 — 본캐만 검사하고, 본캐 + 부캐 일괄 처리.
+        // 본캐를 한 번에 조회한 뒤 길드 재직 여부 × leftGuildAt 상태로 양방향 분리한다.
         const guildMemberIds = new Set(members.map((m) => m.id));
         const mainUsers = await models.user.findAll({
           where: {
             groupId: group.id,
             discordId: { [Op.ne]: null },
-            leftGuildAt: null,
             primaryPuuid: null,
           },
-          attributes: ['puuid', 'discordId'],
+          attributes: ['puuid', 'discordId', 'leftGuildAt'],
         });
-        const leftUsers = mainUsers.filter((u) => !guildMemberIds.has(u.discordId));
+        const leftUsers = mainUsers.filter((u) => !u.leftGuildAt && !guildMemberIds.has(u.discordId));
         if (leftUsers.length > 0) {
           const mainPuuids = leftUsers.map((u) => u.puuid);
           await models.user.update(
@@ -1943,16 +1943,7 @@ module.exports = async (app) => {
 
         // 재입장 복구 — 봇 다운 중 재입장해 guildMemberAdd 이벤트를 놓친 케이스 감지.
         // 길드에 현재 존재하는데 leftGuildAt 이 남아 있는 본캐 → 본캐 + 부캐 일괄 해제.
-        const rejoinedMains = await models.user.findAll({
-          where: {
-            groupId: group.id,
-            discordId: { [Op.ne]: null },
-            leftGuildAt: { [Op.ne]: null },
-            primaryPuuid: null,
-          },
-          attributes: ['puuid', 'discordId'],
-        });
-        const rejoinedUsers = rejoinedMains.filter((u) => guildMemberIds.has(u.discordId));
+        const rejoinedUsers = mainUsers.filter((u) => u.leftGuildAt && guildMemberIds.has(u.discordId));
         if (rejoinedUsers.length > 0) {
           const rejoinedPuuids = rejoinedUsers.map((u) => u.puuid);
           await models.user.update(
