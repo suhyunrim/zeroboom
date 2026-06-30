@@ -1941,6 +1941,36 @@ module.exports = async (app) => {
           logger.info(`서버 멤버 동기화: 그룹 ${group.id} - ${leftUsers.length}명 탈퇴 반영`);
         }
 
+        // 재입장 복구 — 봇 다운 중 재입장해 guildMemberAdd 이벤트를 놓친 케이스 감지.
+        // 길드에 현재 존재하는데 leftGuildAt 이 남아 있는 본캐 → 본캐 + 부캐 일괄 해제.
+        const rejoinedMains = await models.user.findAll({
+          where: {
+            groupId: group.id,
+            discordId: { [Op.ne]: null },
+            leftGuildAt: { [Op.ne]: null },
+            primaryPuuid: null,
+          },
+          attributes: ['puuid', 'discordId'],
+        });
+        const rejoinedUsers = rejoinedMains.filter((u) => guildMemberIds.has(u.discordId));
+        if (rejoinedUsers.length > 0) {
+          const rejoinedPuuids = rejoinedUsers.map((u) => u.puuid);
+          await models.user.update(
+            { leftGuildAt: null },
+            {
+              where: {
+                groupId: group.id,
+                leftGuildAt: { [Op.ne]: null },
+                [Op.or]: [
+                  { puuid: { [Op.in]: rejoinedPuuids } },
+                  { primaryPuuid: { [Op.in]: rejoinedPuuids } },
+                ],
+              },
+            },
+          );
+          logger.info(`서버 멤버 동기화: 그룹 ${group.id} - ${rejoinedUsers.length}명 재입장 복구`);
+        }
+
         // 관리자 권한 동기화
         const { promoted, demoted } = await syncAdminRoles(members, group);
         if (promoted > 0 || demoted > 0) {
