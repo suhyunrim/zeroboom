@@ -1,10 +1,8 @@
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
-const moment = require('moment');
 const { Op } = require('sequelize');
 const elo = require('arpad');
 
-const LatestMatchDateConditionDays = 60;
 const RankingMinumumMatchCount = 5;
 
 const ratingCalculator = new elo(16);
@@ -89,9 +87,6 @@ module.exports.getRanking = async (groupName) => {
       groupId: group.id,
       role: { [Op.ne]: 'outsider' },
       leftGuildAt: null,
-      latestMatchDate: {
-        [Op.gte]: moment().subtract(LatestMatchDateConditionDays, 'days').toDate()
-      }
     },
   });
 
@@ -170,8 +165,6 @@ module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {
     reason = '블랙리스트';
   } else if (totalGames < RankingMinumumMatchCount) {
     reason = `${RankingMinumumMatchCount}판 미만`;
-  } else if (!user.latestMatchDate || moment().diff(moment(user.latestMatchDate), 'days') > LatestMatchDateConditionDays) {
-    reason = `최근 ${LatestMatchDateConditionDays}일 이내 매치 없음`;
   }
 
   return {
