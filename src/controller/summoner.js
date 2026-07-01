@@ -141,7 +141,7 @@ module.exports.getSummonerByName = async (name) => {
  * 소환사 포지션 조회/업데이트
  * @param {string} name - 소환사명
  * @param {Object} options - { force: false }
- * @param {boolean} options.force - true면 캐시 무시하고 강제 업데이트
+ * @param {boolean} options.force - true면 포지션 통계 재계산 캐시(7일)를 무시. 닉네임/랭크티어는 캐시와 무관하게 매번 갱신됨
  * @returns {Promise<Object>}
  */
 module.exports.getPositions = async (name, options = {}) => {
@@ -168,14 +168,7 @@ module.exports.getPositions = async (name, options = {}) => {
       await found.update(summonerData);
     }
 
-    // 7일 이내이고 데이터가 있으면 캐시 반환 (force가 아닐 때만)
-    if (!force && !isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
-      result.push([found.mainPosition, found.mainPositionRate]);
-      result.push([found.subPosition, found.subPositionRate]);
-      return { result, status: 200, skipped: true };
-    }
-
-    // 포지션 업데이트 시 닉네임 및 rankTier 갱신 (puuid로 Riot API 조회)
+    // 닉네임/rankTier는 포지션 캐시와 무관하게 매번 갱신 (puuid로 Riot API 조회)
     let updatedName = null;
     let updatedRankTier = null;
     let updatedRankWin = null;
@@ -184,7 +177,7 @@ module.exports.getPositions = async (name, options = {}) => {
     let updatedFlexRankWin = null;
     let updatedFlexRankLose = null;
     try {
-      const accountData = await getAccountByPuuid(found.puuid);
+      const accountData = await retryWithBackoff(() => getAccountByPuuid(found.puuid));
       if (accountData.riotId && accountData.riotId !== found.name) {
         updatedName = accountData.riotId;
         logger.info(`[${name}] 닉네임 변경 감지: ${found.name} -> ${updatedName}`);
@@ -193,7 +186,7 @@ module.exports.getPositions = async (name, options = {}) => {
       logger.warn(`[${name}] 닉네임 갱신 실패: ${e.message}`);
     }
     try {
-      const leagueData = await getRankDataByPuuid(found.puuid);
+      const leagueData = await retryWithBackoff(() => getRankDataByPuuid(found.puuid));
       const soloRankData = leagueData.find((elem) => elem.queueType === 'RANKED_SOLO_5x5');
       updatedRankTier = soloRankData ? `${soloRankData.tier} ${soloRankData.rank}` : 'UNRANKED';
       if (soloRankData) {
@@ -208,6 +201,33 @@ module.exports.getPositions = async (name, options = {}) => {
       }
     } catch (e) {
       logger.warn(`[${name}] rankTier 갱신 실패: ${e.message}`);
+    }
+
+    if (updatedName || updatedRankTier) {
+      const liveData = {};
+      if (updatedName) {
+        liveData.name = updatedName;
+        liveData.simplifiedName = updatedName.toLowerCase().replace(/ /g, '');
+      }
+      if (updatedRankTier) liveData.rankTier = updatedRankTier;
+      if (updatedRankWin !== null) {
+        liveData.rankWin = updatedRankWin;
+        liveData.rankLose = updatedRankLose;
+      }
+      if (updatedFlexRankTier) liveData.flexRankTier = updatedFlexRankTier;
+      if (updatedFlexRankWin !== null) {
+        liveData.flexRankWin = updatedFlexRankWin;
+        liveData.flexRankLose = updatedFlexRankLose;
+      }
+      found.set(liveData);
+      await found.save();
+    }
+
+    // 7일 이내이고 포지션 데이터가 있으면 포지션 재계산은 스킵 (force가 아닐 때만)
+    if (!force && !isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
+      result.push([found.mainPosition, found.mainPositionRate]);
+      result.push([found.subPosition, found.subPositionRate]);
+      return { result, status: 200, skipped: true };
     }
 
     const SOLO_RANKED_QUEUE = 420;
@@ -315,27 +335,6 @@ module.exports.getPositions = async (name, options = {}) => {
       championStats: championStats,
       positionUpdatedAt: moment(),
     };
-
-    // 닉네임 변경이 있으면 함께 업데이트
-    if (updatedName) {
-      updateData.name = updatedName;
-      updateData.simplifiedName = updatedName.toLowerCase().replace(/ /g, '');
-    }
-    // rankTier, 솔랭/자랭 승패 갱신
-    if (updatedRankTier) {
-      updateData.rankTier = updatedRankTier;
-    }
-    if (updatedRankWin !== null) {
-      updateData.rankWin = updatedRankWin;
-      updateData.rankLose = updatedRankLose;
-    }
-    if (updatedFlexRankTier) {
-      updateData.flexRankTier = updatedFlexRankTier;
-    }
-    if (updatedFlexRankWin !== null) {
-      updateData.flexRankWin = updatedFlexRankWin;
-      updateData.flexRankLose = updatedFlexRankLose;
-    }
 
     found.set(updateData);
     await found.save();
