@@ -1,4 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
+const { Op } = require('sequelize');
 const models = require('../db/models');
 const { logger } = require('../loaders/logger');
 
@@ -13,8 +14,9 @@ async function sendNicknameChangeNotification(client, nameChanges) {
 
   try {
     const puuids = [...new Set(nameChanges.map((c) => c.puuid))];
+    // 추방/탈퇴(leftGuildAt)하거나 외부인(outsider)인 그룹은 알림 대상에서 제외
     const users = await models.user.findAll({
-      where: { puuid: puuids },
+      where: { puuid: puuids, leftGuildAt: null, role: { [Op.ne]: 'outsider' } },
       attributes: ['puuid', 'groupId', 'discordId'],
     });
     if (users.length === 0) return;

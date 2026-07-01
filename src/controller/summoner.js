@@ -394,11 +394,13 @@ module.exports.updateActiveUsersPositions = async (options = {}) => {
     nameChanges: [],
   };
 
-  // 최근 N일 이내 활동한 유저 조회 (중복 puuid 제거)
+  // 최근 N일 이내 활동한 유저 조회 (중복 puuid 제거). 추방/탈퇴(leftGuildAt), 외부인(outsider) 그룹은 제외
   const cutoffDate = moment().subtract(withinDays, 'days').toDate();
   const activeUsers = await models.user.findAll({
     where: {
       updatedAt: { [Op.gte]: cutoffDate },
+      leftGuildAt: null,
+      role: { [Op.ne]: 'outsider' },
     },
     attributes: ['puuid'],
     group: ['puuid'],
