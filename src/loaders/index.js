@@ -18,7 +18,7 @@ module.exports = async (app) => {
   const server = await socketioLoader(app);
   logger.info('✌️ Socket.IO loaded');
 
-  schedulerLoader();
+  schedulerLoader(app);
 
   return server;
 };

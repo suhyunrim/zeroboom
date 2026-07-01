@@ -5,8 +5,9 @@ const { syncAllActiveChallenges, initSnapshotSchedulers } = require('../controll
 const seasonController = require('../controller/season');
 const models = require('../db/models');
 const { getKSTYear, getKSTMonth } = require('../utils/timeUtils');
+const { sendNicknameChangeNotification } = require('../services/nickname-notifier');
 
-module.exports = () => {
+module.exports = (app) => {
   // 매일 새벽 5시에 포지션 업데이트
   cron.schedule('0 5 * * *', async () => {
     logger.info('[스케줄러] 포지션 배치 업데이트 시작');
@@ -19,6 +20,10 @@ module.exports = () => {
       });
 
       logger.info(`[스케줄러] 포지션 배치 완료 - 성공: ${results.success.length}, 실패: ${results.failed.length}, 스킵: ${results.skipped.length}`);
+
+      if (results.nameChanges.length > 0) {
+        await sendNicknameChangeNotification(app.discordClient, results.nameChanges);
+      }
     } catch (e) {
       logger.error(`[스케줄러] 포지션 배치 에러: ${e.message}`);
     }

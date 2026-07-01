@@ -176,6 +176,7 @@ module.exports.getPositions = async (name, options = {}) => {
     let updatedFlexRankTier = null;
     let updatedFlexRankWin = null;
     let updatedFlexRankLose = null;
+    const previousName = found.name;
     try {
       const accountData = await retryWithBackoff(() => getAccountByPuuid(found.puuid));
       if (accountData.riotId && accountData.riotId !== found.name) {
@@ -223,11 +224,13 @@ module.exports.getPositions = async (name, options = {}) => {
       await found.save();
     }
 
+    const nameChange = updatedName ? { puuid: found.puuid, from: previousName, to: updatedName } : null;
+
     // 7일 이내이고 포지션 데이터가 있으면 포지션 재계산은 스킵 (force가 아닐 때만)
     if (!force && !isExpired(found.positionUpdatedAt) && found.mainPositionRate) {
       result.push([found.mainPosition, found.mainPositionRate]);
       result.push([found.subPosition, found.subPositionRate]);
-      return { result, status: 200, skipped: true };
+      return { result, status: 200, skipped: true, nameChange };
     }
 
     const SOLO_RANKED_QUEUE = 420;
@@ -351,7 +354,7 @@ module.exports.getPositions = async (name, options = {}) => {
     return { result: found || e.message, status: 501 };
   }
 
-  return { result, status: 200 };
+  return { result, status: 200, nameChange };
 };
 
 module.exports.getAccountIdByName = async (name) => {
@@ -388,6 +391,7 @@ module.exports.updateActiveUsersPositions = async (options = {}) => {
     failed: [],
     skipped: [],
     notFound: [],
+    nameChanges: [],
   };
 
   // 최근 N일 이내 활동한 유저 조회 (중복 puuid 제거)
@@ -427,6 +431,10 @@ module.exports.updateActiveUsersPositions = async (options = {}) => {
 
     try {
       const result = await module.exports.getPositions(name, { force });
+
+      if (result.nameChange) {
+        results.nameChanges.push(result.nameChange);
+      }
 
       if (result.skipped) {
         results.skipped.push({ name, reason: '캐시 유효' });
