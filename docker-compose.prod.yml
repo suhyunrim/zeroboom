@@ -61,13 +61,16 @@ services:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-    command: /bin/sh -c "envsubst '$$DOMAIN' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+    # 6시간마다 reload → certbot이 갱신한 인증서를 재시작 없이 반영(배포는 app만 재생성하므로 필수)
+    command: /bin/sh -c "envsubst '$$DOMAIN' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
     depends_on:
       - app
 
   certbot:
     image: certbot/certbot
     container_name: zeroboom-certbot
+    # 재시작 정책 필수 — 없으면 재부팅/도커 재시작 시 갱신 데몬이 안 살아나 인증서가 만료됨(과거 장애 원인)
+    restart: unless-stopped
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
