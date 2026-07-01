@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { ChannelType } = require('discord.js');
 
 const route = Router();
 const { Op } = require('sequelize');
@@ -254,6 +255,39 @@ module.exports = (app) => {
         }));
 
       return res.json(roles);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
+  // Discord 서버 텍스트 채널 목록 조회 (봇이 글 쓸 수 있는 채널만)
+  route.get('/:groupId/discord-text-channels', verifyToken, requireGroupAdmin, async (req, res) => {
+    try {
+      const group = await models.group.findByPk(Number(req.params.groupId));
+      if (!group) return res.status(404).json({ result: '그룹을 찾을 수 없습니다.' });
+      if (!group.discordGuildId) return res.status(400).json({ result: 'Discord 서버가 연결되지 않았습니다.' });
+
+      const client = req.app.discordClient;
+      const guild = client.guilds.cache.get(group.discordGuildId);
+      if (!guild) return res.status(404).json({ result: 'Discord 서버를 찾을 수 없습니다.' });
+
+      const me = guild.members.me;
+      const channels = guild.channels.cache
+        .filter((ch) => ch.type === ChannelType.GuildText && ch.permissionsFor(me)?.has('SendMessages'))
+        .sort((a, b) => {
+          const aPPos = a.parent ? a.parent.position : -1;
+          const bPPos = b.parent ? b.parent.position : -1;
+          if (aPPos !== bPPos) return aPPos - bPPos;
+          return a.position - b.position;
+        })
+        .map((ch) => ({
+          id: ch.id,
+          name: ch.name,
+          categoryId: ch.parentId,
+        }));
+
+      return res.json(channels);
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: e.message });
