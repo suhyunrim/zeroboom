@@ -992,6 +992,133 @@ describe('브래킷 일관성(A2) 룰', () => {
   });
 });
 
+describe('ROLLING 예측 모드', () => {
+  const ROLLING = tournamentController.PREDICTION_MODES.ROLLING;
+  const teams = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+
+  describe('validatePredictionMode', () => {
+    test('null/undefined는 통과(기본값 bracket)', () => {
+      expect(tournamentController.validatePredictionMode(null)).toBeNull();
+      expect(tournamentController.validatePredictionMode(undefined)).toBeNull();
+    });
+    test('bracket/rolling은 통과', () => {
+      expect(tournamentController.validatePredictionMode('bracket')).toBeNull();
+      expect(tournamentController.validatePredictionMode('rolling')).toBeNull();
+    });
+    test('그 외 값은 reject', () => {
+      expect(tournamentController.validatePredictionMode('daily')).toMatch(/predictionMode/);
+    });
+  });
+
+  describe('isMatchPredictable', () => {
+    test('양팀 확정 + 미시작이면 true', () => {
+      expect(tournamentController.isMatchPredictable({ team1Id: 1, team2Id: 2 })).toBe(true);
+    });
+    test('한쪽/양쪽 미정이면 false', () => {
+      expect(tournamentController.isMatchPredictable({ team1Id: 1, team2Id: null })).toBe(false);
+      expect(tournamentController.isMatchPredictable({ team1Id: null, team2Id: null })).toBe(false);
+    });
+    test('스코어/승자가 있으면(시작됨) false', () => {
+      expect(tournamentController.isMatchPredictable({ team1Id: 1, team2Id: 2, team1Score: 1 })).toBe(false);
+      expect(tournamentController.isMatchPredictable({ team1Id: 1, team2Id: 2, winnerTeamId: 1 })).toBe(false);
+    });
+    test('scheduledAt이 지났으면 false, 미래면 true', () => {
+      const now = new Date('2026-07-01T00:00:00Z');
+      expect(tournamentController.isMatchPredictable(
+        { team1Id: 1, team2Id: 2, scheduledAt: '2026-06-30T00:00:00Z' }, now,
+      )).toBe(false);
+      expect(tournamentController.isMatchPredictable(
+        { team1Id: 1, team2Id: 2, scheduledAt: '2026-07-02T00:00:00Z' }, now,
+      )).toBe(true);
+    });
+  });
+
+  describe('validatePredictionsInput (rolling)', () => {
+    const matches = [
+      { id: 10, team1Id: 1, team2Id: 2 }, // 확정+미시작
+      { id: 11, team1Id: 3, team2Id: 4, winnerTeamId: 3 }, // 이미 시작(승자 확정)
+      { id: 12, team1Id: null, team2Id: null }, // 미정
+    ];
+
+    test('확정+미시작 매치만 일부 제출해도 통과(완결성 불필요)', () => {
+      const predictions = [{ matchId: 10, predictedTeamId: 1 }];
+      expect(tournamentController.validatePredictionsInput({
+        predictions, matches, teams, predictionMode: ROLLING,
+      })).toBeNull();
+    });
+    test('빈 배열도 통과(완결성 불필요)', () => {
+      expect(tournamentController.validatePredictionsInput({
+        predictions: [], matches, teams, predictionMode: ROLLING,
+      })).toBeNull();
+    });
+    test('미정 매치 예측은 reject', () => {
+      const predictions = [{ matchId: 12, predictedTeamId: 1 }];
+      expect(tournamentController.validatePredictionsInput({
+        predictions, matches, teams, predictionMode: ROLLING,
+      })).toMatch(/확정되지 않았거나 이미 시작/);
+    });
+    test('이미 시작된 매치 예측은 reject', () => {
+      const predictions = [{ matchId: 11, predictedTeamId: 3 }];
+      expect(tournamentController.validatePredictionsInput({
+        predictions, matches, teams, predictionMode: ROLLING,
+      })).toMatch(/확정되지 않았거나 이미 시작/);
+    });
+    test('미시작 매치는 null 삭제 허용', () => {
+      const predictions = [{ matchId: 10, predictedTeamId: null }];
+      expect(tournamentController.validatePredictionsInput({
+        predictions, matches, teams, predictionMode: ROLLING,
+      })).toBeNull();
+    });
+  });
+
+  describe('enrich/leaderboard (rolling): 트리 무시 raw 집계', () => {
+    // 4팀: R1 m1(1v2,승1) m2(3v4,승3), 결승 m3(1v3,승1). b는 m1을 틀렸지만 결승 m3=1은 맞음.
+    const bracketMatches = () => [
+      { id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, winnerTeamId: 1, toJSON() { return { id: 1, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, winnerTeamId: 1 }; } },
+      { id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: 4, winnerTeamId: 3, toJSON() { return { id: 2, round: 1, bracketSlot: 1, team1Id: 3, team2Id: 4, winnerTeamId: 3 }; } },
+      { id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3, winnerTeamId: 1, toJSON() { return { id: 3, round: 2, bracketSlot: 0, team1Id: 1, team2Id: 3, winnerTeamId: 1 }; } },
+    ];
+    const predsB = [
+      { matchId: 1, userPuuid: 'b', predictedTeamId: 2 }, // m1 오답
+      { matchId: 2, userPuuid: 'b', predictedTeamId: 3 }, // m2 정답
+      { matchId: 3, userPuuid: 'b', predictedTeamId: 1 }, // 결승 정답
+    ];
+
+    test('enrich: 부모 틀린 결승 예측도 유효 카운트(bracket이면 무효)', () => {
+      const final = tournamentController.enrichMatchesWithPredictions(bracketMatches(), predsB, ROLLING)
+        .find((m) => m.id === 3);
+      expect(final.team1PredictionCount).toBe(1);
+      expect(final.predictions.find((p) => p.userPuuid === 'b').isValid).toBe(true);
+    });
+
+    test('leaderboard: 트리 무시하고 raw 적중(b: 2/3)', () => {
+      const board = tournamentController.buildLeaderboard(bracketMatches(), predsB, ROLLING);
+      expect(board.find((e) => e.userPuuid === 'b')).toMatchObject({ correctCount: 2, settledCount: 3 });
+    });
+  });
+
+  describe('enrich: predictable 플래그', () => {
+    test('rolling — 미시작 true / 시작 false / 미정 false', () => {
+      const now = new Date('2026-07-01T00:00:00Z');
+      const matches = [
+        { id: 10, team1Id: 1, team2Id: 2, toJSON() { return { id: 10, team1Id: 1, team2Id: 2 }; } },
+        { id: 11, team1Id: 3, team2Id: 4, winnerTeamId: 3, toJSON() { return { id: 11, team1Id: 3, team2Id: 4, winnerTeamId: 3 }; } },
+        { id: 12, team1Id: null, team2Id: 5, toJSON() { return { id: 12, team1Id: null, team2Id: 5 }; } },
+      ];
+      const result = tournamentController.enrichMatchesWithPredictions(matches, [], ROLLING, now);
+      expect(result.find((m) => m.id === 10).predictable).toBe(true);
+      expect(result.find((m) => m.id === 11).predictable).toBe(false);
+      expect(result.find((m) => m.id === 12).predictable).toBe(false);
+    });
+    test('bracket — 전체 잠금 여부에 따름', () => {
+      const unstarted = [{ id: 10, team1Id: 1, team2Id: 2, toJSON() { return { id: 10, team1Id: 1, team2Id: 2 }; } }];
+      expect(tournamentController.enrichMatchesWithPredictions(unstarted, [])[0].predictable).toBe(true);
+      const started = [{ id: 10, team1Id: 1, team2Id: 2, winnerTeamId: 1, toJSON() { return { id: 10, team1Id: 1, team2Id: 2, winnerTeamId: 1 }; } }];
+      expect(tournamentController.enrichMatchesWithPredictions(started, [])[0].predictable).toBe(false);
+    });
+  });
+});
+
 describe('validateTournamentType', () => {
   test('null/undefined 허용 (기본값 normal)', () => {
     expect(tournamentController.validateTournamentType(null)).toBeNull();

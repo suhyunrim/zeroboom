@@ -55,6 +55,12 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: false,
       },
+      // 승부예측 방식: 'bracket'(전체 미리 예측) | 'rolling'(확정된 경기만 순차 예측)
+      predictionMode: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'bracket',
+      },
       type: {
         type: DataTypes.STRING(20),
         allowNull: false,

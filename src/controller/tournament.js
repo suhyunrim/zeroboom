@@ -21,12 +21,28 @@ const TYPES = {
   AUCTION: 'auction',
 };
 
+// 승부예측 방식.
+//  - BRACKET: 전체 대진을 미리 다 찍는 방식(기존). 완결성 강제 + 브래킷 트리 일관성.
+//  - ROLLING: 양팀이 확정되고 아직 시작 안 한 매치만 순차로 찍는 방식. 완결성/트리 불필요.
+const PREDICTION_MODES = {
+  BRACKET: 'bracket',
+  ROLLING: 'rolling',
+};
+
 const TROPHY_TYPES = ['worlds', 'msi', 'first_stand', 'ewc', 'lck', 'kespa'];
 
 const validateTournamentType = (type) => {
   if (type === undefined || type === null) return null;
   if (!Object.values(TYPES).includes(type)) {
     return `type은 다음 중 하나여야 합니다: ${Object.values(TYPES).join(', ')}`;
+  }
+  return null;
+};
+
+const validatePredictionMode = (mode) => {
+  if (mode === undefined || mode === null) return null;
+  if (!Object.values(PREDICTION_MODES).includes(mode)) {
+    return `predictionMode는 다음 중 하나여야 합니다: ${Object.values(PREDICTION_MODES).join(', ')}`;
   }
   return null;
 };
@@ -446,19 +462,26 @@ const handleTournamentFinishedAchievements = async (tournament) => {
   }
 };
 
-const isTournamentLocked = (matches, now = new Date()) => {
-  // BYE/미정 매치(한쪽 또는 양쪽 슬롯이 null)는 winnerTeamId가 자동 설정되거나
-  // 다음 라운드 placeholder라서 "매치 시작됨" 판정에서 제외한다.
-  return matches.some((m) => {
-    if (m.team1Id == null || m.team2Id == null) return false;
-    if (m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null) return true;
-    if (m.scheduledAt && new Date(m.scheduledAt) <= now) return true;
-    return false;
-  });
+// 개별 매치가 "시작됨"인지 판정. BYE/미정 매치(한쪽 또는 양쪽 슬롯이 null)는
+// winnerTeamId가 자동 설정되거나 다음 라운드 placeholder라서 판정 대상에서 제외한다.
+const isMatchStarted = (m, now = new Date()) => {
+  if (m.team1Id == null || m.team2Id == null) return false;
+  if (m.team1Score > 0 || m.team2Score > 0 || m.winnerTeamId != null) return true;
+  if (m.scheduledAt && new Date(m.scheduledAt) <= now) return true;
+  return false;
 };
 
-const validatePredictionsInput = ({ predictions, matches, teams, existingPredictions = [] }) => {
+// ROLLING 모드: 양팀이 확정되고 아직 시작 안 한 매치만 예측 가능.
+const isMatchPredictable = (m, now = new Date()) => m.team1Id != null && m.team2Id != null && !isMatchStarted(m, now);
+
+// BRACKET 모드의 전체 잠금: 정상 매치가 하나라도 시작되면 전체 예측 동결.
+const isTournamentLocked = (matches, now = new Date()) => matches.some((m) => isMatchStarted(m, now));
+
+const validatePredictionsInput = ({
+  predictions, matches, teams, existingPredictions = [], predictionMode = PREDICTION_MODES.BRACKET, now = new Date(),
+}) => {
   if (!Array.isArray(predictions)) return 'predictions는 배열이어야 합니다.';
+  const rolling = predictionMode === PREDICTION_MODES.ROLLING;
   const matchIds = new Set(matches.map((m) => m.id));
   const teamIds = new Set(teams.map((t) => t.id));
   const matchById = new Map(matches.map((m) => [m.id, m]));
@@ -468,10 +491,14 @@ const validatePredictionsInput = ({ predictions, matches, teams, existingPredict
     if (!matchIds.has(p.matchId)) return '이 토너먼트에 속하지 않은 매치입니다.';
     if (seenMatchIds.has(p.matchId)) return '같은 매치에 중복된 예측이 있습니다.';
     seenMatchIds.add(p.matchId);
+    const match = matchById.get(p.matchId);
+    // ROLLING: 양팀 확정 + 미시작 매치만 변경 가능(예측/취소 모두). 시작됐거나 미정 매치는 거부.
+    if (rolling && !isMatchPredictable(match, now)) {
+      return '아직 대진이 확정되지 않았거나 이미 시작된 매치입니다.';
+    }
     if (p.predictedTeamId !== null) {
       if (!Number.isInteger(p.predictedTeamId)) return 'predictedTeamId는 정수 또는 null이어야 합니다.';
       if (!teamIds.has(p.predictedTeamId)) return '이 토너먼트에 속하지 않은 팀입니다.';
-      const match = matchById.get(p.matchId);
       if (match.team1Id != null && match.team2Id != null) {
         if (p.predictedTeamId !== match.team1Id && p.predictedTeamId !== match.team2Id) {
           return '두 팀이 정해진 매치에서는 그중 한 팀만 선택할 수 있습니다.';
@@ -480,7 +507,10 @@ const validatePredictionsInput = ({ predictions, matches, teams, existingPredict
     }
   }
 
-  // BYE(한쪽 슬롯만 채워진 매치)를 제외한 모든 매치에 예측이 있어야 한다.
+  // ROLLING은 완결성을 강제하지 않는다(지금 예측 가능한 매치만 순차로 찍으므로).
+  if (rolling) return null;
+
+  // BRACKET: BYE(한쪽 슬롯만 채워진 매치)를 제외한 모든 매치에 예측이 있어야 한다.
   // existingPredictions(DB의 본인 기존 예측) + 이번 변경분을 합친 최종 상태 기준으로 검증.
   const isBye = (m) => (m.team1Id != null) !== (m.team2Id != null);
   const requiredMatchIds = matches.filter((m) => !isBye(m)).map((m) => m.id);
@@ -572,7 +602,8 @@ const isPredictionValidUnderTree = (userPuuid, match, parentMap, pickMap, memo) 
   return true;
 };
 
-const enrichMatchesWithPredictions = (matches, predictions) => {
+const enrichMatchesWithPredictions = (matches, predictions, predictionMode = PREDICTION_MODES.BRACKET, now = new Date()) => {
+  const rolling = predictionMode === PREDICTION_MODES.ROLLING;
   const matchById = new Map(matches.map((m) => [m.id, m]));
   const parentMap = buildParentMap(matches);
   const pickMap = new Map();
@@ -580,6 +611,8 @@ const enrichMatchesWithPredictions = (matches, predictions) => {
     pickMap.set(`${p.userPuuid}:${p.matchId}`, p.predictedTeamId);
   }
   const memo = new Map();
+  // BRACKET은 전체 잠금 여부가 곧 각 매치의 예측 가능 여부. ROLLING은 매치별로 판정.
+  const bracketLocked = rolling ? false : matches.some((m) => isMatchStarted(m, now));
 
   const byMatch = new Map();
   for (const p of predictions) {
@@ -596,8 +629,9 @@ const enrichMatchesWithPredictions = (matches, predictions) => {
     let t1 = 0;
     let t2 = 0;
     const enrichedPredictions = list.map((p) => {
+      // ROLLING은 예측 시점에 팀이 실제 결과로 확정돼 있어 트리 게이트가 무의미 → active면 유효.
       const valid = active
-        ? isPredictionValidUnderTree(p.userPuuid, matchById.get(p.matchId), parentMap, pickMap, memo)
+        ? (rolling ? true : isPredictionValidUnderTree(p.userPuuid, matchById.get(p.matchId), parentMap, pickMap, memo))
         : null;
       if (active) {
         if (p.predictedTeamId === data.team1Id) {
@@ -619,6 +653,8 @@ const enrichMatchesWithPredictions = (matches, predictions) => {
     const total = c1 + c2;
     data.predictions = enrichedPredictions;
     data.predictionsActive = active;
+    // 이 매치를 지금 예측/변경할 수 있는지. 프론트가 카드별 입력 활성화에 사용.
+    data.predictable = rolling ? isMatchPredictable(m, now) : !bracketLocked;
     data.team1PredictionCount = c1;
     data.team2PredictionCount = c2;
     data.team1PredictionPct = total > 0 ? c1 / total : null;
@@ -630,7 +666,8 @@ const enrichMatchesWithPredictions = (matches, predictions) => {
   });
 };
 
-const buildLeaderboard = (matches, predictions) => {
+const buildLeaderboard = (matches, predictions, predictionMode = PREDICTION_MODES.BRACKET) => {
+  const rolling = predictionMode === PREDICTION_MODES.ROLLING;
   const matchById = new Map(matches.map((m) => [m.id, m]));
   const parentMap = buildParentMap(matches);
   const pickMap = new Map();
@@ -643,7 +680,8 @@ const buildLeaderboard = (matches, predictions) => {
   for (const p of predictions) {
     const match = matchById.get(p.matchId);
     if (!match || match.winnerTeamId == null) continue;
-    const valid = isPredictionValidUnderTree(p.userPuuid, match, parentMap, pickMap, memo);
+    // ROLLING은 트리 게이트 없이 각 예측을 독립 적중으로 집계.
+    const valid = rolling ? true : isPredictionValidUnderTree(p.userPuuid, match, parentMap, pickMap, memo);
     if (!byUser.has(p.userPuuid)) {
       byUser.set(p.userPuuid, {
         userPuuid: p.userPuuid,
@@ -905,10 +943,12 @@ module.exports = {
   VALID_POSITIONS,
   STATUS,
   TYPES,
+  PREDICTION_MODES,
   TROPHY_TYPES,
   validateTrophyType,
   validateHeldAt,
   validateTournamentType,
+  validatePredictionMode,
   validateAuctionConfig,
   validateAuctionTeamInput,
   validateAuctionTeamBudget,
@@ -943,6 +983,8 @@ module.exports = {
   computeTeamAvgRating,
   computeTeamScrimRecord,
   computeHeadToHeadScrim,
+  isMatchStarted,
+  isMatchPredictable,
   isTournamentLocked,
   validatePredictionsInput,
   applyPredictions,
