@@ -236,6 +236,13 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
 
     if (resp.stop_reason !== 'tool_use') {
       const answer = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+      if (!answer) {
+        // ★ 빈 응답 원인 추적용. stop_reason(max_tokens/refusal 등)과 실제 content 블록 구성을 남긴다.
+        logger.warn(
+          `[ai.agent] 빈 응답: stop_reason=${resp.stop_reason}, `
+          + `blocks=${JSON.stringify(resp.content.map((b) => b.type))}, round=${round}`,
+        );
+      }
       return { answer: answer || '음… 답을 만들지 못했어요. 다시 물어봐 주세요.', toolCalls };
     }
 
