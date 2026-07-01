@@ -18,6 +18,8 @@ jobs:
             cd ${{ secrets.PROJECT_DIR_LIVE }}
             git pull origin prod
             sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache app
-            sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
+            # app 외에 nginx/certbot도 스펙에 맞춰 반영(변경 없으면 no-op, certbot 죽어있으면 재기동).
+            # --no-deps로 db/redis는 건드리지 않는다.
+            sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps app nginx certbot
             sudo docker image prune -f
             sudo docker builder prune -f
