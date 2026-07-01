@@ -212,9 +212,13 @@ const buildDetail = async (tournament) => {
     enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId),
     scrims,
   );
-  const matches = tournamentController.enrichMatchesWithPredictions(matchesEnriched, predictions);
-  const predictionsLocked = tournamentController.isTournamentLocked(matchesRaw);
-  const leaderboard = tournamentController.buildLeaderboard(matchesRaw, predictions);
+  const { predictionMode } = tournament;
+  const matches = tournamentController.enrichMatchesWithPredictions(matchesEnriched, predictions, predictionMode);
+  // ROLLING은 전체 락 개념이 없고 매치별 predictable 플래그로 대체(프론트가 카드별로 판단).
+  const predictionsLocked = predictionMode === tournamentController.PREDICTION_MODES.ROLLING
+    ? false
+    : tournamentController.isTournamentLocked(matchesRaw);
+  const leaderboard = tournamentController.buildLeaderboard(matchesRaw, predictions, predictionMode);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
   const currentCandidate = await buildCandidateDetail(tournament, tournament.currentAuctionPuuid);
   return { tournament, teams, matches, scrims, roundLabels, predictionsLocked, leaderboard, currentCandidate };
@@ -339,13 +343,15 @@ module.exports = (app) => {
     const {
       groupId, name, defaultBestOf = 3, finalBestOf = 5, trophyType = null,
       type = tournamentController.TYPES.NORMAL, auctionConfig = null, heldAt = null,
-      allowSingleTeam = false,
+      allowSingleTeam = false, predictionMode = tournamentController.PREDICTION_MODES.BRACKET,
     } = req.body || {};
     if (!groupId || !name) {
       return res.status(400).json({ result: 'groupId, name이 필요합니다.' });
     }
     const heldAtError = tournamentController.validateHeldAt(heldAt);
     if (heldAtError) return res.status(400).json({ result: heldAtError });
+    const predictionModeError = tournamentController.validatePredictionMode(predictionMode);
+    if (predictionModeError) return res.status(400).json({ result: predictionModeError });
     if (!Number.isInteger(defaultBestOf) || defaultBestOf < 1 || defaultBestOf % 2 === 0) {
       return res.status(400).json({ result: 'defaultBestOf는 홀수 양의 정수여야 합니다.' });
     }
@@ -384,6 +390,7 @@ module.exports = (app) => {
         heldAt,
         // 단일팀 즉시우승은 일반 토너먼트에만 의미가 있어 경매 타입은 항상 false로 저장.
         allowSingleTeam: type === tournamentController.TYPES.NORMAL && allowSingleTeam === true,
+        predictionMode,
         type,
         auctionConfig: type === tournamentController.TYPES.AUCTION ? auctionConfig : null,
       });
@@ -394,7 +401,7 @@ module.exports = (app) => {
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.create',
-        details: { tournamentId: tournament.id, name, trophyType, heldAt, allowSingleTeam: tournament.allowSingleTeam, type, auctionConfig: tournament.auctionConfig },
+        details: { tournamentId: tournament.id, name, trophyType, heldAt, allowSingleTeam: tournament.allowSingleTeam, predictionMode: tournament.predictionMode, type, auctionConfig: tournament.auctionConfig },
         source: 'web',
       });
 
@@ -407,7 +414,7 @@ module.exports = (app) => {
   });
 
   route.patch('/:id', verifyToken, async (req, res) => {
-    const { name, trophyType } = req.body || {};
+    const { name, trophyType, predictionMode } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res);
       if (!tournament) return undefined;
@@ -426,6 +433,16 @@ module.exports = (app) => {
         if (trophyError) return res.status(400).json({ result: trophyError });
         before.trophyType = tournament.trophyType;
         updates.trophyType = trophyType;
+      }
+      if (predictionMode !== undefined) {
+        const predictionModeError = tournamentController.validatePredictionMode(predictionMode);
+        if (predictionModeError) return res.status(400).json({ result: predictionModeError });
+        // 예측 방식은 아직 예측/매치가 진행되지 않은 준비중 상태에서만 바꿀 수 있다.
+        if (tournament.status !== STATUS.PREPARING) {
+          return res.status(409).json({ result: '준비중인 토너먼트만 예측 방식을 변경할 수 있습니다.' });
+        }
+        before.predictionMode = tournament.predictionMode;
+        updates.predictionMode = predictionMode;
       }
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ result: '수정할 필드가 없습니다.' });
@@ -1367,12 +1384,15 @@ module.exports = (app) => {
         }),
       ]);
 
-      if (tournamentController.isTournamentLocked(matches)) {
+      // BRACKET은 전체 대진을 미리 찍는 방식이라 매치가 하나라도 시작되면 전체 동결.
+      // ROLLING은 매치별로 예측 가능 여부가 다르므로 전체 락 대신 아래 검증에서 매치별로 판정.
+      if (tournament.predictionMode !== tournamentController.PREDICTION_MODES.ROLLING
+        && tournamentController.isTournamentLocked(matches)) {
         return res.status(409).json({ result: '이미 토너먼트가 시작되어 예측을 변경할 수 없습니다.' });
       }
 
       const validationError = tournamentController.validatePredictionsInput({
-        predictions, matches, teams, existingPredictions,
+        predictions, matches, teams, existingPredictions, predictionMode: tournament.predictionMode,
       });
       if (validationError) return res.status(400).json({ result: validationError });
 
