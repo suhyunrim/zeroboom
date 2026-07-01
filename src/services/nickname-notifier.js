@@ -15,7 +15,7 @@ async function sendNicknameChangeNotification(client, nameChanges) {
     const puuids = [...new Set(nameChanges.map((c) => c.puuid))];
     const users = await models.user.findAll({
       where: { puuid: puuids },
-      attributes: ['puuid', 'groupId'],
+      attributes: ['puuid', 'groupId', 'discordId'],
     });
     if (users.length === 0) return;
 
@@ -27,10 +27,12 @@ async function sendNicknameChangeNotification(client, nameChanges) {
     const groupById = new Map(groups.map((g) => [g.id, g]));
 
     const groupIdsByPuuid = new Map();
+    const discordIdByPuuidAndGroup = new Map();
     users.forEach((u) => {
       const ids = groupIdsByPuuid.get(u.puuid) || [];
       ids.push(u.groupId);
       groupIdsByPuuid.set(u.puuid, ids);
+      discordIdByPuuidAndGroup.set(`${u.puuid}|${u.groupId}`, u.discordId);
     });
 
     // 채널ID별로 알림 문구를 모아서 채널당 한 번만 전송
@@ -42,7 +44,9 @@ async function sendNicknameChangeNotification(client, nameChanges) {
         const channelId = group?.settings?.nicknameChangeChannelId;
         if (!channelId) return;
 
-        const line = `**${change.from}** → **${change.to}**`;
+        const discordId = discordIdByPuuidAndGroup.get(`${change.puuid}|${groupId}`);
+        const mention = discordId ? `<@${discordId}> ` : '';
+        const line = `${mention}**${change.from}** → **${change.to}**`;
         const lines = linesByChannelId.get(channelId) || [];
         lines.push(line);
         linesByChannelId.set(channelId, lines);
