@@ -11,7 +11,7 @@ const bridges = require('./bridges');
 const readonlySql = require('./readonly-sql');
 
 const MAX_ROUNDS = config.ai.maxRounds || 5;
-const MAX_TOKENS = 1024;
+const MAX_TOKENS = 4096; // sonnet-5가 어려운 질문에서 thinking 블록에 예산을 많이 써서 상향(과거 1024는 답변 전에 잘리는 경우가 있었음)
 const HISTORY_MAX_TURNS = 12; // 멀티턴 컨텍스트로 유지할 직전 대화 수
 const HISTORY_MAX_CHARS = 2000; // 각 메시지 길이 상한
 
