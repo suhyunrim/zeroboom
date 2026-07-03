@@ -16,6 +16,7 @@ const profile = require('./routes/profile');
 const notification = require('./routes/notification');
 const tournament = require('./routes/tournament');
 const ai = require('./routes/ai');
+const favorite = require('./routes/favorite');
 
 // v2
 const groupsV2 = require('./routes/v2/groups');
@@ -41,6 +42,7 @@ module.exports = () => {
   notification(app);
   tournament(app);
   ai(app);
+  favorite(app);
 
   // v2
   groupsV2(app);
