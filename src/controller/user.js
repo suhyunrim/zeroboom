@@ -283,6 +283,8 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   const recentWins = recentMatches.filter((m) => m.won).length;
   const recentGames = recentMatches.length;
   const recentWinRate = recentGames > 0 ? Math.round((recentWins / recentGames) * 100) : 0;
+  // 최근 N판 승패 순서 (시간순 — 마지막 원소가 가장 최근 경기)
+  const recentResults = recentMatches.map((m) => m.won);
 
   // 5. 최다 연승 / 최다 연패
   let maxWinStreak = 0;
@@ -377,6 +379,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     recentGames,
     recentWins,
     recentWinRate,
+    recentResults,
     maxWinStreak,
     maxLoseStreak,
     bestOpponents,
