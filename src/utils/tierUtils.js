@@ -69,7 +69,9 @@ const getTierPoint = (rating) => {
     }
 
     if (isNonStepTier(name)) {
-      return Math.floor((rating - tierRating) * 4);
+      // 마스터/그마/챌린저는 실제 롤 솔랭처럼 LP가 리셋되지 않고 마스터 기준점(900)에서
+      // 연속 누적된다. 예) 마스터 400LP == 그마 승격 시점, 그마 1000LP == 챌린저 승격 시점.
+      return Math.floor((rating - tierNames.MASTER) * 4);
     } else {
       return Math.floor(((rating - tierRating) % 25) * 4);
     }
