@@ -35,12 +35,12 @@ describe('tierUtils', () => {
       expect(formatTierBadge(920)).toBe('[M 80LP]');
     });
 
-    test('그랜드마스터 (1000) - GM 약어', () => {
-      expect(formatTierBadge(1000)).toBe('[GM 0LP]');
+    test('그랜드마스터 (1000) - GM 약어, 마스터 기준 연속 LP', () => {
+      expect(formatTierBadge(1000)).toBe('[GM 400LP]');
     });
 
-    test('챌린저 (1150)', () => {
-      expect(formatTierBadge(1150)).toBe('[C 0LP]');
+    test('챌린저 (1150) - 마스터 기준 연속 LP', () => {
+      expect(formatTierBadge(1150)).toBe('[C 1000LP]');
     });
 
     test('prefix 지정', () => {
