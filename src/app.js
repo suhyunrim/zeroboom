@@ -40,7 +40,11 @@ const startServer = async () => {
   });
 };
 
-startServer();
+startServer().catch((err) => {
+  // 부팅 중(DB 연결 등) 실패 시 조용히 멈추지 않고 프로세스를 종료해 재배포/재시작이 트리거되도록 함
+  logger.error('서버 시작 실패:', err);
+  process.exit(1);
+});
 
 // 처리되지 않은 예외를 Sentry로 전송
 process.on('unhandledRejection', (reason) => {

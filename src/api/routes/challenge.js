@@ -178,9 +178,9 @@ module.exports = (app) => {
 
   /**
    * POST /api/challenge/:groupId/:challengeId/sync
-   * 챌린지 그룹 전체 유저 전적 갱신 (인증된 유저만)
+   * 챌린지 그룹 전체 유저 전적 갱신 (관리자 전용)
    */
-  route.post('/:groupId/:challengeId/sync', verifyToken, async (req, res) => {
+  route.post('/:groupId/:challengeId/sync', verifyToken, requireGroupAdmin, async (req, res) => {
     const { challengeId } = req.params;
 
     const result = await challengeController.syncChallengeMatches(Number(challengeId));
