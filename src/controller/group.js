@@ -78,7 +78,7 @@ module.exports.setUserRole = async (groupName, accountId, role) => {
   }
 };
 
-module.exports.getRanking = async (groupName) => {
+module.exports.getRanking = async (groupName, position) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
@@ -102,7 +102,16 @@ module.exports.getRanking = async (groupName) => {
     };
   });
 
-  let filteredUsers = userStats.filter((elem) => elem.totalWin + elem.totalLose >= RankingMinumumMatchCount);
+  // 포지션 필터: 해당 포지션으로 뛴 판이 최소 판수 이상인 유저만 노출
+  const positionStats = position ? await getPositionStats(group.id, position) : null;
+
+  let filteredUsers = userStats.filter((elem) => {
+    if (positionStats) {
+      const pos = positionStats[elem.puuid];
+      return pos && pos.win + pos.lose >= RankingMinumumMatchCount;
+    }
+    return elem.totalWin + elem.totalLose >= RankingMinumumMatchCount;
+  });
 
   filteredUsers.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
 
@@ -116,7 +125,7 @@ module.exports.getRanking = async (groupName) => {
   }, {});
 
   let result = filteredUsers.map((elem, index) => {
-    return {
+    const row = {
       puuid: elem.puuid,
       ranking: index + 1,
       rating: elem.defaultRating + elem.additionalRating,
@@ -124,6 +133,14 @@ module.exports.getRanking = async (groupName) => {
       lose: elem.totalLose,
       winRate: Math.ceil((elem.totalWin / (elem.totalWin + elem.totalLose)) * 100),
     };
+    if (positionStats) {
+      const pos = positionStats[elem.puuid];
+      row.positionWin = pos.win;
+      row.positionLose = pos.lose;
+      row.positionGames = pos.win + pos.lose;
+      row.positionWinRate = Math.ceil((pos.win / (pos.win + pos.lose)) * 100);
+    }
+    return row;
   });
 
   result.forEach((user) => {
@@ -320,122 +337,32 @@ module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
 };
 
 const RANKING_POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
+module.exports.RANKING_POSITIONS = RANKING_POSITIONS;
 
 /**
- * 포지션별 랭킹: 해당 포지션으로 뛴 판에서 발생한 레이팅 증감 누적(득실) 기준 정렬.
- * 매치 저장 포맷 [puuid, name, rating, position]의 레이팅 스냅샷과 포지션을 사용하며,
- * 포지션이 기록된 플레이어만 집계한다.
+ * 승패 확정 매치에서 해당 포지션으로 뛴 puuid별 승/패 집계.
+ * 매치 저장 포맷 [puuid, name, rating, position]의 포지션(4번째 원소)을 사용한다.
  */
-module.exports.getPositionRanking = async (groupId, myPuuid) => {
-  const group = await models.group.findByPk(groupId);
-  if (!group) return { result: 'group is not exist', status: 404 };
-
+const getPositionStats = async (groupId, position) => {
   const matches = await models.match.findAll({
-    where: { groupId: group.id, winTeam: { [Op.ne]: null } },
-    order: [['createdAt', 'ASC']],
+    where: { groupId, winTeam: { [Op.ne]: null } },
   });
 
-  // puuid -> position -> { win, lose, ratingChange }
-  const stats = {};
-
+  const stats = {}; // puuid -> { win, lose }
   for (const match of matches) {
-    const team1Data = match.team1;
-    const team2Data = match.team2;
-    // 10명 전원 포지션이 기록된 매치만 집계 (포지션이 있으면 레이팅 스냅샷도 항상 있다)
-    const allPositioned = [...team1Data, ...team2Data].every((p) => p[3] && RANKING_POSITIONS.includes(p[3]));
-    if (!allPositioned) continue;
-
-    const team1Avg = team1Data.reduce((sum, p) => sum + p[2], 0) / team1Data.length;
-    const team2Avg = team2Data.reduce((sum, p) => sum + p[2], 0) / team2Data.length;
-    const team1Delta =
-      match.winTeam === 1
-        ? ratingCalculator.newRatingIfWon(team1Avg, team2Avg) - team1Avg
-        : ratingCalculator.newRatingIfLost(team1Avg, team2Avg) - team1Avg;
-    const team2Delta =
-      match.winTeam === 2
-        ? ratingCalculator.newRatingIfWon(team2Avg, team1Avg) - team2Avg
-        : ratingCalculator.newRatingIfLost(team2Avg, team1Avg) - team2Avg;
-
     const teams = [
-      { data: team1Data, won: match.winTeam === 1, delta: team1Delta },
-      { data: team2Data, won: match.winTeam === 2, delta: team2Delta },
+      { data: match.team1, won: match.winTeam === 1 },
+      { data: match.team2, won: match.winTeam === 2 },
     ];
-    for (const { data, won, delta } of teams) {
+    for (const { data, won } of teams) {
       for (const player of data) {
-        const position = player[3];
+        if (player[3] !== position) continue;
         const puuid = player[0];
-        if (!stats[puuid]) stats[puuid] = {};
-        if (!stats[puuid][position]) stats[puuid][position] = { win: 0, lose: 0, ratingChange: 0 };
-        const stat = stats[puuid][position];
-        if (won) stat.win++;
-        else stat.lose++;
-        stat.ratingChange += delta;
+        if (!stats[puuid]) stats[puuid] = { win: 0, lose: 0 };
+        if (won) stats[puuid].win++;
+        else stats[puuid].lose++;
       }
     }
   }
-
-  // 전체 랭킹과 동일한 노출 규칙: outsider·서버 탈퇴 유저 제외
-  const eligibleUsers = await models.user.findAll({
-    where: { groupId: group.id, role: { [Op.ne]: 'outsider' }, leftGuildAt: null },
-    attributes: ['puuid'],
-  });
-  const eligibleSet = new Set(eligibleUsers.map((u) => u.puuid));
-
-  const puuids = Object.keys(stats);
-  const summoners = await models.summoner.findAll({ where: { puuid: puuids } });
-  const summonerMap = {};
-  for (const s of summoners) summonerMap[s.puuid] = s.name;
-
-  const toEntry = (puuid, stat) => {
-    const games = stat.win + stat.lose;
-    return {
-      puuid,
-      name: summonerMap[puuid] || 'Unknown',
-      win: stat.win,
-      lose: stat.lose,
-      games,
-      winRate: games > 0 ? Math.round((stat.win / games) * 100) : 0,
-      ratingChange: Math.round(stat.ratingChange),
-    };
-  };
-
-  const result = {};
-  for (const position of RANKING_POSITIONS) {
-    result[position] = puuids
-      .filter((puuid) => {
-        const stat = stats[puuid][position];
-        return eligibleSet.has(puuid) && stat && stat.win + stat.lose >= RankingMinumumMatchCount;
-      })
-      .map((puuid) => toEntry(puuid, stats[puuid][position]))
-      .sort((a, b) => b.ratingChange - a.ratingChange)
-      .map((entry, index) => ({ ...entry, ranking: index + 1 }));
-  }
-
-  const response = { result, status: 200 };
-
-  // 요청자 본인의 포지션별 기록 (랭킹 미포함 시 사유 표시)
-  if (myPuuid && stats[myPuuid]) {
-    const myUser = eligibleSet.has(myPuuid)
-      ? null
-      : await models.user.findOne({ where: { puuid: myPuuid, groupId: group.id } });
-
-    const myRanking = {};
-    for (const position of RANKING_POSITIONS) {
-      const stat = stats[myPuuid][position];
-      if (!stat) continue;
-      const found = result[position].find((r) => r.puuid === myPuuid);
-      if (found) {
-        myRanking[position] = { ...found, reason: null };
-        continue;
-      }
-      let reason = `${RankingMinumumMatchCount}판 미만`;
-      if (!eligibleSet.has(myPuuid)) {
-        reason = myUser && myUser.role === 'outsider' ? '블랙리스트' : '서버 탈퇴';
-      }
-      myRanking[position] = { ...toEntry(myPuuid, stat), ranking: null, reason };
-    }
-    response.myRanking = myRanking;
-  }
-
-  return response;
+  return stats;
 };
