@@ -206,6 +206,27 @@ module.exports = (app) => {
     }
   });
 
+  // 포지션별 랭킹 (해당 포지션으로 뛴 판의 레이팅 득실 누적 기준)
+  route.get('/ranking/position', optionalAuth, async (req, res) => {
+    const { groupId } = req.query;
+
+    if (!groupId) return res.status(400).json({ result: 'groupId가 필요합니다.' });
+
+    try {
+      const myPuuid = (req.user && req.user.puuid) || req.headers.puuid;
+      const rankings = await groupController.getPositionRanking(Number(groupId), myPuuid);
+      if (rankings.status !== 200) return res.status(rankings.status).json({ result: rankings.result });
+
+      const response = { result: rankings.result };
+      if (rankings.myRanking) response.myRanking = rankings.myRanking;
+
+      return res.status(200).json(response);
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: e.message });
+    }
+  });
+
   // 그룹 설정 조회
   route.get('/:groupId/settings', verifyToken, requireGroupAdmin, async (req, res) => {
     const group = await models.group.findByPk(Number(req.params.groupId), { attributes: ['settings'] });
