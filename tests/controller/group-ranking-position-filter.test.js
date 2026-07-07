@@ -34,7 +34,11 @@ beforeEach(() => {
   ]);
 });
 
-describe('getRanking - 포지션 필터', () => {
+describe('getRanking - 포지션 필터 (방설정 rankingPositionSource=internal, 내전 최다 포지션)', () => {
+  beforeEach(() => {
+    mockModels.group.findOne.mockResolvedValue({ id: 1, settings: { rankingPositionSource: 'internal' } });
+  });
+
   test('해당 포지션 5판 이상 유저만 레이팅순으로 노출, 포지션 전적 포함', async () => {
     mockModels.match.findAll.mockResolvedValue([
       // A: TOP 3승 2패
@@ -48,6 +52,7 @@ describe('getRanking - 포지션 필터', () => {
 
     const r = await groupController.getRanking('그룹', 'TOP');
     expect(r.status).toBe(200);
+    expect(r.positionSource).toBe('internal');
 
     // C는 레이팅 1000이지만 TOP 3판이라 제외, 정렬은 레이팅 내림차순 유지
     expect(r.result.map((e) => e.puuid)).toEqual(['A', 'B']);
@@ -151,5 +156,68 @@ describe('getRanking - 포지션 필터', () => {
     expect(r.result.map((e) => e.puuid)).toEqual(['B']);
     expect(r.result[0].positionWin).toBeUndefined();
     expect(r.result[0].positionGames).toBeUndefined();
+  });
+});
+
+describe('getRanking - 포지션 필터 (기본값=솔로랭크 메인 포지션)', () => {
+  test('방설정이 없으면 솔로랭크 기준: mainPosition이 해당 포지션인 유저만 노출, 내전 매치 조회 없음, mainPositionRate 포함', async () => {
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'A', name: '에이', mainPosition: 'TOP', mainPositionRate: 82.5 },
+      { puuid: 'B', name: '비', mainPosition: 'JUNGLE', mainPositionRate: 70 },
+      { puuid: 'C', name: '씨', mainPosition: 'TOP', mainPositionRate: 60 },
+    ]);
+
+    const r = await groupController.getRanking('그룹', 'TOP');
+    expect(r.status).toBe(200);
+    expect(r.positionSource).toBe('solo');
+    expect(mockModels.match.findAll).not.toHaveBeenCalled();
+
+    // C(1000) > A(900) 레이팅 내림차순, B는 JUNGLE이라 제외
+    expect(r.result.map((e) => e.puuid)).toEqual(['C', 'A']);
+    expect(r.result[0]).toEqual({
+      puuid: 'C',
+      ranking: 1,
+      name: '씨',
+      rating: 1000,
+      win: 10,
+      lose: 10,
+      winRate: 50,
+      mainPositionRate: 60,
+    });
+    expect(r.result[0].positionWin).toBeUndefined();
+    expect(r.result[1]).toMatchObject({ puuid: 'A', ranking: 2, mainPositionRate: 82.5 });
+  });
+
+  test('mainPositionRate 0(솔로랭크 포지션 데이터 없음)이면 제외', async () => {
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'A', name: '에이', mainPosition: 'TOP', mainPositionRate: 0 },
+      { puuid: 'B', name: '비', mainPosition: 'TOP', mainPositionRate: 90 },
+      { puuid: 'C', name: '씨', mainPosition: 'JUNGLE', mainPositionRate: 50 },
+    ]);
+
+    const r = await groupController.getRanking('그룹', 'TOP');
+    expect(r.result.map((e) => e.puuid)).toEqual(['B']);
+  });
+
+  test('총 내전 5판 미만이면 mainPosition이 일치해도 제외', async () => {
+    mockModels.user.findAll.mockResolvedValue([
+      makeUser('A', 900, 2, 2), // 총 4판 → 컷 미달
+      makeUser('B', 700, 10, 10),
+    ]);
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'A', name: '에이', mainPosition: 'TOP', mainPositionRate: 80 },
+      { puuid: 'B', name: '비', mainPosition: 'TOP', mainPositionRate: 75 },
+    ]);
+
+    const r = await groupController.getRanking('그룹', 'TOP');
+    expect(r.result.map((e) => e.puuid)).toEqual(['B']);
+  });
+
+  test('position 미지정이면 기존 전체 랭킹과 동일 (positionSource 필드 없음)', async () => {
+    const r = await groupController.getRanking('그룹');
+    expect(mockModels.match.findAll).not.toHaveBeenCalled();
+    expect(r.result.map((e) => e.puuid)).toEqual(['C', 'A', 'B']);
+    expect(r.positionSource).toBeUndefined();
+    expect(r.result[0].mainPositionRate).toBeUndefined();
   });
 });

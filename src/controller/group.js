@@ -102,10 +102,29 @@ module.exports.getRanking = async (groupName, position) => {
     };
   });
 
-  // 포지션 필터: 내전에서 가장 많이 뛴 포지션(내전 메인)이 해당 포지션인 유저만 노출
-  const positionStats = position ? await getPositionStats(group.id) : null;
+  // 포지션 필터 기준: 방설정 rankingPositionSource가 internal이면 내전 최다 포지션, 그 외(기본)는 솔로랭크 메인 포지션(summoner.mainPosition)
+  const useSoloPosition = Boolean(position) && group.settings?.rankingPositionSource !== 'internal';
+  const positionStats = position && !useSoloPosition ? await getPositionStats(group.id) : null;
+
+  // solo 모드는 필터링에 소환사 정보가 필요하므로 전체 유저의 소환사 정보를 먼저 조회
+  let summonerObj = {};
+  if (useSoloPosition) {
+    const summoners = await models.summoner.findAll({
+      where: { puuid: userStats.map((elem) => elem.puuid) },
+    });
+    summonerObj = summoners.reduce((obj, v) => {
+      obj[v.puuid] = v;
+      return obj;
+    }, {});
+  }
 
   let filteredUsers = userStats.filter((elem) => {
+    if (useSoloPosition) {
+      if (elem.totalWin + elem.totalLose < RankingMinumumMatchCount) return false;
+      const summoner = summonerObj[elem.puuid];
+      // mainPositionRate 0은 솔로랭크 포지션 데이터 없음
+      return Boolean(summoner) && summoner.mainPosition === position && summoner.mainPositionRate > 0;
+    }
     if (positionStats) {
       const posMap = positionStats[elem.puuid];
       if (!posMap || !posMap[position]) return false;
@@ -121,13 +140,15 @@ module.exports.getRanking = async (groupName, position) => {
   filteredUsers.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
 
   const userIds = filteredUsers.map((elem) => elem.puuid);
-  const summoners = await models.summoner.findAll({
-    where: { puuid: userIds },
-  });
-  const summonerObj = summoners.reduce((obj, v) => {
-    obj[v.puuid] = v;
-    return obj;
-  }, {});
+  if (!useSoloPosition) {
+    const summoners = await models.summoner.findAll({
+      where: { puuid: userIds },
+    });
+    summonerObj = summoners.reduce((obj, v) => {
+      obj[v.puuid] = v;
+      return obj;
+    }, {});
+  }
 
   let result = filteredUsers.map((elem, index) => {
     const row = {
@@ -138,7 +159,9 @@ module.exports.getRanking = async (groupName, position) => {
       lose: elem.totalLose,
       winRate: Math.ceil((elem.totalWin / (elem.totalWin + elem.totalLose)) * 100),
     };
-    if (positionStats) {
+    if (useSoloPosition) {
+      row.mainPositionRate = summonerObj[elem.puuid].mainPositionRate;
+    } else if (positionStats) {
       const pos = positionStats[elem.puuid][position];
       row.positionWin = pos.win;
       row.positionLose = pos.lose;
@@ -152,7 +175,9 @@ module.exports.getRanking = async (groupName, position) => {
     user.name = summonerObj[user.puuid].name;
   });
 
-  return { result: result, status: 200 };
+  const response = { result: result, status: 200 };
+  if (position) response.positionSource = useSoloPosition ? 'solo' : 'internal';
+  return response;
 };
 
 module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {
