@@ -342,6 +342,7 @@ module.exports = (app) => {
 
       const rankings = await groupController.getRanking(groupName, position);
       const response = { result: rankings.result };
+      if (rankings.positionSource) response.positionSource = rankings.positionSource;
 
       // 요청자의 랭킹 정보 추가 (세션 우선, 없으면 puuid 헤더로 식별)
       const myPuuid = (req.user && req.user.puuid) || req.headers.puuid;
