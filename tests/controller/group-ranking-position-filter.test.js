@@ -86,6 +86,45 @@ describe('getRanking - 포지션 필터', () => {
     expect(r.result).toEqual([]);
   });
 
+  test('내전 최다 포지션 필터에만 노출 (그 외 포지션은 5판 이상이어도 숨김)', async () => {
+    mockModels.match.findAll.mockResolvedValue([
+      // A: TOP 5판 + JUNGLE 7판 → 내전 메인은 JUNGLE
+      ...Array.from({ length: 5 }, () => match([player('A', 'TOP')], [player('D', 'JUNGLE')], 1)),
+      ...Array.from({ length: 7 }, () => match([player('A', 'JUNGLE')], [player('D', 'TOP')], 1)),
+    ]);
+
+    const top = await groupController.getRanking('그룹', 'TOP');
+    expect(top.result).toEqual([]);
+
+    const jungle = await groupController.getRanking('그룹', 'JUNGLE');
+    expect(jungle.result.map((e) => e.puuid)).toEqual(['A']);
+    expect(jungle.result[0]).toMatchObject({ positionWin: 7, positionGames: 7 });
+  });
+
+  test('공동 최다 포지션이면 양쪽 필터에 모두 노출', async () => {
+    mockModels.match.findAll.mockResolvedValue([
+      ...Array.from({ length: 5 }, () => match([player('A', 'TOP')], [player('D', 'JUNGLE')], 1)),
+      ...Array.from({ length: 5 }, () => match([player('A', 'JUNGLE')], [player('D', 'TOP')], 1)),
+    ]);
+
+    const top = await groupController.getRanking('그룹', 'TOP');
+    expect(top.result.map((e) => e.puuid)).toEqual(['A']);
+
+    const jungle = await groupController.getRanking('그룹', 'JUNGLE');
+    expect(jungle.result.map((e) => e.puuid)).toEqual(['A']);
+  });
+
+  test('최다 포지션이어도 5판 미만이면 숨김', async () => {
+    mockModels.match.findAll.mockResolvedValue([
+      // A: JUNGLE 4판이 최다지만 5판 미만
+      ...Array.from({ length: 4 }, () => match([player('A', 'JUNGLE')], [player('D', 'TOP')], 1)),
+      ...Array.from({ length: 2 }, () => match([player('A', 'TOP')], [player('D', 'JUNGLE')], 1)),
+    ]);
+
+    const r = await groupController.getRanking('그룹', 'JUNGLE');
+    expect(r.result).toEqual([]);
+  });
+
   test('포지션 미기록 매치(구형·부분 기록)는 집계되지 않음', async () => {
     mockModels.match.findAll.mockResolvedValue([
       // 구형 포맷 [puuid, name]
