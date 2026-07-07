@@ -68,9 +68,9 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
-.env
-.env.test
+# dotenv 환경변수 파일 — 백업본·복사본(*.env)과 변종(.env.local, .env.test 등)까지 전부 커밋 금지 (평문 시크릿 유입 방지)
+*.env
+*.env.*
 
 # DB 덤프 및 SSH 키 (시크릿/실데이터 — 커밋 금지)
 live_dump.sql

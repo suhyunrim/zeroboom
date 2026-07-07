@@ -329,21 +329,30 @@ module.exports = (app) => {
   });
 
   route.get('/ranking', optionalAuth, async (req, res) => {
-    const { groupName } = req.query;
+    const { groupName, position } = req.query;
 
     if (!groupName) return res.status(501).json({ result: 'invalid group name' });
+    if (position && !groupController.RANKING_POSITIONS.includes(position)) {
+      return res.status(400).json({ result: 'position은 TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY 중 하나여야 합니다.' });
+    }
 
     try {
       const tokenId = req.headers.riottokenid;
       if (tokenId) await tokenController.validateUserGroup(tokenId, groupName);
 
-      const rankings = await groupController.getRanking(groupName);
+      const rankings = await groupController.getRanking(groupName, position);
       const response = { result: rankings.result };
 
       // 요청자의 랭킹 정보 추가 (세션 우선, 없으면 puuid 헤더로 식별)
       const myPuuid = (req.user && req.user.puuid) || req.headers.puuid;
       if (myPuuid && rankings.status === 200) {
-        response.myRanking = await groupController.getMyRanking(groupName, myPuuid, rankings.result);
+        if (position) {
+          // 포지션 필터 시에는 필터 결과 내에서만 내 순위 표시
+          const mine = rankings.result.find((r) => r.puuid === myPuuid);
+          if (mine) response.myRanking = { ...mine, reason: null };
+        } else {
+          response.myRanking = await groupController.getMyRanking(groupName, myPuuid, rankings.result);
+        }
       }
 
       return res.status(rankings.status).json(response);

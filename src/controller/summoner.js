@@ -105,7 +105,7 @@ module.exports.getSummonerByName = async (name) => {
       }
     } catch (e) {
       logger.error(e.stack);
-      if (e.response.status === 404)
+      if (e.response?.status === 404)
         return { result: `[${name}] 은 존재하지 않는 소환사입니다.`, status: 501 }
 
       return { result: found || e.message, status: 501 };

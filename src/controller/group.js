@@ -78,7 +78,7 @@ module.exports.setUserRole = async (groupName, accountId, role) => {
   }
 };
 
-module.exports.getRanking = async (groupName) => {
+module.exports.getRanking = async (groupName, position) => {
   const group = await models.group.findOne({ where: { groupName } });
   if (!group) return { result: 'group is not exist' };
 
@@ -102,7 +102,21 @@ module.exports.getRanking = async (groupName) => {
     };
   });
 
-  let filteredUsers = userStats.filter((elem) => elem.totalWin + elem.totalLose >= RankingMinumumMatchCount);
+  // 포지션 필터: 내전에서 가장 많이 뛴 포지션(내전 메인)이 해당 포지션인 유저만 노출
+  const positionStats = position ? await getPositionStats(group.id) : null;
+
+  let filteredUsers = userStats.filter((elem) => {
+    if (positionStats) {
+      const posMap = positionStats[elem.puuid];
+      if (!posMap || !posMap[position]) return false;
+      const games = posMap[position].win + posMap[position].lose;
+      if (games < RankingMinumumMatchCount) return false;
+      // 최다 포지션만 (공동 최다면 양쪽 모두 노출)
+      const maxGames = Math.max(...Object.values(posMap).map((s) => s.win + s.lose));
+      return games === maxGames;
+    }
+    return elem.totalWin + elem.totalLose >= RankingMinumumMatchCount;
+  });
 
   filteredUsers.sort((a, b) => b.defaultRating + b.additionalRating - (a.defaultRating + a.additionalRating));
 
@@ -116,7 +130,7 @@ module.exports.getRanking = async (groupName) => {
   }, {});
 
   let result = filteredUsers.map((elem, index) => {
-    return {
+    const row = {
       puuid: elem.puuid,
       ranking: index + 1,
       rating: elem.defaultRating + elem.additionalRating,
@@ -124,6 +138,14 @@ module.exports.getRanking = async (groupName) => {
       lose: elem.totalLose,
       winRate: Math.ceil((elem.totalWin / (elem.totalWin + elem.totalLose)) * 100),
     };
+    if (positionStats) {
+      const pos = positionStats[elem.puuid][position];
+      row.positionWin = pos.win;
+      row.positionLose = pos.lose;
+      row.positionGames = pos.win + pos.lose;
+      row.positionWinRate = Math.ceil((pos.win / (pos.win + pos.lose)) * 100);
+    }
+    return row;
   });
 
   result.forEach((user) => {
@@ -317,4 +339,37 @@ module.exports.getRankingByPeriod = async (groupId, startDate, endDate) => {
     .sort((a, b) => ratingOrNeg(b.rating) - ratingOrNeg(a.rating));
 
   return { result, status: 200 };
+};
+
+const RANKING_POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
+module.exports.RANKING_POSITIONS = RANKING_POSITIONS;
+
+/**
+ * 승패 확정 매치에서 puuid별 포지션 승/패 집계.
+ * 매치 저장 포맷 [puuid, name, rating, position]의 포지션(4번째 원소)을 사용한다.
+ */
+const getPositionStats = async (groupId) => {
+  const matches = await models.match.findAll({
+    where: { groupId, winTeam: { [Op.ne]: null } },
+  });
+
+  const stats = {}; // puuid -> position -> { win, lose }
+  for (const match of matches) {
+    const teams = [
+      { data: match.team1, won: match.winTeam === 1 },
+      { data: match.team2, won: match.winTeam === 2 },
+    ];
+    for (const { data, won } of teams) {
+      for (const player of data) {
+        const position = player[3];
+        if (!position || !RANKING_POSITIONS.includes(position)) continue;
+        const puuid = player[0];
+        if (!stats[puuid]) stats[puuid] = {};
+        if (!stats[puuid][position]) stats[puuid][position] = { win: 0, lose: 0 };
+        if (won) stats[puuid][position].win++;
+        else stats[puuid][position].lose++;
+      }
+    }
+  }
+  return stats;
 };
