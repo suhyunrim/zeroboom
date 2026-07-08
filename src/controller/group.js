@@ -103,7 +103,8 @@ module.exports.getRanking = async (groupName, position) => {
   });
 
   // 포지션 필터 기준: 방설정 rankingPositionSource가 internal이면 내전 최다 포지션, 그 외(기본)는 솔로랭크 메인 포지션(summoner.mainPosition)
-  const useSoloPosition = Boolean(position) && group.settings?.rankingPositionSource !== 'internal';
+  const positionSource = group.settings?.rankingPositionSource === 'internal' ? 'internal' : 'solo';
+  const useSoloPosition = Boolean(position) && positionSource === 'solo';
   const positionStats = position && !useSoloPosition ? await getPositionStats(group.id) : null;
 
   // solo 모드는 필터링에 소환사 정보가 필요하므로 전체 유저의 소환사 정보를 먼저 조회
@@ -175,9 +176,8 @@ module.exports.getRanking = async (groupName, position) => {
     user.name = summonerObj[user.puuid].name;
   });
 
-  const response = { result: result, status: 200 };
-  if (position) response.positionSource = useSoloPosition ? 'solo' : 'internal';
-  return response;
+  // 필터 전에도 프론트가 기준별 안내(툴팁 등)를 표시할 수 있도록 항상 포함
+  return { result: result, status: 200, positionSource };
 };
 
 module.exports.getMyRanking = async (groupName, puuid, rankingResult) => {

@@ -156,6 +156,7 @@ describe('getRanking - 포지션 필터 (방설정 rankingPositionSource=interna
     expect(r.result.map((e) => e.puuid)).toEqual(['B']);
     expect(r.result[0].positionWin).toBeUndefined();
     expect(r.result[0].positionGames).toBeUndefined();
+    expect(r.positionSource).toBe('internal'); // 필터 전 안내용으로 항상 포함
   });
 });
 
@@ -213,11 +214,11 @@ describe('getRanking - 포지션 필터 (기본값=솔로랭크 메인 포지션
     expect(r.result.map((e) => e.puuid)).toEqual(['B']);
   });
 
-  test('position 미지정이면 기존 전체 랭킹과 동일 (positionSource 필드 없음)', async () => {
+  test('position 미지정이면 기존 전체 랭킹과 동일, positionSource는 항상 포함', async () => {
     const r = await groupController.getRanking('그룹');
     expect(mockModels.match.findAll).not.toHaveBeenCalled();
     expect(r.result.map((e) => e.puuid)).toEqual(['C', 'A', 'B']);
-    expect(r.positionSource).toBeUndefined();
+    expect(r.positionSource).toBe('solo');
     expect(r.result[0].mainPositionRate).toBeUndefined();
   });
 });
