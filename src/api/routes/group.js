@@ -159,6 +159,73 @@ module.exports = (app) => {
     }
   });
 
+  /**
+   * GET /api/group/:groupId/unlinked-mains
+   * 디스코드 미연동 본캐(discordId=null, primaryPuuid=null, 현역) 목록. 관리자용.
+   * 등록/스왑 과정에서 orphan 된 계정을 찾아 /유저디코연결로 정리하기 위한 가시성 도구.
+   */
+  route.get('/:groupId/unlinked-mains', verifyToken, requireGroupAdmin, async (req, res) => {
+    const groupId = Number(req.params.groupId);
+    if (!groupId) return res.status(400).json({ result: 'groupId가 필요합니다.' });
+
+    try {
+      const users = await models.user.findAll({
+        where: {
+          groupId,
+          primaryPuuid: null,
+          discordId: null,
+          role: { [Op.ne]: 'outsider' },
+          leftGuildAt: null,
+        },
+        attributes: [
+          'puuid',
+          'win',
+          'lose',
+          'defaultRating',
+          'additionalRating',
+          'firstMatchDate',
+          'latestMatchDate',
+        ],
+      });
+
+      const puuids = users.map((u) => u.puuid);
+      const summoners = puuids.length
+        ? await models.summoner.findAll({
+            where: { puuid: puuids },
+            attributes: ['puuid', 'name', 'profileIconId', 'rankTier'],
+          })
+        : [];
+      const summonerByPuuid = {};
+      summoners.forEach((s) => {
+        summonerByPuuid[s.puuid] = s;
+      });
+
+      const result = users
+        .map((u) => {
+          const s = summonerByPuuid[u.puuid];
+          return {
+            puuid: u.puuid,
+            name: s ? s.name : null,
+            profileIconId: s ? s.profileIconId : null,
+            rankTier: s ? s.rankTier : null,
+            rating: (u.defaultRating || 0) + (u.additionalRating || 0),
+            win: u.win || 0,
+            lose: u.lose || 0,
+            games: (u.win || 0) + (u.lose || 0),
+            firstMatchDate: u.firstMatchDate,
+            latestMatchDate: u.latestMatchDate,
+          };
+        })
+        .filter((m) => m.name)
+        .sort((a, b) => b.games - a.games); // 판수 많은 순 (정리 우선순위)
+
+      return res.status(200).json({ result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
   // 방 이름 변경
   route.patch('/:groupId/name', verifyToken, requireGroupAdmin, async (req, res) => {
     const { groupName } = req.body;
