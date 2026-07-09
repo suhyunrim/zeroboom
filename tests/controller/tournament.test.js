@@ -1544,6 +1544,84 @@ describe('pickRandomCandidate', () => {
   test('auctionConfig 없으면 null', () => {
     expect(tournamentController.pickRandomCandidate({}, [])).toBeNull();
   });
+
+  test('한 패스 안에서는 같은 사람이 다시 안 나온다 (유찰자 재등장 방지)', () => {
+    const teams = [{ members: [] }, { members: [] }]; // 아무도 낙찰 안 됨
+    let tournament = { auctionConfig: { candidates }, auctionOfferedPuuids: [] };
+    const seen = [];
+    const total = 10; // 후보 10명
+    for (let i = 0; i < total; i += 1) {
+      const picked = tournamentController.pickRandomCandidate(tournament, teams);
+      expect(picked).not.toBeNull();
+      expect(seen).not.toContain(picked.puuid); // 이번 패스 중복 없음
+      seen.push(picked.puuid);
+      tournament = { ...tournament, auctionOfferedPuuids: picked.offeredPuuids };
+    }
+    expect(new Set(seen).size).toBe(total); // 전원 한 번씩
+    // 패스 완료 → 다음은 새 패스라 offered가 1개로 리셋
+    const next = tournamentController.pickRandomCandidate(tournament, teams);
+    expect(next.offeredPuuids).toHaveLength(1);
+  });
+
+  test('패스가 끝나면 유찰자(미낙찰)들만으로 새 패스를 돈다', () => {
+    const teams = [{ members: [{ puuid: 't1' }] }, { members: [] }]; // t1만 낙찰
+    let tournament = { auctionConfig: { candidates }, auctionOfferedPuuids: [] };
+    const seen = [];
+    for (let i = 0; i < 9; i += 1) {
+      const picked = tournamentController.pickRandomCandidate(tournament, teams);
+      expect(picked.puuid).not.toBe('t1'); // 낙찰자는 안 나옴
+      seen.push(picked.puuid);
+      tournament = { ...tournament, auctionOfferedPuuids: picked.offeredPuuids };
+    }
+    expect(new Set(seen).size).toBe(9); // 유찰 9명 한 번씩
+    const next = tournamentController.pickRandomCandidate(tournament, teams);
+    expect(next.offeredPuuids).toHaveLength(1); // 새 패스 리셋
+    expect(next.puuid).not.toBe('t1');
+  });
+});
+
+describe('findForcedAssignment', () => {
+  const candidates = {
+    top: ['t1', 't2'],
+    jungle: ['j1', 'j2'],
+    mid: ['m1', 'm2'],
+    adc: ['a1', 'a2'],
+    support: ['s1', 's2'],
+  };
+  const makeTournament = () => ({ auctionConfig: { candidates }, status: 'auction' });
+
+  test('한 포지션 미낙찰 1명 → 그 포지션 빈 팀에 강제 배정 정보 반환', () => {
+    const teams = [
+      { id: 1, name: 'A', members: [{ puuid: 't1', position: 'top' }] },
+      { id: 2, name: 'B', members: [] },
+    ];
+    expect(tournamentController.findForcedAssignment(makeTournament(), teams)).toEqual({
+      puuid: 't2', position: 'top', teamId: 2, teamName: 'B',
+    });
+  });
+
+  test('미낙찰 2명 이상이면 강제 배정 없음(null)', () => {
+    const teams = [
+      { id: 1, name: 'A', members: [] },
+      { id: 2, name: 'B', members: [] },
+    ];
+    expect(tournamentController.findForcedAssignment(makeTournament(), teams)).toBeNull();
+  });
+
+  test('여러 포지션이 동시에 마지막 1명이면 첫 포지션(top)을 반환', () => {
+    const teams = [
+      { id: 1, name: 'A', members: [{ puuid: 't1', position: 'top' }, { puuid: 'j1', position: 'jungle' }] },
+      { id: 2, name: 'B', members: [] },
+    ];
+    const forced = tournamentController.findForcedAssignment(makeTournament(), teams);
+    expect(forced.position).toBe('top');
+    expect(forced.teamId).toBe(2);
+    expect(forced.puuid).toBe('t2');
+  });
+
+  test('auctionConfig 없으면 null', () => {
+    expect(tournamentController.findForcedAssignment({}, [])).toBeNull();
+  });
 });
 
 describe('setCurrentAuction', () => {

@@ -414,7 +414,7 @@ module.exports = (app) => {
   });
 
   route.patch('/:id', verifyToken, async (req, res) => {
-    const { name, trophyType, predictionMode } = req.body || {};
+    const { name, trophyType, predictionMode, bidDurationSeconds } = req.body || {};
     try {
       const tournament = await loadTournamentForAdmin(req, res);
       if (!tournament) return undefined;
@@ -444,6 +444,18 @@ module.exports = (app) => {
         before.predictionMode = tournament.predictionMode;
         updates.predictionMode = predictionMode;
       }
+      if (bidDurationSeconds !== undefined) {
+        // 경매시간(초). 다음 입찰 시작/시간갱신부터 적용되며, 진행 중인 타이머는 그대로 둔다.
+        if (tournament.type !== tournamentController.TYPES.AUCTION || !tournament.auctionConfig) {
+          return res.status(400).json({ result: '경매 타입 토너먼트만 경매시간을 수정할 수 있습니다.' });
+        }
+        if (!Number.isInteger(bidDurationSeconds) || bidDurationSeconds <= 0) {
+          return res.status(400).json({ result: '경매시간(bidDurationSeconds)은 양의 정수(초)여야 합니다.' });
+        }
+        before.bidDurationSeconds = tournament.auctionConfig.bidDurationSeconds;
+        // JSON 컬럼은 새 객체로 재할당해야 Sequelize가 변경을 감지한다(in-place 수정 X).
+        updates.auctionConfig = { ...tournament.auctionConfig, bidDurationSeconds };
+      }
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ result: '수정할 필드가 없습니다.' });
       }
@@ -451,13 +463,19 @@ module.exports = (app) => {
       Object.assign(tournament, updates);
       await tournament.save();
 
+      // 감사 로그에 auctionConfig 후보 배열 전체가 실리지 않도록 변경분만 요약한다.
+      const auditAfter = { ...updates };
+      if (auditAfter.auctionConfig) {
+        auditAfter.auctionConfig = { bidDurationSeconds: auditAfter.auctionConfig.bidDurationSeconds };
+      }
+
       const { discordId, actorName } = auditUser(req);
       auditLog.log({
         groupId: tournament.groupId,
         actorDiscordId: discordId,
         actorName,
         action: 'tournament.update',
-        details: { tournamentId: tournament.id, before, after: updates },
+        details: { tournamentId: tournament.id, before, after: auditAfter },
         source: 'web',
       });
 
@@ -776,14 +794,68 @@ module.exports = (app) => {
       if (tournament.status !== STATUS.AUCTION) {
         return res.status(409).json({ result: '경매 단계가 아닙니다.' });
       }
+      if (tournament.currentAuctionDeadline && new Date(tournament.currentAuctionDeadline) > new Date()) {
+        return res.status(409).json({ result: '입찰이 진행 중입니다.' });
+      }
 
       const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
+
+      // 강제 배정 우선: 한 포지션 마지막 1명은 남은 팀에 0원으로 자동 낙찰한다.
+      const forced = tournamentController.findForcedAssignment(tournament, teams);
+      if (forced) {
+        const forcedTeam = teams.find((t) => t.id === forced.teamId);
+        const assign = await models.sequelize.transaction(async (transaction) => {
+          return tournamentController.forceAssignCandidate(tournament, forcedTeam, forced, { transaction });
+        });
+        if (!assign.ok) return res.status(409).json({ result: assign.error });
+
+        const autoCandidate = await buildCandidateDetail(tournament, forced.puuid);
+        const autoAssigned = {
+          puuid: forced.puuid,
+          position: forced.position,
+          teamId: forced.teamId,
+          teamName: forced.teamName,
+          amount: 0,
+          candidate: autoCandidate,
+        };
+
+        const { discordId, actorName } = auditUser(req);
+        auditLog.log({
+          groupId: tournament.groupId,
+          actorDiscordId: discordId,
+          actorName,
+          action: 'tournament.auction_auto_assign',
+          details: {
+            tournamentId: tournament.id,
+            puuid: forced.puuid,
+            position: forced.position,
+            teamId: forced.teamId,
+            teamName: forced.teamName,
+            amount: 0,
+          },
+          source: 'web',
+        });
+
+        const forcedIo = req.app.get('io');
+        if (forcedIo) {
+          forcedIo.to(`tournament:${tournament.id}`).emit('auction:auto-assign', {
+            tournamentId: tournament.id,
+            ...autoAssigned,
+          });
+        }
+
+        const forcedDetail = await buildDetail(tournament);
+        return res.status(200).json({ result: 'ok', autoAssigned, ...forcedDetail });
+      }
+
       const picked = tournamentController.pickRandomCandidate(tournament, teams);
       if (!picked) {
         return res.status(400).json({ result: '남은 후보가 없습니다.' });
       }
 
       const result = await models.sequelize.transaction(async (transaction) => {
+        // 이번 패스에 올라온 목록 갱신(유찰자 재등장 방지). setCurrentAuction의 save에 함께 반영됨.
+        tournament.auctionOfferedPuuids = picked.offeredPuuids;
         return tournamentController.setCurrentAuction(tournament, picked.puuid, { transaction });
       });
       if (!result.ok) return res.status(409).json({ result: result.error });
