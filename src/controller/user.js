@@ -86,7 +86,6 @@ module.exports.getRating = async (groupId, puuid) => {
 
 // 상세 통계 계산 상수
 const TOP_LIST_COUNT = 15; // 같은 팀/상대 팀 Top N명
-const TOP_N_FOR_BEST_STATS = 10; // 자주 만난 상위 N명 내에서 승률 기준 선정
 const RECENT_GAMES_COUNT = 10; // 최근 N판 승률 계산용
 const POSITION_KEYS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']; // 내전 포지션 전적 키 (Riot 표준)
 const VALID_POSITIONS = new Set(POSITION_KEYS);
@@ -213,7 +212,7 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
   });
   const excludedFromList = new Set(excludedUsers.map((u) => u.puuid));
 
-  // Top 리스트 및 best/worst 후보 미리 계산 (제외 대상 필터 후 게임 수 순)
+  // Top 리스트(많이 만난 순): 제외 대상 필터 후 게임 수 순 Top 15
   const topTeammateEntries = Object.entries(teammateStats)
     .filter(([puuid]) => !excludedFromList.has(puuid))
     .sort((a, b) => b[1].games - a[1].games)
@@ -223,10 +222,39 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     .sort((a, b) => b[1].games - a[1].games)
     .slice(0, TOP_LIST_COUNT);
 
+  // best/worst(승률·상대전적 순) 후보: "판수 상위 N명" 컷 대신 최소 판수 하한을 넘긴 전원.
+  // ★ 판수 상위 컷을 쓰면 "8승 0패지만 11번째로 많이 만난 상대"가 잘려 의도가 퇴색됨.
+  // 하한 = max(내 전체 판수의 5%, 5), 상한 12. floor 5로 소표본 플루크를 막고,
+  // cap 12로 고인물(판수 많은 유저)도 리스트가 비지 않게 한다.
+  const MIN_GAMES_FOR_BEST = Math.max(5, Math.min(12, Math.round(matchHistory.length * 0.05)));
+  const teammateCandidates = Object.entries(teammateStats)
+    .filter(([puuid, stats]) => !excludedFromList.has(puuid) && stats.games >= MIN_GAMES_FOR_BEST)
+    .map(([puuid, stats]) => ({ puuid, ...stats, winRate: (stats.wins / stats.games) * 100 }));
+  const opponentCandidates = Object.entries(opponentStats)
+    .filter(([puuid, stats]) => !excludedFromList.has(puuid) && stats.games >= MIN_GAMES_FOR_BEST)
+    .map(([puuid, stats]) => ({ puuid, ...stats, winRate: (stats.myWins / stats.games) * 100 }));
+
+  // 각 리스트 선정(이름 붙이기 전, puuid 단위). 이름은 아래에서 한 번에 조회한다.
+  const bestTeammateSel = teammateCandidates
+    .slice()
+    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT);
+  const bestOpponentSel = opponentCandidates
+    .slice()
+    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT);
+  const worstOpponentSel = opponentCandidates
+    .slice()
+    .sort((a, b) => a.winRate - b.winRate || b.games - a.games)
+    .slice(0, TOP_LIST_COUNT);
+
   // 필요한 puuid를 모아서 이름을 한 번에 조회
   const puuidsToResolve = new Set([
     ...topTeammateEntries.map(([puuid]) => puuid),
     ...topOpponentEntries.map(([puuid]) => puuid),
+    ...bestTeammateSel.map((c) => c.puuid),
+    ...bestOpponentSel.map((c) => c.puuid),
+    ...worstOpponentSel.map((c) => c.puuid),
   ]);
   const summoners = await models.summoner.findAll({
     where: { puuid: [...puuidsToResolve] },
@@ -259,24 +287,15 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     winRate: Math.round((stats.myWins / stats.games) * 100),
   }));
 
-  // 3. 자주 함께한 Top N명 중 승률 높은 순 Top 15
-  const bestTeammates = topTeammateEntries
-    .slice(0, TOP_N_FOR_BEST_STATS)
-    .map(([puuid, stats]) => ({
-      puuid,
-      ...stats,
-      winRate: (stats.wins / stats.games) * 100,
-    }))
-    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
-    .slice(0, TOP_LIST_COUNT)
-    .map((c) => ({
-      puuid: c.puuid,
-      name: resolveName(c.puuid),
-      games: c.games,
-      wins: c.wins,
-      losses: c.losses,
-      winRate: Math.round(c.winRate),
-    }));
+  // 3. 최소 판수 하한 넘긴 팀원 중 승률 높은 순 Top 15
+  const bestTeammates = bestTeammateSel.map((c) => ({
+    puuid: c.puuid,
+    name: resolveName(c.puuid),
+    games: c.games,
+    wins: c.wins,
+    losses: c.losses,
+    winRate: Math.round(c.winRate),
+  }));
 
   // 4. 최근 N판 승률
   const recentMatches = matchHistory.slice(-RECENT_GAMES_COUNT);
@@ -304,41 +323,25 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     }
   }
 
-  // 6. 자주 상대한 Top N명 중 상대 전적 좋은 순 Top 15
-  const opponentCandidates = topOpponentEntries
-    .slice(0, TOP_N_FOR_BEST_STATS)
-    .map(([puuid, stats]) => ({
-      puuid,
-      ...stats,
-      winRate: (stats.myWins / stats.games) * 100,
-    }));
+  // 6. 최소 판수 하한 넘긴 상대 중 상대 전적 좋은 순 Top 15
+  const bestOpponents = bestOpponentSel.map((c) => ({
+    puuid: c.puuid,
+    name: resolveName(c.puuid),
+    games: c.games,
+    myWins: c.myWins,
+    myLosses: c.myLosses,
+    winRate: Math.round(c.winRate),
+  }));
 
-  const bestOpponents = opponentCandidates
-    .slice()
-    .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
-    .slice(0, TOP_LIST_COUNT)
-    .map((c) => ({
-      puuid: c.puuid,
-      name: resolveName(c.puuid),
-      games: c.games,
-      myWins: c.myWins,
-      myLosses: c.myLosses,
-      winRate: Math.round(c.winRate),
-    }));
-
-  // 7. 자주 상대한 Top N명 중 상대 전적 안 좋은 순 Top 15
-  const worstOpponents = opponentCandidates
-    .slice()
-    .sort((a, b) => a.winRate - b.winRate || b.games - a.games)
-    .slice(0, TOP_LIST_COUNT)
-    .map((c) => ({
-      puuid: c.puuid,
-      name: resolveName(c.puuid),
-      games: c.games,
-      myWins: c.myWins,
-      myLosses: c.myLosses,
-      winRate: Math.round(c.winRate),
-    }));
+  // 7. 최소 판수 하한 넘긴 상대 중 상대 전적 안 좋은 순 Top 15
+  const worstOpponents = worstOpponentSel.map((c) => ({
+    puuid: c.puuid,
+    name: resolveName(c.puuid),
+    games: c.games,
+    myWins: c.myWins,
+    myLosses: c.myLosses,
+    winRate: Math.round(c.winRate),
+  }));
 
   // 레이팅 히스토리: 최근 100판, 같은 날짜는 마지막 매치 기준으로 그룹핑
   const recentRatingHistory = ratingHistory.slice(-100);
