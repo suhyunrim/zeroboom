@@ -235,16 +235,18 @@ const calculateDetailedStats = async (groupId, myPuuid) => {
     .map(([puuid, stats]) => ({ puuid, ...stats, winRate: (stats.myWins / stats.games) * 100 }));
 
   // 각 리스트 선정(이름 붙이기 전, puuid 단위). 이름은 아래에서 한 번에 조회한다.
+  // ★ 이름과 의미를 맞추기 위해 "최고" 계열은 표시 승률 51% 이상만, "최악"은 49% 이하만 담는다.
+  //   (화면에 뜨는 값 = Math.round(winRate) 기준. 50%로 표시되는 관계는 어느 쪽에도 넣지 않음.)
   const bestTeammateSel = teammateCandidates
-    .slice()
+    .filter((c) => Math.round(c.winRate) >= 51)
     .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
     .slice(0, TOP_LIST_COUNT);
   const bestOpponentSel = opponentCandidates
-    .slice()
+    .filter((c) => Math.round(c.winRate) >= 51)
     .sort((a, b) => b.winRate - a.winRate || b.games - a.games)
     .slice(0, TOP_LIST_COUNT);
   const worstOpponentSel = opponentCandidates
-    .slice()
+    .filter((c) => Math.round(c.winRate) <= 49)
     .sort((a, b) => a.winRate - b.winRate || b.games - a.games)
     .slice(0, TOP_LIST_COUNT);
 
