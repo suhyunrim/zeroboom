@@ -771,8 +771,9 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       const buildTeamFromSnapshot = async (teamData) => {
         const players = [];
         let totalRating = 0;
-        for (const [puuid, name, rating] of teamData) {
-          players.push({ puuid, name, rating, tier: formatTier(rating) });
+        // 저장 포맷 [puuid, name, rating, position] — 포지션(4번째)이 있으면 함께 내려준다.
+        for (const [puuid, name, rating, position = null] of teamData) {
+          players.push({ puuid, name, rating, tier: formatTier(rating), position });
           totalRating += rating;
         }
         return {
@@ -805,9 +806,10 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       // 스냅샷 없는 기존 매치 — 이름만 표시 (레이팅 정보 없음)
       const buildTeamFallback = async (teamData) => {
         const players = [];
+        // 스냅샷 없는 옛 매치는 포지션 정보가 없으므로 position=null (응답 형태는 통일)
         for (const [puuid, name] of teamData) {
           const resolvedName = name || (await getSummonerName(puuid));
-          players.push({ puuid, name: resolvedName, rating: null, tier: null });
+          players.push({ puuid, name: resolvedName, rating: null, tier: null, position: null });
         }
         return { players, avgRating: null };
       };
