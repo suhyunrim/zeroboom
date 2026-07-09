@@ -87,21 +87,31 @@ const registerUser = async (groupName, summonerName, tier, discordId = null, { a
     return { result: 'enter the tier explicitly', status: 501 };
 
   try {
-    // (groupId, discordId) UNIQUE 제약과 충돌 방지:
-    // 같은 디스코드 ID 로 이전에 등록된 본캐 row 가 있고 puuid 가 다르면(=계정 갈아탐)
-    // 그 row 의 discordId 를 NULL 로 비워 둔다. 통계/매치 보존을 위해 row 자체는 유지.
+    // (groupId, discordId) UNIQUE 제약 & "조용한 계정 갈아탐" 방지:
+    // 같은 디스코드가 이미 다른 본캐에 연결돼 있으면, 그 계정을 말없이 orphan 시키지 않고
+    // 등록을 막고 안내한다. 본캐 이동/부캐 편입은 관리자가 /유저디코연결로 명시적으로 처리한다.
+    // (같은 puuid 재등록은 홀더 조회에서 제외되므로 정상 통과)
     if (discordId) {
-      await models.user.update(
-        { discordId: null },
-        {
-          where: {
-            groupId: group.id,
-            discordId,
-            primaryPuuid: null,
-            puuid: { [Op.ne]: summoner.puuid },
-          },
+      const holder = await models.user.findOne({
+        where: {
+          groupId: group.id,
+          discordId,
+          primaryPuuid: null,
+          puuid: { [Op.ne]: summoner.puuid },
         },
-      );
+        attributes: ['puuid'],
+      });
+      if (holder) {
+        const holderSummoner = await models.summoner.findOne({
+          where: { puuid: holder.puuid },
+          attributes: ['name'],
+        });
+        const holderName = holderSummoner ? holderSummoner.name : '다른 계정';
+        return {
+          result: `이 디스코드는 이미 [${holderName}]에 연결돼 있습니다. 계정을 옮기려면 관리자가 '/유저디코연결 @유저 ${summonerName}'로 이동해주세요.`,
+          status: 409,
+        };
+      }
     }
 
     // 외부인 등록(asOutsider)은 신규 생성된 경우에만 role을 outsider로 지정한다.

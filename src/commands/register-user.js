@@ -1,4 +1,5 @@
 const { registerUser } = require('../services/user');
+const auditLog = require('../controller/audit-log');
 const { syncUserAdminRole } = require('../discord/adminSync');
 const { logger } = require('../loaders/logger');
 
@@ -8,6 +9,18 @@ exports.run = async (groupName, interaction) => {
   const tier = interaction.options.getString('티어');
   const discordId = discordUser ? discordUser.id : null;
   const ret = await registerUser(groupName, summonerName, tier, discordId);
+
+  if (ret.status === 200) {
+    auditLog.log({
+      groupId: ret.group.id,
+      actorDiscordId: interaction.user ? interaction.user.id : null,
+      actorName: interaction.user
+        ? interaction.user.globalName || interaction.user.username || null
+        : null,
+      action: 'user.register',
+      details: { summonerName, tier, linkedDiscordId: discordId },
+    });
+  }
 
   // 디스코드 계정이 연결된 등록이면 권한(role)을 즉시 동기화한다.
   // (재시작/역할변경 이벤트를 기다리지 않고 admin 캐시가 어긋나지 않게)
