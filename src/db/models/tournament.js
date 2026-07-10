@@ -78,6 +78,12 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // 이번 패스에 이미 매물로 올라온 후보(유찰 포함) puuid 목록.
+      // 유찰자를 패스가 끝날 때까지 다시 안 뽑고, 패스가 끝나면 비워 새 패스를 시작한다.
+      auctionOfferedPuuids: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
     },
     {},
   );

@@ -773,6 +773,7 @@ const startAuction = async (tournament, teams, options = {}) => {
     await team.save({ transaction: options.transaction });
   }
   tournament.status = STATUS.AUCTION;
+  tournament.auctionOfferedPuuids = []; // 경매 시작 시 패스 상태 초기화
   await tournament.save({ transaction: options.transaction });
   return { ok: true };
 };
@@ -841,6 +842,10 @@ const undoAuctionBid = async (tournament, team, puuid, options = {}) => {
   return { ok: true, refund };
 };
 
+// 다음 매물을 랜덤으로 뽑는다. 낙찰된 사람은 제외하고, "이번 패스에 이미 올라온 사람"도
+// 패스가 끝날 때까지 다시 뽑지 않는다. 남은(유찰) 사람이 모두 이번 패스에 나왔으면
+// offered를 비우고 새 패스를 시작해 유찰자들끼리 다시 랜덤으로 돌린다.
+// @returns {{ puuid, position, offeredPuuids }} | null  offeredPuuids=저장할 새 offered 목록
 const pickRandomCandidate = (tournament, teams) => {
   const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
   if (!candidates) return null;
@@ -849,10 +854,94 @@ const pickRandomCandidate = (tournament, teams) => {
   for (const team of teams) {
     (team.members || []).forEach((m) => taken.add(m.puuid));
   }
-  const remaining = allPuuids.filter((p) => !taken.has(p));
-  if (remaining.length === 0) return null;
-  const picked = remaining[Math.floor(Math.random() * remaining.length)];
-  return { puuid: picked, position: findCandidatePosition(candidates, picked) };
+  const notSold = allPuuids.filter((p) => !taken.has(p));
+  if (notSold.length === 0) return null;
+
+  const offeredArr = Array.isArray(tournament.auctionOfferedPuuids) ? tournament.auctionOfferedPuuids : [];
+  const offered = new Set(offeredArr);
+  const notOffered = notSold.filter((p) => !offered.has(p));
+  const startNewPass = notOffered.length === 0; // 남은 사람이 다 이번 패스에 나옴 → 새 패스
+  const pool = startNewPass ? notSold : notOffered;
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  const offeredPuuids = startNewPass ? [picked] : [...offeredArr, picked];
+  return { puuid: picked, position: findCandidatePosition(candidates, picked), offeredPuuids };
+};
+
+// 한 포지션의 미낙찰 후보가 정확히 1명 남으면, 그 포지션이 빈 팀은 정확히 1팀뿐이라
+// 그 후보는 남은 팀에 고정될 수밖에 없다(후보 수 = 팀 수). 그런 "강제 배정" 대상을 찾는다.
+// @returns {{ puuid, position, teamId, teamName }} | null
+const findForcedAssignment = (tournament, teams) => {
+  const candidates = tournament.auctionConfig && tournament.auctionConfig.candidates;
+  if (!candidates) return null;
+  const taken = new Set();
+  for (const team of teams) {
+    (team.members || []).forEach((m) => taken.add(m.puuid));
+  }
+  for (const position of VALID_POSITIONS) {
+    const unsold = (candidates[position] || []).filter((p) => !taken.has(p));
+    if (unsold.length !== 1) continue;
+    // 그 포지션이 비어있는(정원 미달) 팀 = 정확히 1팀
+    const team = teams.find(
+      (t) => (t.members || []).length < TEAM_SIZE
+        && !(t.members || []).some((m) => m.position === position),
+    );
+    if (team) {
+      return { puuid: unsold[0], position, teamId: team.id, teamName: team.name, reason: 'last_candidate' };
+    }
+  }
+  return null;
+};
+
+// 데드락 해소: 어떤 포지션의 남은 후보가 2명 이상인데, 그 포지션이 빈 팀 중
+// 최소입찰(minBid)을 낼 수 있는(remainingBudget >= minBid) 팀이 0팀이면 정상 경매가
+// 영원히 유찰된다. 이때 남은 후보 1명을 빈 팀 1개에 랜덤으로 0원 배정한다.
+// 1명씩 처리 → 남은 후보/빈 팀이 함께 줄어 결국 1명 남으면 findForcedAssignment가 마무리 → 수렴.
+// @returns {{ puuid, position, teamId, teamName, reason }} | null
+const findDeadlockAssignment = (tournament, teams) => {
+  const config = tournament.auctionConfig || {};
+  const { candidates, minBid } = config;
+  if (!candidates || !Number.isInteger(minBid)) return null;
+  const taken = new Set();
+  for (const team of teams) {
+    (team.members || []).forEach((m) => taken.add(m.puuid));
+  }
+  for (const position of VALID_POSITIONS) {
+    const unsold = (candidates[position] || []).filter((p) => !taken.has(p));
+    if (unsold.length < 2) continue; // 1명 남음은 findForcedAssignment가 처리
+    const missingTeams = teams.filter(
+      (t) => (t.members || []).length < TEAM_SIZE
+        && !(t.members || []).some((m) => m.position === position),
+    );
+    if (missingTeams.length === 0) continue;
+    // 최소입찰을 낼 수 있는 빈 팀이 하나라도 있으면 정상 경매에 맡긴다.
+    const canBid = missingTeams.filter((t) => (t.remainingBudget == null ? 0 : t.remainingBudget) >= minBid);
+    if (canBid.length > 0) continue;
+    // 데드락: 남은 후보/빈 팀에서 랜덤으로 하나씩 뽑아 0원 배정
+    const puuid = unsold[Math.floor(Math.random() * unsold.length)];
+    const team = missingTeams[Math.floor(Math.random() * missingTeams.length)];
+    return { puuid, position, teamId: team.id, teamName: team.name, reason: 'deadlock_random' };
+  }
+  return null;
+};
+
+// 강제 0원 배정: 포지션 마지막 후보를 남은 팀에 붙인다(입찰/최소가/예산 검증 없이).
+const forceAssignCandidate = async (tournament, team, { puuid, position }, options = {}) => {
+  if (tournament.status !== STATUS.AUCTION) {
+    return { ok: false, error: '경매 단계가 아닙니다.' };
+  }
+  if ((team.members || []).some((m) => m.position === position)) {
+    return { ok: false, error: '해당 팀에 이미 그 포지션이 있습니다.' };
+  }
+  if ((team.members || []).some((m) => m.puuid === puuid)) {
+    return { ok: false, error: '이미 배정된 후보입니다.' };
+  }
+  team.members = [...(team.members || []), { puuid, position, bidAmount: 0 }];
+  await team.save({ transaction: options.transaction });
+  // 강제 배정 후 현재 매물/타이머는 비운다.
+  tournament.currentAuctionPuuid = null;
+  tournament.currentAuctionDeadline = null;
+  await tournament.save({ transaction: options.transaction });
+  return { ok: true };
 };
 
 const setCurrentAuction = async (tournament, puuid, options = {}) => {
@@ -960,6 +1049,9 @@ module.exports = {
   undoAuctionBid,
   completeAuction,
   pickRandomCandidate,
+  findForcedAssignment,
+  findDeadlockAssignment,
+  forceAssignCandidate,
   setCurrentAuction,
   startBidTimer,
   extendBidTimer,
