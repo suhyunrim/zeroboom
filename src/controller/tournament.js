@@ -886,8 +886,40 @@ const findForcedAssignment = (tournament, teams) => {
         && !(t.members || []).some((m) => m.position === position),
     );
     if (team) {
-      return { puuid: unsold[0], position, teamId: team.id, teamName: team.name };
+      return { puuid: unsold[0], position, teamId: team.id, teamName: team.name, reason: 'last_candidate' };
     }
+  }
+  return null;
+};
+
+// 데드락 해소: 어떤 포지션의 남은 후보가 2명 이상인데, 그 포지션이 빈 팀 중
+// 최소입찰(minBid)을 낼 수 있는(remainingBudget >= minBid) 팀이 0팀이면 정상 경매가
+// 영원히 유찰된다. 이때 남은 후보 1명을 빈 팀 1개에 랜덤으로 0원 배정한다.
+// 1명씩 처리 → 남은 후보/빈 팀이 함께 줄어 결국 1명 남으면 findForcedAssignment가 마무리 → 수렴.
+// @returns {{ puuid, position, teamId, teamName, reason }} | null
+const findDeadlockAssignment = (tournament, teams) => {
+  const config = tournament.auctionConfig || {};
+  const { candidates, minBid } = config;
+  if (!candidates || !Number.isInteger(minBid)) return null;
+  const taken = new Set();
+  for (const team of teams) {
+    (team.members || []).forEach((m) => taken.add(m.puuid));
+  }
+  for (const position of VALID_POSITIONS) {
+    const unsold = (candidates[position] || []).filter((p) => !taken.has(p));
+    if (unsold.length < 2) continue; // 1명 남음은 findForcedAssignment가 처리
+    const missingTeams = teams.filter(
+      (t) => (t.members || []).length < TEAM_SIZE
+        && !(t.members || []).some((m) => m.position === position),
+    );
+    if (missingTeams.length === 0) continue;
+    // 최소입찰을 낼 수 있는 빈 팀이 하나라도 있으면 정상 경매에 맡긴다.
+    const canBid = missingTeams.filter((t) => (t.remainingBudget == null ? 0 : t.remainingBudget) >= minBid);
+    if (canBid.length > 0) continue;
+    // 데드락: 남은 후보/빈 팀에서 랜덤으로 하나씩 뽑아 0원 배정
+    const puuid = unsold[Math.floor(Math.random() * unsold.length)];
+    const team = missingTeams[Math.floor(Math.random() * missingTeams.length)];
+    return { puuid, position, teamId: team.id, teamName: team.name, reason: 'deadlock_random' };
   }
   return null;
 };
@@ -1018,6 +1050,7 @@ module.exports = {
   completeAuction,
   pickRandomCandidate,
   findForcedAssignment,
+  findDeadlockAssignment,
   forceAssignCandidate,
   setCurrentAuction,
   startBidTimer,

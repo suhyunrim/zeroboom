@@ -800,8 +800,10 @@ module.exports = (app) => {
 
       const teams = await models.tournament_team.findAll({ where: { tournamentId: tournament.id } });
 
-      // 강제 배정 우선: 한 포지션 마지막 1명은 남은 팀에 0원으로 자동 낙찰한다.
-      const forced = tournamentController.findForcedAssignment(tournament, teams);
+      // 자동 0원 배정: ① 포지션 마지막 1명은 남은 팀에 강제 낙찰,
+      // ② 남은 후보를 놓고 최소입찰 낼 수 있는 팀이 0팀이면(데드락) 랜덤으로 0원 배정.
+      const forced = tournamentController.findForcedAssignment(tournament, teams)
+        || tournamentController.findDeadlockAssignment(tournament, teams);
       if (forced) {
         const forcedTeam = teams.find((t) => t.id === forced.teamId);
         const assign = await models.sequelize.transaction(async (transaction) => {
@@ -816,6 +818,7 @@ module.exports = (app) => {
           teamId: forced.teamId,
           teamName: forced.teamName,
           amount: 0,
+          reason: forced.reason, // 'last_candidate' | 'deadlock_random'
           candidate: autoCandidate,
         };
 
@@ -832,6 +835,7 @@ module.exports = (app) => {
             teamId: forced.teamId,
             teamName: forced.teamName,
             amount: 0,
+            reason: forced.reason,
           },
           source: 'web',
         });

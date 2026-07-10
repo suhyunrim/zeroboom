@@ -1596,7 +1596,7 @@ describe('findForcedAssignment', () => {
       { id: 2, name: 'B', members: [] },
     ];
     expect(tournamentController.findForcedAssignment(makeTournament(), teams)).toEqual({
-      puuid: 't2', position: 'top', teamId: 2, teamName: 'B',
+      puuid: 't2', position: 'top', teamId: 2, teamName: 'B', reason: 'last_candidate',
     });
   });
 
@@ -1621,6 +1621,101 @@ describe('findForcedAssignment', () => {
 
   test('auctionConfig 없으면 null', () => {
     expect(tournamentController.findForcedAssignment({}, [])).toBeNull();
+  });
+});
+
+describe('findDeadlockAssignment', () => {
+  const candidates = {
+    top: ['t1', 't2'],
+    jungle: ['j1', 'j2'],
+    mid: ['m1', 'm2'],
+    adc: ['a1', 'a2'],
+    support: ['s1', 's2'],
+  };
+  const makeTournament = (minBid = 100) => ({ auctionConfig: { candidates, minBid }, status: 'auction' });
+
+  test('미낙찰 2명 + 빈 팀 전부 예산부족(<minBid) → 랜덤 0원 배정 대상 반환', () => {
+    const teams = [
+      { id: 1, name: 'A', members: [], remainingBudget: 0 },
+      { id: 2, name: 'B', members: [], remainingBudget: 0 },
+    ];
+    const res = tournamentController.findDeadlockAssignment(makeTournament(), teams);
+    expect(res).not.toBeNull();
+    expect(res.reason).toBe('deadlock_random');
+    expect(res.position).toBe('top'); // 첫 데드락 포지션
+    expect(['t1', 't2']).toContain(res.puuid);
+    expect([1, 2]).toContain(res.teamId);
+  });
+
+  test('빈 팀 중 1팀이라도 minBid 낼 수 있으면 → null(정상 경매에 맡김)', () => {
+    const teams = [
+      { id: 1, name: 'A', members: [], remainingBudget: 100 }, // minBid=100 낼 수 있음
+      { id: 2, name: 'B', members: [], remainingBudget: 0 },
+    ];
+    expect(tournamentController.findDeadlockAssignment(makeTournament(), teams)).toBeNull();
+  });
+
+  test('미낙찰 1명이면 → null(findForcedAssignment 담당)', () => {
+    const teams = [
+      {
+        id: 1,
+        name: 'A',
+        members: [
+          { puuid: 't1', position: 'top' }, { puuid: 'j1', position: 'jungle' },
+          { puuid: 'm1', position: 'mid' }, { puuid: 'a1', position: 'adc' }, { puuid: 's1', position: 'support' },
+        ],
+        remainingBudget: 0,
+      },
+      {
+        id: 2,
+        name: 'B',
+        members: [
+          { puuid: 'j2', position: 'jungle' }, { puuid: 'm2', position: 'mid' },
+          { puuid: 'a2', position: 'adc' }, { puuid: 's2', position: 'support' },
+        ],
+        remainingBudget: 0,
+      }, // top(t2) 1명만 남음
+    ];
+    expect(tournamentController.findDeadlockAssignment(makeTournament(), teams)).toBeNull();
+  });
+
+  test('minBid/candidates 없으면 null', () => {
+    expect(tournamentController.findDeadlockAssignment({}, [])).toBeNull();
+    expect(tournamentController.findDeadlockAssignment({ auctionConfig: { candidates } }, [])).toBeNull();
+  });
+
+  test('데드락 1명 배정 후 마지막 1명은 forced가 마무리(수렴)', () => {
+    const teams = [
+      {
+        id: 1,
+        name: 'A',
+        members: [
+          { puuid: 'j1', position: 'jungle' }, { puuid: 'm1', position: 'mid' },
+          { puuid: 'a1', position: 'adc' }, { puuid: 's1', position: 'support' },
+        ],
+        remainingBudget: 0,
+      },
+      {
+        id: 2,
+        name: 'B',
+        members: [
+          { puuid: 'j2', position: 'jungle' }, { puuid: 'm2', position: 'mid' },
+          { puuid: 'a2', position: 'adc' }, { puuid: 's2', position: 'support' },
+        ],
+        remainingBudget: 0,
+      }, // 둘 다 top만 비어있음(t1,t2 미낙찰), 예산 0
+    ];
+    const t = makeTournament();
+    const first = tournamentController.findDeadlockAssignment(t, teams);
+    expect(first.position).toBe('top');
+    // 배정 반영
+    const team = teams.find((x) => x.id === first.teamId);
+    team.members.push({ puuid: first.puuid, position: 'top' });
+    // 이제 top 1명 남음 → deadlock은 null, forced가 처리
+    expect(tournamentController.findDeadlockAssignment(t, teams)).toBeNull();
+    const forced = tournamentController.findForcedAssignment(t, teams);
+    expect(forced.position).toBe('top');
+    expect(forced.reason).toBe('last_candidate');
   });
 });
 
