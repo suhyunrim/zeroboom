@@ -135,7 +135,14 @@ const getTournamentRelation = async (groupId, puuidA, puuidB) => {
       .map((t) => {
         const acc = accByTournament.get(t.id);
         if (!acc || (acc.aWins === 0 && acc.bWins === 0)) return null;
-        return { tournamentId: t.id, name: t.name, aWins: acc.aWins, bWins: acc.bWins };
+        return {
+          tournamentId: t.id,
+          name: t.name,
+          aTeamName: teamOfA.get(t.id).name,
+          bTeamName: teamOfB.get(t.id).name,
+          aWins: acc.aWins,
+          bWins: acc.bWins,
+        };
       })
       .filter(Boolean);
   }

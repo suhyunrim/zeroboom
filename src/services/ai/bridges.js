@@ -396,7 +396,9 @@ function projectCompareReport(r) {
         matches: r.tournament.vs.matches,
         aWins: r.tournament.vs.aWins,
         bWins: r.tournament.vs.bWins,
-        byTournament: (r.tournament.vs.byTournament || []).map(({ name, aWins, bWins }) => ({ name, aWins, bWins })),
+        byTournament: (r.tournament.vs.byTournament || []).map(
+          ({ name, aTeamName, bTeamName, aWins, bWins }) => ({ name, aTeamName, bTeamName, aWins, bWins }),
+        ),
       },
     },
   };

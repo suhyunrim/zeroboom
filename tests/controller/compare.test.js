@@ -535,8 +535,8 @@ describe('tournament: 토너먼트 인연', () => {
       aWins: 2,
       bWins: 1,
       byTournament: [
-        { tournamentId: 3, name: '3회 대회', aWins: 0, bWins: 1 },
-        { tournamentId: 2, name: '2회 대회', aWins: 2, bWins: 0 },
+        { tournamentId: 3, name: '3회 대회', aTeamName: 'A2팀', bTeamName: 'B2팀', aWins: 0, bWins: 1 },
+        { tournamentId: 2, name: '2회 대회', aTeamName: 'A팀', bTeamName: 'B팀', aWins: 2, bWins: 0 },
       ],
     });
     // 대회별 합 == 전체 합산 (하위호환 값과 정확히 일치)

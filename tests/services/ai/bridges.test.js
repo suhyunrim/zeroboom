@@ -224,7 +224,12 @@ describe('projectCompareReport (compare_players 투영, 순수 코어)', () => {
     tournament: {
       togetherChampionships: [{ tournamentId: 1, name: '대회', teamName: '팀', heldAt: 'D4' }],
       sameTeam: [{ tournamentId: 1, name: '대회', teamName: '팀', heldAt: 'D4' }],
-      vs: { matches: 2, aWins: 1, bWins: 1, byTournament: [{ tournamentId: 2, name: '맞대결 대회', aWins: 1, bWins: 1 }] },
+      vs: {
+        matches: 2,
+        aWins: 1,
+        bWins: 1,
+        byTournament: [{ tournamentId: 2, name: '맞대결 대회', aTeamName: 'A의팀', bTeamName: 'B의팀', aWins: 1, bWins: 1 }],
+      },
     },
     ratingTrajectory: { a: [], b: [] },
     matches: { total: 17, items: [] },
@@ -255,7 +260,7 @@ describe('projectCompareReport (compare_players 투영, 순수 코어)', () => {
       matches: 2,
       aWins: 1,
       bWins: 1,
-      byTournament: [{ name: '맞대결 대회', aWins: 1, bWins: 1 }], // tournamentId 미노출
+      byTournament: [{ name: '맞대결 대회', aTeamName: 'A의팀', bTeamName: 'B의팀', aWins: 1, bWins: 1 }], // tournamentId 미노출
     });
     // 궤적/경기 목록은 토큰 절약을 위해 미포함
     expect(r.ratingTrajectory).toBeUndefined();
