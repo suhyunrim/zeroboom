@@ -1,4 +1,6 @@
-const { rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress } = require('../../../src/services/ai/bridges');
+const {
+  rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress, projectCompareReport,
+} = require('../../../src/services/ai/bridges');
 
 const P = (name, win, lose, rating = 500, firstMatchDate = null) => ({
   name, win, lose, rating, firstMatchDate, rankTier: null, mainPosition: null,
@@ -179,5 +181,103 @@ describe('computeAchievementProgress (순수 코어)', () => {
   test('closestLimit 으로 개수 제한', () => {
     const r = computeAchievementProgress(defs, new Set(), { GAMES: 0, STREAK: 0, FIRST: 0 }, statTypeOf, { closestLimit: 1 });
     expect(r.closest).toHaveLength(1);
+  });
+});
+
+describe('projectCompareReport (compare_players 투영, 순수 코어)', () => {
+  const compareResult = {
+    header: {
+      a: { puuid: 'PUUID-A', name: 'A유저', rating: 600, rankTier: 'GOLD I', mainPosition: 'MIDDLE', wins: 10, losses: 5, winRate: 67 },
+      b: { puuid: 'PUUID-B', name: 'B유저', rating: 900, rankTier: null, mainPosition: null, wins: 3, losses: 7, winRate: 30 },
+    },
+    headToHead: {
+      games: 12, aWins: 9, bWins: 3, aWinRate: 75, recentResults: ['A'],
+      currentStreak: { holder: 'B', count: 2 }, maxStreak: { a: 6, b: 2 },
+    },
+    together: { games: 5, wins: 4, losses: 1, winRate: 80, expectedWinRate: 55, synergyDelta: 25, positionCombos: [] },
+    ratingFlow: { takenByA: 40, takenByB: 16, net: 24, computedGames: 12, skippedGames: 0 },
+    timeline: {
+      firstVs: { gameId: 1, date: 'D1', winner: 'A', aRating: 500, bRating: 510 },
+      firstTogether: { gameId: 2, date: 'D2', won: true, aRating: 500, bRating: 510 },
+      lastMetAt: 'D3', vsGames: 12, togetherGames: 5, totalGames: 17, monthlyCounts: [],
+    },
+    laneMatchup: { games: 1, aWins: 1, bWins: 0, byPosition: [] },
+    relationTitles: [
+      { key: 'natural_enemy', label: '천적', holder: 'A' },
+      { key: 'love_hate', label: '애증의 관계' },
+    ],
+    mutualSynergy: {
+      minGames: 5,
+      minGamesA: 5,
+      minGamesB: 5,
+      goodWithBoth: [{
+        puuid: 'PUUID-C',
+        name: 'C유저',
+        withA: { games: 5, wins: 5, winRate: 100 },
+        withB: { games: 5, wins: 4, winRate: 80 },
+        avgWinRate: 90,
+      }],
+      badWithBoth: [],
+      goodForABadForB: [],
+      goodForBBadForA: [],
+    },
+    tournament: {
+      togetherChampionships: [{ tournamentId: 1, name: '대회', teamName: '팀', heldAt: 'D4' }],
+      sameTeam: [{ tournamentId: 1, name: '대회', teamName: '팀', heldAt: 'D4' }],
+      vs: {
+        matches: 2,
+        aWins: 1,
+        bWins: 1,
+        byTournament: [{ tournamentId: 2, name: '맞대결 대회', aTeamName: 'A의팀', bTeamName: 'B의팀', aWins: 1, bWins: 1 }],
+      },
+    },
+    ratingTrajectory: { a: [], b: [] },
+    matches: { total: 17, items: [] },
+  };
+
+  test('절대 레이팅은 티어로, puuid 미노출, holder는 이름으로 치환', () => {
+    const r = projectCompareReport(compareResult);
+    expect(r.a.ratingTier).toBe('PLATINUM IV'); // 600
+    expect(r.b.ratingTier).toBe('MASTER'); // 900
+    expect(r.a.rating).toBeUndefined(); // raw 미노출
+    expect(JSON.stringify(r)).not.toContain('PUUID'); // puuid 전면 제거
+    expect(r.headToHead.currentStreak).toEqual({ holderName: 'B유저', count: 2 });
+    expect(r.headToHead.maxStreak).toEqual({ a: 6, b: 2 });
+    expect(r.relationTitles).toEqual([
+      { label: '천적', holderName: 'A유저' },
+      { label: '애증의 관계' },
+    ]);
+    expect(r.timeline.firstVsWinnerName).toBe('A유저');
+    expect(r.pointsFlow).toEqual({ takenByA: 40, takenByB: 16, net: 24 });
+    expect(r.mutualSynergy.goodWithBoth[0]).toEqual({
+      name: 'C유저',
+      withA: { games: 5, wins: 5, winRate: 100 },
+      withB: { games: 5, wins: 4, winRate: 80 },
+      avgWinRate: 90,
+    });
+    expect(r.tournament.togetherChampionships).toEqual([{ name: '대회', teamName: '팀', heldAt: 'D4' }]);
+    expect(r.tournament.vs).toEqual({
+      matches: 2,
+      aWins: 1,
+      bWins: 1,
+      byTournament: [{ name: '맞대결 대회', aTeamName: 'A의팀', bTeamName: 'B의팀', aWins: 1, bWins: 1 }], // tournamentId 미노출
+    });
+    // 궤적/경기 목록은 토큰 절약을 위해 미포함
+    expect(r.ratingTrajectory).toBeUndefined();
+    expect(r.matches).toBeUndefined();
+  });
+
+  test('연승/첫만남/타이틀이 없어도 안전', () => {
+    const emptyish = {
+      ...compareResult,
+      headToHead: { ...compareResult.headToHead, currentStreak: { holder: null, count: 0 } },
+      timeline: { ...compareResult.timeline, firstVs: null, firstTogether: null },
+      relationTitles: [],
+    };
+    const r = projectCompareReport(emptyish);
+    expect(r.headToHead.currentStreak).toBeNull();
+    expect(r.timeline.firstVsDate).toBeNull();
+    expect(r.timeline.firstVsWinnerName).toBeNull();
+    expect(r.relationTitles).toEqual([]);
   });
 });

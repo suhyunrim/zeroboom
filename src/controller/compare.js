@@ -55,6 +55,101 @@ const toDailyRatingHistory = (history) => {
   return [...daily.entries()].map(([date, rating]) => ({ date, rating }));
 };
 
+// 토너먼트 인연: 같은 팀이었던 대회 / 함께 우승 / 서로 다른 팀으로 맞붙은 매치 전적
+const getTournamentRelation = async (groupId, puuidA, puuidB) => {
+  const relation = {
+    togetherChampionships: [],
+    sameTeam: [],
+    vs: { matches: 0, aWins: 0, bWins: 0, byTournament: [] },
+  };
+  const tournaments = await models.tournament.findAll({
+    where: { groupId },
+    attributes: ['id', 'name', 'status', 'championTeamId', 'heldAt'],
+    order: [['heldAt', 'DESC'], ['id', 'DESC']],
+    raw: true,
+  });
+  if (!tournaments.length) return relation;
+
+  const teams = await models.tournament_team.findAll({
+    where: { tournamentId: tournaments.map((t) => t.id) },
+    attributes: ['id', 'tournamentId', 'name', 'members'],
+    raw: true,
+  });
+  const parseMembers = (members) => {
+    if (Array.isArray(members)) return members;
+    try {
+      return JSON.parse(members) || [];
+    } catch (e) {
+      return [];
+    }
+  };
+  const teamOfA = new Map(); // tournamentId -> team row
+  const teamOfB = new Map();
+  for (const team of teams) {
+    const members = parseMembers(team.members);
+    if (members.some((member) => member && member.puuid === puuidA)) teamOfA.set(team.tournamentId, team);
+    if (members.some((member) => member && member.puuid === puuidB)) teamOfB.set(team.tournamentId, team);
+  }
+
+  const vsTournaments = []; // 서로 다른 팀으로 참가한 대회 (heldAt DESC 순서 유지)
+  for (const t of tournaments) {
+    const teamA = teamOfA.get(t.id);
+    const teamB = teamOfB.get(t.id);
+    if (!teamA || !teamB) continue;
+    if (teamA.id === teamB.id) {
+      const entry = { tournamentId: t.id, name: t.name, teamName: teamA.name, heldAt: t.heldAt };
+      relation.sameTeam.push(entry);
+      if (t.status === 'finished' && t.championTeamId === teamA.id) relation.togetherChampionships.push(entry);
+    } else {
+      vsTournaments.push(t);
+    }
+  }
+
+  if (vsTournaments.length) {
+    const matches = await models.tournament_match.findAll({
+      where: { tournamentId: vsTournaments.map((t) => t.id), winnerTeamId: { [Op.ne]: null } },
+      attributes: ['tournamentId', 'team1Id', 'team2Id', 'winnerTeamId'],
+      raw: true,
+    });
+    const accByTournament = new Map(); // tournamentId -> { aWins, bWins }
+    for (const match of matches) {
+      const aTeamId = teamOfA.get(match.tournamentId).id;
+      const bTeamId = teamOfB.get(match.tournamentId).id;
+      const isPair =
+        (match.team1Id === aTeamId && match.team2Id === bTeamId) ||
+        (match.team1Id === bTeamId && match.team2Id === aTeamId);
+      if (!isPair) continue;
+      relation.vs.matches++;
+      if (!accByTournament.has(match.tournamentId)) accByTournament.set(match.tournamentId, { aWins: 0, bWins: 0 });
+      const acc = accByTournament.get(match.tournamentId);
+      if (match.winnerTeamId === aTeamId) {
+        relation.vs.aWins++;
+        acc.aWins++;
+      } else if (match.winnerTeamId === bTeamId) {
+        relation.vs.bWins++;
+        acc.bWins++;
+      }
+    }
+    // 대회별 전적: 승패가 결정된 맞대결이 있는 대회만, 최신 대회(heldAt DESC) 순
+    relation.vs.byTournament = vsTournaments
+      .map((t) => {
+        const acc = accByTournament.get(t.id);
+        if (!acc || (acc.aWins === 0 && acc.bWins === 0)) return null;
+        return {
+          tournamentId: t.id,
+          name: t.name,
+          aTeamName: teamOfA.get(t.id).name,
+          bTeamName: teamOfB.get(t.id).name,
+          aWins: acc.aWins,
+          bWins: acc.bWins,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return relation;
+};
+
 /**
  * 두 유저 비교: 상대전적 / 같은팀 시너지 / 타임라인 / 점수 이동 / 둘 다와의 시너지 리스트
  * @param {number} groupId
@@ -101,6 +196,8 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
   const bRatingHistory = [];
   // 맞라인 전적: 둘 다 포지션이 있고 같은 포지션으로 맞팀인 경기
   const laneAcc = {}; // { POSITION: { games, aWins, bWins } }
+  // 같은 팀 포지션 조합: 둘 다 포지션이 있는 같은팀 경기 (A포지션|B포지션 기준)
+  const duoAcc = new Map(); // 'A포지션|B포지션' -> { games, wins }
 
   for (const match of matches) {
     const team1 = JSON.parse(match.team1);
@@ -154,6 +251,13 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
       if (aWon) together.wins++;
       if (!firstTogether) {
         firstTogether = { gameId, date: createdAt, won: aWon, aRating, bRating };
+      }
+      if (aPosition && bPosition) {
+        const comboKey = `${aPosition}|${bPosition}`;
+        if (!duoAcc.has(comboKey)) duoAcc.set(comboKey, { games: 0, wins: 0 });
+        const combo = duoAcc.get(comboKey);
+        combo.games++;
+        if (aWon) combo.wins++;
       }
     } else {
       vs.games++;
@@ -245,8 +349,24 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
     .filter((c) => c.withA.winRate <= 49 && c.withB.winRate <= 49)
     .sort((x, y) => x.avgWinRate - y.avgWinRate || y.totalGames - x.totalGames)
     .slice(0, MUTUAL_LIST_COUNT);
+  // 엇갈린 시너지: 한쪽에겐 승요, 다른 쪽에겐 패요인 유저. 승률 격차 큰 순
+  const goodForABadForB = mutualCandidates
+    .filter((c) => c.withA.winRate >= 51 && c.withB.winRate <= 49)
+    .sort((x, y) => y.withA.winRate - y.withB.winRate - (x.withA.winRate - x.withB.winRate) || y.totalGames - x.totalGames)
+    .slice(0, MUTUAL_LIST_COUNT);
+  const goodForBBadForA = mutualCandidates
+    .filter((c) => c.withB.winRate >= 51 && c.withA.winRate <= 49)
+    .sort((x, y) => y.withB.winRate - y.withA.winRate - (x.withB.winRate - x.withA.winRate) || y.totalGames - x.totalGames)
+    .slice(0, MUTUAL_LIST_COUNT);
 
-  const namePuuids = new Set([puuidA, puuidB, ...goodWithBoth.map((c) => c.puuid), ...badWithBoth.map((c) => c.puuid)]);
+  const namePuuids = new Set([
+    puuidA,
+    puuidB,
+    ...goodWithBoth.map((c) => c.puuid),
+    ...badWithBoth.map((c) => c.puuid),
+    ...goodForABadForB.map((c) => c.puuid),
+    ...goodForBBadForA.map((c) => c.puuid),
+  ]);
   const [summoners, externalRecords] = await Promise.all([
     models.summoner.findAll({
       where: { puuid: [...namePuuids] },
@@ -294,6 +414,21 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
     for (let i = vsResults.length - 1; i >= 0 && vsResults[i].aWon === lastWon; i--) {
       streakCount++;
     }
+  }
+
+  // 맞대결 역대 최다 연승 (각자 기준)
+  let maxStreakA = 0;
+  let maxStreakB = 0;
+  let streakRun = 0;
+  let streakRunWon = null;
+  for (const { aWon } of vsResults) {
+    if (aWon === streakRunWon) streakRun++;
+    else {
+      streakRunWon = aWon;
+      streakRun = 1;
+    }
+    if (aWon) maxStreakA = Math.max(maxStreakA, streakRun);
+    else maxStreakB = Math.max(maxStreakB, streakRun);
   }
 
   const togetherWinRate = together.games > 0 ? (together.wins / together.games) * 100 : null;
@@ -345,6 +480,23 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
     byPosition: laneByPosition,
   };
 
+  // 같은 팀 포지션 조합 (많이 선 조합 순)
+  const positionCombos = [...duoAcc.entries()]
+    .map(([comboKey, stat]) => {
+      const [aPos, bPos] = comboKey.split('|');
+      return {
+        aPosition: aPos,
+        bPosition: bPos,
+        games: stat.games,
+        wins: stat.wins,
+        winRate: Math.round((stat.wins / stat.games) * 100),
+      };
+    })
+    .sort((x, y) => y.games - x.games || y.winRate - x.winRate);
+
+  // 토너먼트 인연
+  const tournament = await getTournamentRelation(groupId, puuidA, puuidB);
+
   return {
     status: 200,
     result: {
@@ -356,6 +508,7 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
         aWinRate: aVsWinRate,
         recentResults: vsResults.slice(-RECENT_VS_COUNT).map((r) => (r.aWon ? 'A' : 'B')),
         currentStreak: { holder: streakHolder, count: streakCount },
+        maxStreak: { a: maxStreakA, b: maxStreakB },
       },
       together: {
         games: together.games,
@@ -364,6 +517,7 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
         winRate: togetherWinRateRounded,
         expectedWinRate: expectedWinRate !== null ? Math.round(expectedWinRate) : null,
         synergyDelta,
+        positionCombos,
       },
       ratingFlow: {
         takenByA: Math.round(takenByA),
@@ -387,9 +541,12 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
         minGamesB,
         goodWithBoth: goodWithBoth.map(toMutualItem),
         badWithBoth: badWithBoth.map(toMutualItem),
+        goodForABadForB: goodForABadForB.map(toMutualItem),
+        goodForBBadForA: goodForBBadForA.map(toMutualItem),
       },
       laneMatchup,
       relationTitles,
+      tournament,
       ratingTrajectory: {
         a: toDailyRatingHistory(aRatingHistory),
         b: toDailyRatingHistory(bRatingHistory),

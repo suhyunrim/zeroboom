@@ -11,6 +11,15 @@ const mockModels = {
   externalRecord: {
     findAll: jest.fn(),
   },
+  tournament: {
+    findAll: jest.fn(),
+  },
+  tournament_team: {
+    findAll: jest.fn(),
+  },
+  tournament_match: {
+    findAll: jest.fn(),
+  },
 };
 
 jest.mock('../../src/db/models', () => mockModels);
@@ -44,6 +53,9 @@ beforeEach(() => {
   nextGameId = 1;
   mockModels.summoner.findAll.mockResolvedValue([]);
   mockModels.externalRecord.findAll.mockResolvedValue([]);
+  mockModels.tournament.findAll.mockResolvedValue([]);
+  mockModels.tournament_team.findAll.mockResolvedValue([]);
+  mockModels.tournament_match.findAll.mockResolvedValue([]);
 });
 
 test('한 명이라도 그룹에 없으면 404', async () => {
@@ -71,8 +83,9 @@ describe('상대전적/시너지/타임라인/점수이동 집계', () => {
       m([p('PB'), p('PC')], [p('PA'), p('PD')], 1, '2025-01-02T00:00:00Z'),
       m([p('PA'), p('PD')], [p('PB'), p('PE')], 1, '2025-01-03T00:00:00Z'),
       m([pOld('PA'), pOld('PD')], [pOld('PB'), pOld('PE')], 2, '2025-01-03T12:00:00Z'),
-      m([p('PA'), p('PB')], [p('PC'), p('PD')], 1, '2025-01-04T00:00:00Z'),
-      m([p('PC'), p('PD')], [p('PA'), p('PB')], 1, '2025-01-05T00:00:00Z'),
+      // g5/g6은 A=JUNGLE, B=MIDDLE 같은팀 조합 2판(1승 1패)
+      m([p('PA', 500, 'JUNGLE'), p('PB', 500, 'MIDDLE')], [p('PC'), p('PD')], 1, '2025-01-04T00:00:00Z'),
+      m([p('PC'), p('PD')], [p('PA', 500, 'JUNGLE'), p('PB', 500, 'MIDDLE')], 1, '2025-01-05T00:00:00Z'),
       m([p('PA', 508), p('PC')], [p('PD'), p('PE')], 1, '2025-01-06T00:00:00Z'),
       m([p('PB'), p('PC')], [p('PD'), p('PE')], 1, '2025-01-07T00:00:00Z'),
     ];
@@ -98,6 +111,7 @@ describe('상대전적/시너지/타임라인/점수이동 집계', () => {
       aWinRate: 50,
       recentResults: ['A', 'B', 'A', 'B'],
       currentStreak: { holder: 'B', count: 1 },
+      maxStreak: { a: 1, b: 1 },
     });
   });
 
@@ -112,6 +126,7 @@ describe('상대전적/시너지/타임라인/점수이동 집계', () => {
       winRate: 50,
       expectedWinRate: 57,
       synergyDelta: -7,
+      positionCombos: [{ aPosition: 'JUNGLE', bPosition: 'MIDDLE', games: 2, wins: 1, winRate: 50 }],
     });
   });
 
@@ -262,6 +277,8 @@ describe('relationTitles: 관계 타이틀 부여', () => {
       { key: 'fantastic_duo', label: '환상의 듀오' },
       { key: 'love_hate', label: '애증의 관계' },
     ]);
+    // 역대 최다 연승: A 9연승(9연속 승) / B 3연승(마지막 3연속)
+    expect(result.headToHead.maxStreak).toEqual({ a: 9, b: 3 });
   });
 
   test('숙명의 라이벌(45~55%/20판+), 듀오 승률 미달이면 제외', async () => {
@@ -390,6 +407,19 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
       () => [p('PX'), p('PY')],
       2,
     );
+    // PH: A와 5판 5승, B와 5판 0승 → 엇갈린 시너지 (A에겐 승요, B에겐 패요)
+    repeat(
+      5,
+      () => [p('PA'), p('PH')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      5,
+      () => [p('PB'), p('PH')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
     // PA-PB 같은 팀 5판 5승 → 서로는 mutual 리스트에 나오지 않아야 함
     repeat(
       5,
@@ -407,11 +437,12 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
       { puuid: 'PB', name: 'BName' },
       { puuid: 'PC', name: 'CName' },
       { puuid: 'PD', name: 'DName' },
+      { puuid: 'PH', name: 'HName' },
     ]);
 
     const { result } = await compareController.compareUsers(1, 'PA', 'PB');
 
-    // A/B 전체 30·31판 → 5%는 2지만 하한 5로 클램프
+    // A/B 전체 35·36판 → 5%는 2지만 하한 5로 클램프
     expect(result.mutualSynergy.minGamesA).toBe(5);
     expect(result.mutualSynergy.minGamesB).toBe(5);
     expect(result.mutualSynergy.goodWithBoth).toEqual([
@@ -432,6 +463,17 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
         avgWinRate: 0,
       },
     ]);
+    // 엇갈린 시너지: PH는 A에겐 100%, B에겐 0%
+    expect(result.mutualSynergy.goodForABadForB).toEqual([
+      {
+        puuid: 'PH',
+        name: 'HName',
+        withA: { games: 5, wins: 5, winRate: 100 },
+        withB: { games: 5, wins: 0, winRate: 0 },
+        avgWinRate: 50,
+      },
+    ]);
+    expect(result.mutualSynergy.goodForBBadForA).toEqual([]);
 
     // 같은 팀 5판은 together에 집계
     expect(result.together.games).toBe(5);
@@ -445,6 +487,78 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
       computedGames: 0,
       skippedGames: 0,
     });
+  });
+});
+
+describe('tournament: 토너먼트 인연', () => {
+  test('같은 팀/함께 우승/맞대결 매치 집계', async () => {
+    mockModels.user.findAll
+      .mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)])
+      .mockResolvedValueOnce([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    // 실제 쿼리와 동일하게 heldAt DESC 순서로 반환된다고 가정
+    // t5: 맞대결 팀은 있으나 승자 확정 매치 없음 / t4: B만 참가 / t3: 진행중 맞대결 /
+    // t2: 서로 다른 팀(맞대결) / t1: 같은 팀으로 우승
+    mockModels.tournament.findAll.mockResolvedValue([
+      { id: 5, name: '5회 대회', status: 'in_progress', championTeamId: null, heldAt: new Date('2026-07-10') },
+      { id: 4, name: '4회 대회', status: 'finished', championTeamId: 41, heldAt: new Date('2026-07-05') },
+      { id: 3, name: '3회 대회', status: 'in_progress', championTeamId: null, heldAt: new Date('2026-07-01') },
+      { id: 2, name: '2회 대회', status: 'finished', championTeamId: 99, heldAt: new Date('2026-06-01') },
+      { id: 1, name: '1회 대회', status: 'finished', championTeamId: 11, heldAt: new Date('2026-05-01') },
+    ]);
+    mockModels.tournament_team.findAll.mockResolvedValue([
+      { id: 11, tournamentId: 1, name: '우승팀', members: [{ puuid: 'PA' }, { puuid: 'PB' }] },
+      { id: 21, tournamentId: 2, name: 'A팀', members: JSON.stringify([{ puuid: 'PA' }]) }, // 문자열 JSON도 파싱
+      { id: 22, tournamentId: 2, name: 'B팀', members: [{ puuid: 'PB' }] },
+      { id: 31, tournamentId: 3, name: 'A2팀', members: [{ puuid: 'PA' }] },
+      { id: 32, tournamentId: 3, name: 'B2팀', members: [{ puuid: 'PB' }] },
+      { id: 41, tournamentId: 4, name: 'B만', members: [{ puuid: 'PB' }] },
+      { id: 51, tournamentId: 5, name: 'A3팀', members: [{ puuid: 'PA' }] },
+      { id: 52, tournamentId: 5, name: 'B3팀', members: [{ puuid: 'PB' }] },
+    ]);
+    mockModels.tournament_match.findAll.mockResolvedValue([
+      { tournamentId: 2, team1Id: 21, team2Id: 22, winnerTeamId: 21 }, // A 승
+      { tournamentId: 2, team1Id: 22, team2Id: 21, winnerTeamId: 21 }, // 역순 배치, A 승
+      { tournamentId: 2, team1Id: 23, team2Id: 24, winnerTeamId: 23 }, // 다른 팀끼리 → 무시
+      { tournamentId: 3, team1Id: 31, team2Id: 32, winnerTeamId: 32 }, // B 승
+      // t5는 승자 확정 매치 없음(winnerTeamId != null 쿼리 필터로 애초에 안 옴) → byTournament 제외
+    ]);
+
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.tournament.sameTeam).toEqual([
+      { tournamentId: 1, name: '1회 대회', teamName: '우승팀', heldAt: new Date('2026-05-01') },
+    ]);
+    expect(result.tournament.togetherChampionships).toEqual(result.tournament.sameTeam);
+    // 대회별 전적: 최신 대회 순, 승패 확정 맞대결이 있는 대회만(t5 제외)
+    expect(result.tournament.vs).toEqual({
+      matches: 3,
+      aWins: 2,
+      bWins: 1,
+      byTournament: [
+        { tournamentId: 3, name: '3회 대회', aTeamName: 'A2팀', bTeamName: 'B2팀', aWins: 0, bWins: 1 },
+        { tournamentId: 2, name: '2회 대회', aTeamName: 'A팀', bTeamName: 'B팀', aWins: 2, bWins: 0 },
+      ],
+    });
+    // 대회별 합 == 전체 합산 (하위호환 값과 정확히 일치)
+    const sumA = result.tournament.vs.byTournament.reduce((s, t) => s + t.aWins, 0);
+    const sumB = result.tournament.vs.byTournament.reduce((s, t) => s + t.bWins, 0);
+    expect(sumA).toBe(result.tournament.vs.aWins);
+    expect(sumB).toBe(result.tournament.vs.bWins);
+  });
+
+  test('토너먼트가 없으면 빈 결과', async () => {
+    mockModels.user.findAll
+      .mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)])
+      .mockResolvedValueOnce([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.tournament).toEqual({
+      togetherChampionships: [],
+      sameTeam: [],
+      vs: { matches: 0, aWins: 0, bWins: 0, byTournament: [] },
+    });
+    expect(mockModels.tournament_team.findAll).not.toHaveBeenCalled();
   });
 });
 

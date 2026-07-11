@@ -64,15 +64,18 @@ module.exports = (app) => {
       }
 
       // history: 클라이언트가 보낸 이전 대화(멀티턴 컨텍스트). 에이전트가 정규화/상한 처리.
-      const { answer, toolCalls } = await agent.ask({ groupId, question, askerName, history: req.body.history });
+      const { answer, toolCalls, usage } = await agent.ask({ groupId, question, askerName, history: req.body.history });
 
-      // ★ 익명 Q&A 기록(답변 품질 검수용) — 작성자 식별자 없이 질문·답변·도구호출만 저장.
+      // ★ 익명 Q&A 기록(답변 품질 검수용) — 작성자 식별자 없이 질문·답변·도구호출·토큰 사용량만 저장.
       models.ai_chat_log.create({
         groupId,
         question,
         answer,
         model: config.ai.model,
         toolCalls, // name+input 전체(run_sql의 SQL 포함) — 답변 추적용
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+        thinkingTokens: usage?.thinkingTokens ?? null,
       }).catch((e) => logger.error(`[ai.chat_log] 기록 실패: ${e.message}`));
 
       // 감사 로그: "누가 AI를 썼는지"(책임추적)만 남기고 질문 내용은 제외 — 방명록 비밀글처럼 익명화.

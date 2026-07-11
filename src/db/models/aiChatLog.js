@@ -31,6 +31,19 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.JSON,
         allowNull: true,
       },
+      // 이 질문 하나(멀티라운드 tool-use 루프 전체)에서 실제 사용된 토큰 — 비용 추적용
+      inputTokens: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      outputTokens: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      thinkingTokens: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {},
   );

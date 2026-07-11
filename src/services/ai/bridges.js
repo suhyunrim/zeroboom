@@ -332,6 +332,98 @@ async function getPlayer(groupId, { name }) {
 }
 
 /**
+ * compare 결과 → LLM 안전 투영 (순수 함수).
+ * puuid 제외, 절대 레이팅은 티어로 변환, holder('A'|'B')는 실제 이름으로 치환,
+ * 궤적/경기목록은 토큰 절약을 위해 제외한다.
+ */
+function projectCompareReport(r) {
+  const nameOf = (holder) => (holder === 'A' ? r.header.a.name : holder === 'B' ? r.header.b.name : null);
+  const toHeader = (h) => ({
+    name: h.name,
+    ratingTier: formatTier(h.rating), // 내전 레이팅 → 티어 (raw 미노출)
+    rankTier: h.rankTier,
+    mainPosition: h.mainPosition,
+    win: h.wins,
+    lose: h.losses,
+    winRate: h.winRate,
+  });
+  const stripPuuid = ({ name, withA, withB, avgWinRate }) => ({ name, withA, withB, avgWinRate });
+
+  return {
+    a: toHeader(r.header.a),
+    b: toHeader(r.header.b),
+    headToHead: {
+      games: r.headToHead.games,
+      aWins: r.headToHead.aWins,
+      bWins: r.headToHead.bWins,
+      aWinRate: r.headToHead.aWinRate,
+      currentStreak: r.headToHead.currentStreak.holder
+        ? { holderName: nameOf(r.headToHead.currentStreak.holder), count: r.headToHead.currentStreak.count }
+        : null,
+      maxStreak: { a: r.headToHead.maxStreak.a, b: r.headToHead.maxStreak.b },
+    },
+    together: r.together,
+    pointsFlow: {
+      takenByA: r.ratingFlow.takenByA,
+      takenByB: r.ratingFlow.takenByB,
+      net: r.ratingFlow.net,
+    },
+    timeline: {
+      firstVsDate: r.timeline.firstVs ? r.timeline.firstVs.date : null,
+      firstVsWinnerName: r.timeline.firstVs ? nameOf(r.timeline.firstVs.winner) : null,
+      firstTogetherDate: r.timeline.firstTogether ? r.timeline.firstTogether.date : null,
+      firstTogetherWon: r.timeline.firstTogether ? r.timeline.firstTogether.won : null,
+      lastMetAt: r.timeline.lastMetAt,
+      vsGames: r.timeline.vsGames,
+      togetherGames: r.timeline.togetherGames,
+      totalGames: r.timeline.totalGames,
+    },
+    laneMatchup: r.laneMatchup,
+    relationTitles: r.relationTitles.map((t) => ({
+      label: t.label,
+      ...(t.holder ? { holderName: nameOf(t.holder) } : {}),
+    })),
+    mutualSynergy: {
+      goodWithBoth: r.mutualSynergy.goodWithBoth.map(stripPuuid),
+      badWithBoth: r.mutualSynergy.badWithBoth.map(stripPuuid),
+      goodForABadForB: r.mutualSynergy.goodForABadForB.map(stripPuuid),
+      goodForBBadForA: r.mutualSynergy.goodForBBadForA.map(stripPuuid),
+    },
+    tournament: {
+      togetherChampionships: r.tournament.togetherChampionships.map(({ name, teamName, heldAt }) => ({ name, teamName, heldAt })),
+      sameTeam: r.tournament.sameTeam.map(({ name, teamName, heldAt }) => ({ name, teamName, heldAt })),
+      vs: {
+        matches: r.tournament.vs.matches,
+        aWins: r.tournament.vs.aWins,
+        bWins: r.tournament.vs.bWins,
+        byTournament: (r.tournament.vs.byTournament || []).map(
+          ({ name, aTeamName, bTeamName, aWins, bWins }) => ({ name, aTeamName, bTeamName, aWins, bWins }),
+        ),
+      },
+    },
+  };
+}
+
+/**
+ * 두 플레이어 1:1 비교. 상대전적/같은팀 시너지/점수 이동/타임라인/토너먼트 인연 요약.
+ * "나랑 ㅇㅇ 상대전적 어때?", "ㅇㅇ랑 ㅇㅇ 누가 이겨?" 류에 사용.
+ */
+async function comparePlayers(groupId, { nameA, nameB }) {
+  if (!nameA || !nameB) return { error: 'nameA와 nameB가 필요합니다.' };
+  const [resolvedA, resolvedB] = await Promise.all([resolvePuuid(groupId, nameA), resolvePuuid(groupId, nameB)]);
+  if (!resolvedA) return { error: `'${nameA}' 을(를) 이 그룹에서 찾지 못했습니다.` };
+  if (!resolvedB) return { error: `'${nameB}' 을(를) 이 그룹에서 찾지 못했습니다.` };
+  if (resolvedA.puuid === resolvedB.puuid) return { error: '같은 플레이어입니다. 서로 다른 두 명을 지정해주세요.' };
+
+  const compareController = require('../../controller/compare');
+  const cmp = await compareController.compareUsers(groupId, resolvedA.puuid, resolvedB.puuid);
+  if (cmp.status !== 200) {
+    return { error: typeof cmp.result === 'string' ? cmp.result : '비교 정보를 불러오지 못했습니다.' };
+  }
+  return projectCompareReport(cmp.result);
+}
+
+/**
  * 업적 진행도/다음 목표. "업적 더 따려면?" 류에 사용.
  */
 async function getAchievementProgress(groupId, { name }) {
@@ -366,6 +458,7 @@ module.exports = {
   rankVeterans,
   tallyRecentWins,
   computeAchievementProgress,
+  projectCompareReport,
   METRICS,
   // 브릿지
   queryPlayers,
@@ -373,6 +466,7 @@ module.exports = {
   queryRecentWins,
   getPlayer,
   getAchievementProgress,
+  comparePlayers,
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)
   _internal: { fetchActivePlayers, resolvePuuid },
 };
