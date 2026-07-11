@@ -332,6 +332,27 @@ module.exports = (app) => {
     }
   });
 
+  /**
+   * GET /api/user/compare/matches?groupId=&puuidA=&puuidB=&page=&size=
+   * 두 유저가 얽힌 경기 히스토리 페이징 + 양 팀 전체 로스터 (검증은 컨트롤러에서 수행)
+   */
+  route.get('/compare/matches', async (req, res) => {
+    const { groupId, puuidA, puuidB, page, size } = req.query;
+    try {
+      const matches = await compareController.getEntangledMatches(
+        Number(groupId),
+        puuidA,
+        puuidB,
+        Number(page),
+        Number(size),
+      );
+      return res.status(matches.status).json({ result: matches.result });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
   route.get('/getInfo', optionalAuth, async (req, res) => {
     const { groupId, puuid: queryPuuid } = req.query;
     try {

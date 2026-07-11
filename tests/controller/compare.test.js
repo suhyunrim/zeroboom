@@ -411,7 +411,9 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
 
     const { result } = await compareController.compareUsers(1, 'PA', 'PB');
 
-    expect(result.mutualSynergy.minGames).toBe(compareController.MIN_GAMES_FOR_MUTUAL);
+    // A/B 전체 30·31판 → 5%는 2지만 하한 5로 클램프
+    expect(result.mutualSynergy.minGamesA).toBe(5);
+    expect(result.mutualSynergy.minGamesB).toBe(5);
     expect(result.mutualSynergy.goodWithBoth).toEqual([
       {
         puuid: 'PC',
@@ -443,5 +445,103 @@ describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
       computedGames: 0,
       skippedGames: 0,
     });
+  });
+});
+
+describe('mutualMinGames: 동적 하한 = max(5, min(12, round(전체판수*5%)))', () => {
+  test('소표본은 하한 5, 고표본은 상한 12로 클램프', () => {
+    expect(compareController.mutualMinGames(0)).toBe(5);
+    expect(compareController.mutualMinGames(40)).toBe(5); // round(2)=2 → 5
+    expect(compareController.mutualMinGames(100)).toBe(5); // round(5)=5
+    expect(compareController.mutualMinGames(160)).toBe(8); // round(8)=8
+    expect(compareController.mutualMinGames(300)).toBe(12); // round(15)=15 → 12
+  });
+});
+
+describe('getEntangledMatches: 얽힌 경기 페이징 + 양 팀 전체 로스터', () => {
+  // g1 vs: [PA,PC] vs [PB,PD] 1팀 승 / g2 A만 참여(제외) / g3 같은팀 [PA,PB] 2팀 승(패배) / g4 옛 포맷 vs 2팀 승
+  const fixtures = () => [
+    m([p('PA'), p('PC', 480, 'TOP')], [p('PB'), p('PD')], 1, '2025-01-01T00:00:00Z'),
+    m([p('PA'), p('PC')], [p('PD'), p('PE')], 1, '2025-01-02T00:00:00Z'),
+    m([p('PA'), p('PB')], [p('PC'), p('PD')], 2, '2025-01-03T00:00:00Z'),
+    m([pOld('PA'), pOld('PD')], [pOld('PB'), pOld('PE')], 2, '2025-01-04T00:00:00Z'),
+  ];
+  const setupUsers = () => {
+    mockModels.user.findAll.mockResolvedValue([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)]);
+    mockModels.match.findAll.mockResolvedValue(fixtures());
+  };
+
+  test('얽힌 경기만 최신순으로, 로스터·승패 플래그·이름 폴백', async () => {
+    setupUsers();
+    mockModels.summoner.findAll.mockResolvedValue([{ puuid: 'PA', name: 'CurrentA' }]);
+
+    const { status, result } = await compareController.getEntangledMatches(1, 'PA', 'PB');
+    expect(status).toBe(200);
+    expect(result.total).toBe(3);
+    expect(result.page).toBe(0);
+    expect(result.size).toBe(20);
+    expect(result.items.map((i) => i.gameId)).toEqual([4, 3, 1]);
+
+    // g3: 같은팀 패배 → aWon/bWon 모두 false, 2팀이 won
+    const g3 = result.items[1];
+    expect(g3).toMatchObject({ sameTeam: true, winTeam: 2, aWon: false, bWon: false });
+    expect(g3.teams[0]).toMatchObject({ teamNo: 1, won: false });
+    expect(g3.teams[1]).toMatchObject({ teamNo: 2, won: true });
+    // 현재 summoner 이름 우선, 없으면 스냅샷 name 폴백 + isA/isB 플래그
+    expect(g3.teams[0].players[0]).toEqual({
+      puuid: 'PA',
+      name: 'CurrentA',
+      position: null,
+      rating: 500,
+      isA: true,
+      isB: false,
+    });
+    expect(g3.teams[0].players[1]).toMatchObject({ puuid: 'PB', name: 'n-PB', isA: false, isB: true });
+
+    // g4(옛 포맷): rating/position null
+    const g4 = result.items[0];
+    expect(g4).toMatchObject({ sameTeam: false, winTeam: 2, aWon: false, bWon: true });
+    expect(g4.teams[0].players[1]).toEqual({
+      puuid: 'PD',
+      name: 'n-PD',
+      position: null,
+      rating: null,
+      isA: false,
+      isB: false,
+    });
+
+    // g1: 포지션 스냅샷 있는 플레이어는 그대로
+    const g1 = result.items[2];
+    expect(g1.teams[0].players[1]).toMatchObject({ puuid: 'PC', position: 'TOP', rating: 480 });
+  });
+
+  test('page/size 슬라이스와 클램프, NaN이면 기본값', async () => {
+    setupUsers();
+
+    const page1 = await compareController.getEntangledMatches(1, 'PA', 'PB', 1, 2);
+    expect(page1.result).toMatchObject({ total: 3, page: 1, size: 2 });
+    expect(page1.result.items.map((i) => i.gameId)).toEqual([1]);
+
+    const clamped = await compareController.getEntangledMatches(1, 'PA', 'PB', -5, 999);
+    expect(clamped.result).toMatchObject({ page: 0, size: 50 });
+    expect(clamped.result.items).toHaveLength(3);
+
+    const defaulted = await compareController.getEntangledMatches(1, 'PA', 'PB', NaN, NaN);
+    expect(defaulted.result).toMatchObject({ page: 0, size: 20 });
+  });
+
+  test('400: 파라미터 누락 또는 동일 puuid (DB 호출 전 차단)', async () => {
+    const missing = await compareController.getEntangledMatches(NaN, 'PA', 'PB');
+    expect(missing.status).toBe(400);
+    const same = await compareController.getEntangledMatches(1, 'PA', 'PA');
+    expect(same.status).toBe(400);
+    expect(mockModels.user.findAll).not.toHaveBeenCalled();
+  });
+
+  test('404: 한 명이라도 그룹에 없음', async () => {
+    mockModels.user.findAll.mockResolvedValue([userRow('PA', 0, 0, 500, 0)]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    const r = await compareController.getEntangledMatches(1, 'PA', 'PB');
+    expect(r.status).toBe(404);
   });
 });

@@ -5,12 +5,19 @@ const models = require('../db/models');
 // applyMatchResult와 동일한 K-factor — 재계산한 delta가 실제 적용값과 일치해야 함
 const ratingCalculator = new Elo(16);
 
-// 둘 다와의 시너지 리스트 자격: A/B 각각과 같은 팀으로 최소 이 판수 이상
-const MIN_GAMES_FOR_MUTUAL = 5;
+// 둘 다와의 시너지 리스트 자격 하한: user.js best/worst와 동일한 동적 기준.
+// max(하한 5, min(상한 12, 해당 유저 전체 판수의 5%)) — 소표본 플루크 방지(floor) + 고인물도 리스트가 비지 않게(cap).
+const MUTUAL_MIN_GAMES_FLOOR = 5;
+const MUTUAL_MIN_GAMES_CAP = 12;
+const MUTUAL_GAMES_RATIO = 0.05;
+const mutualMinGames = (totalGames) =>
+  Math.max(MUTUAL_MIN_GAMES_FLOOR, Math.min(MUTUAL_MIN_GAMES_CAP, Math.round(totalGames * MUTUAL_GAMES_RATIO)));
 const MUTUAL_LIST_COUNT = 3;
 const MATCH_LIST_COUNT = 20;
 const RECENT_VS_COUNT = 10;
 const RATING_TRAJECTORY_MATCH_COUNT = 100;
+const ENTANGLED_PAGE_SIZE_DEFAULT = 20;
+const ENTANGLED_PAGE_SIZE_MAX = 50;
 
 // 내전 포지션 키 (유저 상세와 동일, Riot 표준)
 const POSITION_KEYS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
@@ -208,12 +215,16 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
   });
   const excluded = new Set(excludedUsers.map((u) => u.puuid));
 
+  // A/B 각각의 전체 판수 기준 동적 하한 (해당 유저 전체 판수의 5%, 5~12판)
+  const minGamesA = mutualMinGames(overall.a.games);
+  const minGamesB = mutualMinGames(overall.b.games);
+
   const mutualCandidates = [];
   for (const [puuid, withA] of Object.entries(teammatesOfA)) {
     if (puuid === puuidB || excluded.has(puuid)) continue;
     const withB = teammatesOfB[puuid];
     if (!withB) continue;
-    if (withA.games < MIN_GAMES_FOR_MUTUAL || withB.games < MIN_GAMES_FOR_MUTUAL) continue;
+    if (withA.games < minGamesA || withB.games < minGamesB) continue;
     const winRateA = (withA.wins / withA.games) * 100;
     const winRateB = (withB.wins / withB.games) * 100;
     mutualCandidates.push({
@@ -371,7 +382,9 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
         monthlyCounts: [...monthly.entries()].map(([month, games]) => ({ month, games })),
       },
       mutualSynergy: {
-        minGames: MIN_GAMES_FOR_MUTUAL,
+        minGames: Math.max(minGamesA, minGamesB), // 구버전 프론트 호환(대표값)
+        minGamesA,
+        minGamesB,
         goodWithBoth: goodWithBoth.map(toMutualItem),
         badWithBoth: badWithBoth.map(toMutualItem),
       },
@@ -389,4 +402,93 @@ module.exports.compareUsers = async (groupId, puuidA, puuidB) => {
   };
 };
 
-module.exports.MIN_GAMES_FOR_MUTUAL = MIN_GAMES_FOR_MUTUAL;
+/**
+ * 두 유저가 얽힌 경기 히스토리 페이징 + 양 팀 전체 로스터
+ * @param {number} groupId
+ * @param {string} puuidA
+ * @param {string} puuidB
+ * @param {number} [page] - 0-based 페이지 (기본 0)
+ * @param {number} [size] - 페이지 크기 (기본 20, 최대 50)
+ * @returns {Promise<{status: number, result: Object|string}>}
+ */
+module.exports.getEntangledMatches = async (groupId, puuidA, puuidB, page, size) => {
+  if (!groupId || !puuidA || !puuidB) {
+    return { status: 400, result: 'groupId, puuidA, puuidB가 필요합니다.' };
+  }
+  if (puuidA === puuidB) {
+    return { status: 400, result: '서로 다른 두 유저를 선택해주세요.' };
+  }
+  const pageNum = Number.isFinite(page) ? Math.max(0, Math.floor(page)) : 0;
+  const sizeNum = Number.isFinite(size)
+    ? Math.min(ENTANGLED_PAGE_SIZE_MAX, Math.max(1, Math.floor(size)))
+    : ENTANGLED_PAGE_SIZE_DEFAULT;
+
+  const [users, matches] = await Promise.all([
+    models.user.findAll({ where: { groupId, puuid: [puuidA, puuidB] }, raw: true }),
+    models.match.findAll({
+      where: { groupId, winTeam: { [Op.ne]: null } },
+      order: [['createdAt', 'ASC']],
+      raw: true,
+    }),
+  ]);
+  if (!users.find((u) => u.puuid === puuidA) || !users.find((u) => u.puuid === puuidB)) {
+    return { status: 404, result: '두 유저 모두 그룹에 등록되어 있어야 합니다.' };
+  }
+
+  // team1/team2가 JSON 문자열이라 DB에서 필터 불가 → 전체 로드 후 파싱·필터 (compareUsers와 동일 비용)
+  const entangled = [];
+  for (const match of matches) {
+    const team1 = JSON.parse(match.team1);
+    const team2 = JSON.parse(match.team2);
+    const findSide = (puuid) => (team1.some((p) => p[0] === puuid) ? 1 : team2.some((p) => p[0] === puuid) ? 2 : null);
+    const aTeam = findSide(puuidA);
+    const bTeam = findSide(puuidB);
+    if (!aTeam || !bTeam) continue;
+    entangled.push({ match, team1, team2, aTeam, bTeam });
+  }
+  entangled.reverse(); // 최신순
+
+  const total = entangled.length;
+  const pageItems = entangled.slice(pageNum * sizeNum, pageNum * sizeNum + sizeNum);
+
+  // 스냅샷 name([1])은 과거 값일 수 있어 현재 summoner 이름 우선 — 페이지에 등장하는 puuid만 배치 조회
+  const pagePuuids = new Set();
+  for (const { team1, team2 } of pageItems) {
+    for (const [puuid] of [...team1, ...team2]) pagePuuids.add(puuid);
+  }
+  const summoners = pagePuuids.size
+    ? await models.summoner.findAll({
+        where: { puuid: [...pagePuuids] },
+        attributes: ['puuid', 'name'],
+        raw: true,
+      })
+    : [];
+  const nameMap = {};
+  for (const s of summoners) nameMap[s.puuid] = s.name;
+
+  const toPlayer = (player) => ({
+    puuid: player[0],
+    name: nameMap[player[0]] || player[1] || 'Unknown',
+    position: VALID_POSITIONS.has(player[3]) ? player[3] : null,
+    rating: typeof player[2] === 'number' ? player[2] : null,
+    isA: player[0] === puuidA,
+    isB: player[0] === puuidB,
+  });
+
+  const items = pageItems.map(({ match, team1, team2, aTeam, bTeam }) => ({
+    gameId: match.gameId,
+    date: match.createdAt,
+    sameTeam: aTeam === bTeam,
+    winTeam: match.winTeam,
+    aWon: match.winTeam === aTeam,
+    bWon: match.winTeam === bTeam,
+    teams: [
+      { teamNo: 1, won: match.winTeam === 1, players: team1.map(toPlayer) },
+      { teamNo: 2, won: match.winTeam === 2, players: team2.map(toPlayer) },
+    ],
+  }));
+
+  return { status: 200, result: { total, page: pageNum, size: sizeNum, items } };
+};
+
+module.exports.mutualMinGames = mutualMinGames;
