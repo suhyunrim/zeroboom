@@ -100,6 +100,25 @@ const TOOLS = [
       required: ['name'],
     },
   },
+  {
+    name: 'compare_players',
+    description:
+      '두 플레이어의 1:1 비교 리포트를 반환한다. 상대전적(맞대결 승패/승률, 현재·역대 연승), '
+      + '같은팀 시너지(승률, 개인 통산 대비 synergyDelta, 포지션 조합), 맞대결로 오간 점수(pointsFlow), '
+      + '첫 맞대결/첫 같은팀/마지막 만남 날짜, 맞라인 전적, 관계 타이틀(천적/라이벌/듀오/애증), '
+      + '둘 다와 궁합 좋은/나쁜/엇갈린 제3의 유저, 토너먼트 인연(함께 우승/같은팀/맞대결)을 준다. '
+      + '"나랑 ㅇㅇ 상대전적", "ㅇㅇ랑 ㅇㅇ 붙으면 누가 이겨?", "우리 듀오 궁합 어때?" 류 질문에 쓴다. '
+      + '응답의 a/b와 aWins/takenByA 등은 nameA/nameB 순서 기준이다. '
+      + 'pointsFlow의 점수는 절대 레이팅이 아니라 맞대결로 오간 이동량이라 숫자 그대로 말해도 된다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nameA: { type: 'string', description: '첫 번째 플레이어 이름(부분 일치 가능)' },
+        nameB: { type: 'string', description: '두 번째 플레이어 이름(부분 일치 가능)' },
+      },
+      required: ['nameA', 'nameB'],
+    },
+  },
 ];
 
 // run_sql: 읽기 전용 SQL 탈출구. 전용 도구(query_*, get_*)로 답 못 하는 드문/복합 질문용.
@@ -108,7 +127,8 @@ const RUN_SQL_TOOL = {
   name: 'run_sql',
   description:
     '이 그룹 데이터를 읽기 전용 SQL(SELECT)로 직접 조회한다. 다른 전용 도구로 답할 수 없는 '
-    + '드물거나 복합적인 통계 질문에만 쓴다(예: 티어 분포, 특정 포지션 승률, 요일별 판수, 둘이 같은 팀일 때 승률 등). '
+    + '드물거나 복합적인 통계 질문에만 쓴다(예: 티어 분포, 특정 포지션 승률, 요일별 판수 등). '
+    + '두 사람의 맞대결/같은팀 승률은 compare_players 전용 도구가 있으니 그쪽을 먼저 쓴다. '
     + '규칙: SELECT 또는 WITH 로 시작하는 한 문장만. 쓰기/DDL/세미콜론 다중문/주석/사용자변수(@)는 금지. '
     + '그룹 필터는 서버가 자동 적용하니 groupId 조건을 직접 넣지 말 것. 결과는 최대 100행. '
     + '내전 레이팅(rating)은 raw 점수이니 답변엔 티어로 환산해 말한다. '
@@ -135,6 +155,7 @@ const DISPATCH = {
   query_recent_wins: (groupId, input) => bridges.queryRecentWins(groupId, input),
   get_player: (groupId, input) => bridges.getPlayer(groupId, input),
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
+  compare_players: (groupId, input) => bridges.comparePlayers(groupId, input),
   run_sql: (groupId, input) => readonlySql.runReadonlyQuery(groupId, input),
 };
 
@@ -150,8 +171,9 @@ function buildSystem(askerName, schemaDoc = '') {
     askerName ? `- 질문자는 "${askerName}" 이다. "나/내/제"는 이 사람을 가리킨다.` : '- 질문자가 "나/내"라고 하면 누구인지 이름을 물어본다.',
     '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
     '- "최근 N판/요즘/최근에" 처럼 최근성(기간)을 묻는 승리·승률 질문은 query_recent_wins를 쓴다. query_players의 승수는 전체 누적이므로 최근 N판엔 쓰지 말 것. 최근성 질문에 "전체 누적만 가능하다"고 답하지 말 것. 단 실제 집계된 매치 수(matchesConsidered)가 요청보다 적으면 그 수를 솔직히 밝힌다(예: "최근 80판 기준").',
+    '- 두 사람의 상대전적/맞대결/듀오 궁합/천적 관계 질문은 compare_players 한 번으로 답한다. run_sql로 직접 집계하지 말 것.',
     schemaDoc
-      ? '- 위 전용 도구들로 답할 수 없는 드문/복합 통계 질문(티어 분포, 특정 포지션 승률, 요일별 판수, 맞대결, 대회 트로피 등)은 run_sql로 직접 SELECT해서 시도한다. "그건 못 한다"고 먼저 포기하지 말 것. run_sql 결과로도 답할 수 없을 때만 솔직히 모른다고 한다. SQL 오류가 나면 메시지를 보고 한 번 더 고쳐 시도한다.'
+      ? '- 위 전용 도구들로 답할 수 없는 드문/복합 통계 질문(티어 분포, 특정 포지션 승률, 요일별 판수, 대회 트로피 등)은 run_sql로 직접 SELECT해서 시도한다. "그건 못 한다"고 먼저 포기하지 말 것. run_sql 결과로도 답할 수 없을 때만 솔직히 모른다고 한다. SQL 오류가 나면 메시지를 보고 한 번 더 고쳐 시도한다.'
       : null,
     schemaDoc
       ? `- run_sql로 조회 가능한 뷰(이미 이 그룹으로 자동 필터됨, 컬럼명으로 의미 추론):\n${schemaDoc}`
@@ -197,13 +219,14 @@ function client() {
  * 질문에 답한다.
  * @param {{ groupId:number, question:string, askerName?:string, history?:Array }} params
  *   history: 이전 대화 [{ role:'user'|'assistant'|'ai', content:string }, ...] (멀티턴 컨텍스트)
- * @returns {Promise<{ answer:string, toolCalls:Array<{name:string,input:object}> }>}
+ * @returns {Promise<{ answer:string, toolCalls:Array<{name:string,input:object}>, usage:{inputTokens:number,outputTokens:number,thinkingTokens:number} }>}
  */
 async function ask({ groupId, question, askerName = null, history = [] }) {
   if (!groupId) throw new Error('groupId가 필요합니다.');
   if (!question || !question.trim()) throw new Error('question이 필요합니다.');
+  const emptyUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
   if (!isConfigured()) {
-    return { answer: 'AI 채팅 기능이 아직 설정되지 않았어요. (서버에 ANTHROPIC_API_KEY 설정 필요)', toolCalls: [] };
+    return { answer: 'AI 채팅 기능이 아직 설정되지 않았어요. (서버에 ANTHROPIC_API_KEY 설정 필요)', toolCalls: [], usage: emptyUsage };
   }
 
   // run_sql 사용 가능 시, 현재 DB의 ai_* 뷰 스키마를 동적으로 읽어 프롬프트에 주입(자동 발견).
@@ -211,6 +234,8 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
   const system = buildSystem(askerName, schemaDoc);
   const messages = [...sanitizeHistory(history), { role: 'user', content: question.trim() }];
   const toolCalls = [];
+  // ★ 비용 추적용. 한 질문이 여러 라운드(tool-use 루프) API 호출을 거칠 수 있어 라운드별로 합산한다.
+  const usage = { ...emptyUsage };
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     let resp;
@@ -229,9 +254,15 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
       // ★ 크레딧 소진은 유저에게 명시적으로 안내(일반 "오류 발생"으로 묻히지 않게). 그 외 에러는 라우트가 처리.
       if (isCreditError(e)) {
         logger.error(`[ai.agent] Anthropic 크레딧 소진: ${e.message}`);
-        return { answer: '⚠️ 지금 AI 크레딧이 다 떨어져서 답변을 드릴 수 없어요. 관리자가 크레딧을 충전하면 다시 이용할 수 있어요 🙏', toolCalls };
+        return { answer: '⚠️ 지금 AI 크레딧이 다 떨어져서 답변을 드릴 수 없어요. 관리자가 크레딧을 충전하면 다시 이용할 수 있어요 🙏', toolCalls, usage };
       }
       throw e;
+    }
+
+    if (resp.usage) {
+      usage.inputTokens += resp.usage.input_tokens || 0;
+      usage.outputTokens += resp.usage.output_tokens || 0;
+      usage.thinkingTokens += resp.usage.output_tokens_details?.thinking_tokens || 0;
     }
 
     if (resp.stop_reason !== 'tool_use') {
@@ -243,7 +274,7 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
           + `blocks=${JSON.stringify(resp.content.map((b) => b.type))}, round=${round}`,
         );
       }
-      return { answer: answer || '음… 답을 만들지 못했어요. 다시 물어봐 주세요.', toolCalls };
+      return { answer: answer || '음… 답을 만들지 못했어요. 다시 물어봐 주세요.', toolCalls, usage };
     }
 
     messages.push({ role: 'assistant', content: resp.content });
@@ -274,7 +305,7 @@ async function ask({ groupId, question, askerName = null, history = [] }) {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { answer: '질문이 복잡해서 정리하지 못했어요. 조금 더 구체적으로 물어봐 주세요.', toolCalls };
+  return { answer: '질문이 복잡해서 정리하지 못했어요. 조금 더 구체적으로 물어봐 주세요.', toolCalls, usage };
 }
 
 module.exports = { ask, isConfigured, isCreditError, TOOLS, sanitizeHistory };
