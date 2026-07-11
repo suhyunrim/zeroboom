@@ -6,6 +6,7 @@ const { getGuildIconUrl } = require('../../utils/discordUtils');
 const route = Router();
 const userController = require('../../controller/user');
 const summonerController = require('../../controller/summoner');
+const compareController = require('../../controller/compare');
 const auditLog = require('../../controller/audit-log');
 
 const STATUS_MESSAGE_MAX_LENGTH = 50;
@@ -303,6 +304,28 @@ module.exports = (app) => {
       });
 
       return res.status(200).json({ result: '한마디가 삭제되었습니다.' });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  /**
+   * GET /api/user/compare?groupId=&puuidA=&puuidB=
+   * 두 유저 비교: 상대전적 / 같은팀 시너지 / 타임라인 / 점수 이동 / 둘 다와의 시너지 리스트
+   */
+  route.get('/compare', async (req, res) => {
+    const { groupId: rawGroupId, puuidA, puuidB } = req.query;
+    const groupId = Number(rawGroupId);
+    if (!groupId || !puuidA || !puuidB) {
+      return res.status(400).json({ result: 'groupId, puuidA, puuidB가 필요합니다.' });
+    }
+    if (puuidA === puuidB) {
+      return res.status(400).json({ result: '서로 다른 두 유저를 선택해주세요.' });
+    }
+    try {
+      const compare = await compareController.compareUsers(groupId, puuidA, puuidB);
+      return res.status(compare.status).json({ result: compare.result });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });

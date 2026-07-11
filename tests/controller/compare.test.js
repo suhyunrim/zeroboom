@@ -1,0 +1,447 @@
+const mockModels = {
+  user: {
+    findAll: jest.fn(),
+  },
+  match: {
+    findAll: jest.fn(),
+  },
+  summoner: {
+    findAll: jest.fn(),
+  },
+  externalRecord: {
+    findAll: jest.fn(),
+  },
+};
+
+jest.mock('../../src/db/models', () => mockModels);
+
+const compareController = require('../../src/controller/compare');
+
+// [puuid, name, rating, position] 스냅샷 플레이어
+const p = (puuid, rating = 500, position = null) => [puuid, `n-${puuid}`, rating, position];
+// 스냅샷 없는 옛 포맷 [puuid, name]
+const pOld = (puuid) => [puuid, `n-${puuid}`];
+
+let nextGameId = 1;
+const m = (team1, team2, winTeam, dateStr = '2025-02-01T00:00:00Z') => ({
+  gameId: nextGameId++,
+  team1: JSON.stringify(team1),
+  team2: JSON.stringify(team2),
+  winTeam,
+  createdAt: new Date(dateStr),
+});
+
+const userRow = (puuid, win, lose, defaultRating, additionalRating) => ({
+  puuid,
+  win,
+  lose,
+  defaultRating,
+  additionalRating,
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  nextGameId = 1;
+  mockModels.summoner.findAll.mockResolvedValue([]);
+  mockModels.externalRecord.findAll.mockResolvedValue([]);
+});
+
+test('한 명이라도 그룹에 없으면 404', async () => {
+  mockModels.user.findAll.mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0)]);
+  mockModels.match.findAll.mockResolvedValue([]);
+
+  const r = await compareController.compareUsers(1, 'PA', 'PB');
+  expect(r.status).toBe(404);
+});
+
+describe('상대전적/시너지/타임라인/점수이동 집계', () => {
+  const setup = () => {
+    // 시간순:
+    // g1 vs: [PA,PC] vs [PB,PD] 1팀 승 → A 승 (전원 500 → delta 8)
+    // g2 vs: [PB,PC] vs [PA,PD] 1팀 승 → B 승
+    // g3 vs: [PA,PD] vs [PB,PE] 1팀 승 → A 승
+    // g4 vs(옛 포맷, 스냅샷 없음): [PA,PD] vs [PB,PE] 2팀 승 → B 승, 점수 계산 스킵
+    // g5 같은팀: [PA,PB] vs [PC,PD] 1팀 승 → 승
+    // g6 같은팀: [PC,PD] vs [PA,PB] 1팀 승 → 패
+    // g7 A만 참여: [PA,PC] vs [PD,PE] 1팀 승
+    // g8 B만 참여: [PB,PC] vs [PD,PE] 1팀 승
+    const matches = [
+      // g1은 A/B 둘 다 MIDDLE로 맞팀 → 맞라인 전적 1판
+      m([p('PA', 500, 'MIDDLE'), p('PC')], [p('PB', 500, 'MIDDLE'), p('PD')], 1, '2025-01-01T00:00:00Z'),
+      m([p('PB'), p('PC')], [p('PA'), p('PD')], 1, '2025-01-02T00:00:00Z'),
+      m([p('PA'), p('PD')], [p('PB'), p('PE')], 1, '2025-01-03T00:00:00Z'),
+      m([pOld('PA'), pOld('PD')], [pOld('PB'), pOld('PE')], 2, '2025-01-03T12:00:00Z'),
+      m([p('PA'), p('PB')], [p('PC'), p('PD')], 1, '2025-01-04T00:00:00Z'),
+      m([p('PC'), p('PD')], [p('PA'), p('PB')], 1, '2025-01-05T00:00:00Z'),
+      m([p('PA', 508), p('PC')], [p('PD'), p('PE')], 1, '2025-01-06T00:00:00Z'),
+      m([p('PB'), p('PC')], [p('PD'), p('PE')], 1, '2025-01-07T00:00:00Z'),
+    ];
+    mockModels.user.findAll
+      .mockResolvedValueOnce([userRow('PA', 10, 5, 500, 30), userRow('PB', 4, 6, 500, -20)])
+      .mockResolvedValueOnce([]); // 제외 대상 없음
+    mockModels.match.findAll.mockResolvedValue(matches);
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'PA', name: 'AName', rankTier: 'GOLD II', mainPosition: 'MID' },
+      { puuid: 'PB', name: 'BName', rankTier: 'SILVER I', mainPosition: 'JUNGLE' },
+    ]);
+    mockModels.externalRecord.findAll.mockResolvedValue([{ puuid: 'PA', win: 2, lose: 1 }]);
+  };
+
+  test('headToHead: 승패, 최근 흐름, 현재 연승', async () => {
+    setup();
+    const { status, result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(status).toBe(200);
+    expect(result.headToHead).toEqual({
+      games: 4,
+      aWins: 2,
+      bWins: 2,
+      aWinRate: 50,
+      recentResults: ['A', 'B', 'A', 'B'],
+      currentStreak: { holder: 'B', count: 1 },
+    });
+  });
+
+  test('together: 같은팀 승률과 개인 통산 대비 시너지', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    // A 통산 7판 4승(57%), B 통산 7판 4승(57%) → 기대 57, 같은팀 50% → delta -7
+    expect(result.together).toEqual({
+      games: 2,
+      wins: 1,
+      losses: 1,
+      winRate: 50,
+      expectedWinRate: 57,
+      synergyDelta: -7,
+    });
+  });
+
+  test('ratingFlow: 스냅샷으로 재계산한 delta 합, 스냅샷 없는 매치는 스킵', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    // 전원 500 → 승팀 delta = round(500 + 16*0.5) - 500 = 8
+    expect(result.ratingFlow).toEqual({
+      takenByA: 16,
+      takenByB: 8,
+      net: 8,
+      computedGames: 3,
+      skippedGames: 1,
+    });
+  });
+
+  test('timeline: 첫 맞대결/첫 같은팀/마지막 만남/월별 카운트', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.timeline.firstVs).toMatchObject({
+      gameId: 1,
+      winner: 'A',
+      aRating: 500,
+      bRating: 500,
+    });
+    expect(result.timeline.firstTogether).toMatchObject({ gameId: 5, won: true });
+    expect(result.timeline.lastMetAt).toEqual(new Date('2025-01-05T00:00:00Z'));
+    expect(result.timeline.vsGames).toBe(4);
+    expect(result.timeline.togetherGames).toBe(2);
+    expect(result.timeline.totalGames).toBe(6);
+    expect(result.timeline.monthlyCounts).toEqual([{ month: '2025-01', games: 6 }]);
+  });
+
+  test('matches: 최신순 리스트, 옛 포맷은 레이팅 null', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.matches.total).toBe(6);
+    expect(result.matches.items.map((i) => i.gameId)).toEqual([6, 5, 4, 3, 2, 1]);
+    const g4 = result.matches.items.find((i) => i.gameId === 4);
+    expect(g4).toMatchObject({ sameTeam: false, aWon: false, bWon: true, aRating: null, bRating: null });
+    const g5 = result.matches.items.find((i) => i.gameId === 5);
+    expect(g5).toMatchObject({ sameTeam: true, aWon: true, bWon: true });
+  });
+
+  test('header: 레이팅 합산, 외부 기록 승패 합산, 소환사 정보', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.header.a).toEqual({
+      puuid: 'PA',
+      name: 'AName',
+      rating: 530,
+      rankTier: 'GOLD II',
+      mainPosition: 'MID',
+      wins: 12, // 10 + 외부 2
+      losses: 6, // 5 + 외부 1
+      winRate: 67,
+    });
+    expect(result.header.b).toMatchObject({ name: 'BName', rating: 480, wins: 4, losses: 6, winRate: 40 });
+  });
+
+  test('판수 부족하면 mutualSynergy 리스트는 비어 있음', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.mutualSynergy.goodWithBoth).toEqual([]);
+    expect(result.mutualSynergy.badWithBoth).toEqual([]);
+  });
+
+  test('laneMatchup: 같은 포지션 맞팀 경기만 집계', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.laneMatchup).toEqual({
+      games: 1,
+      aWins: 1,
+      bWins: 0,
+      byPosition: [{ position: 'MIDDLE', games: 1, aWins: 1, bWins: 0 }],
+    });
+  });
+
+  test('relationTitles: 판수 기준 미달이면 빈 배열', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.relationTitles).toEqual([]);
+  });
+
+  test('ratingTrajectory: 스냅샷 있는 매치만 KST 일 단위로 수집', async () => {
+    setup();
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    // A: g1~g3(500), g4는 스냅샷 없어 제외, g5·g6(500), g7(508) → 6일
+    expect(result.ratingTrajectory.a).toHaveLength(6);
+    expect(result.ratingTrajectory.a[result.ratingTrajectory.a.length - 1]).toEqual({
+      date: '2025-01-06',
+      rating: 508,
+    });
+    // B: g1~g3, g5, g6, g8 → 6일
+    expect(result.ratingTrajectory.b).toHaveLength(6);
+    expect(result.ratingTrajectory.b[0]).toEqual({ date: '2025-01-01', rating: 500 });
+  });
+});
+
+describe('relationTitles: 관계 타이틀 부여', () => {
+  const setupWith = (matches) => {
+    mockModels.user.findAll
+      .mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)])
+      .mockResolvedValueOnce([]);
+    mockModels.match.findAll.mockResolvedValue(matches);
+  };
+  const repeat = (matches, count, team1, team2, winTeam) => {
+    for (let i = 0; i < count; i++) matches.push(m(team1(), team2(), winTeam));
+  };
+
+  test('천적(65%+/10판+) + 환상의 듀오(60%+/10판+) + 애증(둘 다 10판+)', async () => {
+    const matches = [];
+    // 맞대결 12판 중 A 9승 (75%)
+    repeat(
+      matches,
+      9,
+      () => [p('PA'), p('PX')],
+      () => [p('PB'), p('PY')],
+      1,
+    );
+    repeat(
+      matches,
+      3,
+      () => [p('PA'), p('PX')],
+      () => [p('PB'), p('PY')],
+      2,
+    );
+    // 같은팀 10판 중 7승 (70%)
+    repeat(
+      matches,
+      7,
+      () => [p('PA'), p('PB')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      matches,
+      3,
+      () => [p('PA'), p('PB')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    setupWith(matches);
+
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.relationTitles).toEqual([
+      { key: 'natural_enemy', label: '천적', holder: 'A' },
+      { key: 'fantastic_duo', label: '환상의 듀오' },
+      { key: 'love_hate', label: '애증의 관계' },
+    ]);
+  });
+
+  test('숙명의 라이벌(45~55%/20판+), 듀오 승률 미달이면 제외', async () => {
+    const matches = [];
+    // 맞대결 20판 10:10 (50%)
+    repeat(
+      matches,
+      10,
+      () => [p('PA'), p('PX')],
+      () => [p('PB'), p('PY')],
+      1,
+    );
+    repeat(
+      matches,
+      10,
+      () => [p('PA'), p('PX')],
+      () => [p('PB'), p('PY')],
+      2,
+    );
+    // 같은팀 10판 5승 (50% → 듀오 미달, 애증은 충족)
+    repeat(
+      matches,
+      5,
+      () => [p('PA'), p('PB')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      matches,
+      5,
+      () => [p('PA'), p('PB')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    setupWith(matches);
+
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+    expect(result.relationTitles).toEqual([
+      { key: 'fated_rivals', label: '숙명의 라이벌' },
+      { key: 'love_hate', label: '애증의 관계' },
+    ]);
+  });
+});
+
+describe('mutualSynergy: 둘 다와의 시너지 좋은/나쁜 유저', () => {
+  test('최소 판수·경계 필터·제외 대상·상대방 본인 제외', async () => {
+    const matches = [];
+    const repeat = (count, team1, team2, winTeam) => {
+      for (let i = 0; i < count; i++) matches.push(m(team1(), team2(), winTeam));
+    };
+
+    // PC: A와 5판 5승, B와 5판 5승 → good
+    repeat(
+      5,
+      () => [p('PA'), p('PC')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      5,
+      () => [p('PB'), p('PC')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    // PD: A와 5판 0승, B와 5판 0승 → bad
+    repeat(
+      5,
+      () => [p('PA'), p('PD')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    repeat(
+      5,
+      () => [p('PB'), p('PD')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    // PE: A와 4판(최소 판수 미달), B와 5판 → 제외
+    repeat(
+      4,
+      () => [p('PA'), p('PE')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      5,
+      () => [p('PB'), p('PE')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    // PF: 둘 다와 5판 5승이지만 outsider/탈퇴 → 제외
+    repeat(
+      5,
+      () => [p('PA'), p('PF')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      5,
+      () => [p('PB'), p('PF')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    // PG: 둘 다와 6판 3승(50%) → 경계 필터로 어느 리스트에도 없음
+    repeat(
+      3,
+      () => [p('PA'), p('PG')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      3,
+      () => [p('PA'), p('PG')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    repeat(
+      3,
+      () => [p('PB'), p('PG')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+    repeat(
+      3,
+      () => [p('PB'), p('PG')],
+      () => [p('PX'), p('PY')],
+      2,
+    );
+    // PA-PB 같은 팀 5판 5승 → 서로는 mutual 리스트에 나오지 않아야 함
+    repeat(
+      5,
+      () => [p('PA'), p('PB')],
+      () => [p('PX'), p('PY')],
+      1,
+    );
+
+    mockModels.user.findAll
+      .mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)])
+      .mockResolvedValueOnce([{ puuid: 'PF' }]);
+    mockModels.match.findAll.mockResolvedValue(matches);
+    mockModels.summoner.findAll.mockResolvedValue([
+      { puuid: 'PA', name: 'AName' },
+      { puuid: 'PB', name: 'BName' },
+      { puuid: 'PC', name: 'CName' },
+      { puuid: 'PD', name: 'DName' },
+    ]);
+
+    const { result } = await compareController.compareUsers(1, 'PA', 'PB');
+
+    expect(result.mutualSynergy.minGames).toBe(compareController.MIN_GAMES_FOR_MUTUAL);
+    expect(result.mutualSynergy.goodWithBoth).toEqual([
+      {
+        puuid: 'PC',
+        name: 'CName',
+        withA: { games: 5, wins: 5, winRate: 100 },
+        withB: { games: 5, wins: 5, winRate: 100 },
+        avgWinRate: 100,
+      },
+    ]);
+    expect(result.mutualSynergy.badWithBoth).toEqual([
+      {
+        puuid: 'PD',
+        name: 'DName',
+        withA: { games: 5, wins: 0, winRate: 0 },
+        withB: { games: 5, wins: 0, winRate: 0 },
+        avgWinRate: 0,
+      },
+    ]);
+
+    // 같은 팀 5판은 together에 집계
+    expect(result.together.games).toBe(5);
+    expect(result.together.wins).toBe(5);
+    // A-B가 서로 맞선 경기는 없음
+    expect(result.headToHead.games).toBe(0);
+    expect(result.ratingFlow).toEqual({
+      takenByA: 0,
+      takenByB: 0,
+      net: 0,
+      computedGames: 0,
+      skippedGames: 0,
+    });
+  });
+});
