@@ -57,7 +57,11 @@ const toDailyRatingHistory = (history) => {
 
 // 토너먼트 인연: 같은 팀이었던 대회 / 함께 우승 / 서로 다른 팀으로 맞붙은 매치 전적
 const getTournamentRelation = async (groupId, puuidA, puuidB) => {
-  const relation = { togetherChampionships: [], sameTeam: [], vs: { matches: 0, aWins: 0, bWins: 0 } };
+  const relation = {
+    togetherChampionships: [],
+    sameTeam: [],
+    vs: { matches: 0, aWins: 0, bWins: 0, byTournament: [] },
+  };
   const tournaments = await models.tournament.findAll({
     where: { groupId },
     attributes: ['id', 'name', 'status', 'championTeamId', 'heldAt'],
@@ -87,7 +91,7 @@ const getTournamentRelation = async (groupId, puuidA, puuidB) => {
     if (members.some((member) => member && member.puuid === puuidB)) teamOfB.set(team.tournamentId, team);
   }
 
-  const vsTournamentIds = [];
+  const vsTournaments = []; // 서로 다른 팀으로 참가한 대회 (heldAt DESC 순서 유지)
   for (const t of tournaments) {
     const teamA = teamOfA.get(t.id);
     const teamB = teamOfB.get(t.id);
@@ -97,16 +101,17 @@ const getTournamentRelation = async (groupId, puuidA, puuidB) => {
       relation.sameTeam.push(entry);
       if (t.status === 'finished' && t.championTeamId === teamA.id) relation.togetherChampionships.push(entry);
     } else {
-      vsTournamentIds.push(t.id);
+      vsTournaments.push(t);
     }
   }
 
-  if (vsTournamentIds.length) {
+  if (vsTournaments.length) {
     const matches = await models.tournament_match.findAll({
-      where: { tournamentId: vsTournamentIds, winnerTeamId: { [Op.ne]: null } },
+      where: { tournamentId: vsTournaments.map((t) => t.id), winnerTeamId: { [Op.ne]: null } },
       attributes: ['tournamentId', 'team1Id', 'team2Id', 'winnerTeamId'],
       raw: true,
     });
+    const accByTournament = new Map(); // tournamentId -> { aWins, bWins }
     for (const match of matches) {
       const aTeamId = teamOfA.get(match.tournamentId).id;
       const bTeamId = teamOfB.get(match.tournamentId).id;
@@ -115,9 +120,24 @@ const getTournamentRelation = async (groupId, puuidA, puuidB) => {
         (match.team1Id === bTeamId && match.team2Id === aTeamId);
       if (!isPair) continue;
       relation.vs.matches++;
-      if (match.winnerTeamId === aTeamId) relation.vs.aWins++;
-      else if (match.winnerTeamId === bTeamId) relation.vs.bWins++;
+      if (!accByTournament.has(match.tournamentId)) accByTournament.set(match.tournamentId, { aWins: 0, bWins: 0 });
+      const acc = accByTournament.get(match.tournamentId);
+      if (match.winnerTeamId === aTeamId) {
+        relation.vs.aWins++;
+        acc.aWins++;
+      } else if (match.winnerTeamId === bTeamId) {
+        relation.vs.bWins++;
+        acc.bWins++;
+      }
     }
+    // 대회별 전적: 승패가 결정된 맞대결이 있는 대회만, 최신 대회(heldAt DESC) 순
+    relation.vs.byTournament = vsTournaments
+      .map((t) => {
+        const acc = accByTournament.get(t.id);
+        if (!acc || (acc.aWins === 0 && acc.bWins === 0)) return null;
+        return { tournamentId: t.id, name: t.name, aWins: acc.aWins, bWins: acc.bWins };
+      })
+      .filter(Boolean);
   }
 
   return relation;

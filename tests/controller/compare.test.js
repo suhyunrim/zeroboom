@@ -496,12 +496,15 @@ describe('tournament: 토너먼트 인연', () => {
       .mockResolvedValueOnce([userRow('PA', 0, 0, 500, 0), userRow('PB', 0, 0, 500, 0)])
       .mockResolvedValueOnce([]);
     mockModels.match.findAll.mockResolvedValue([]);
+    // 실제 쿼리와 동일하게 heldAt DESC 순서로 반환된다고 가정
+    // t5: 맞대결 팀은 있으나 승자 확정 매치 없음 / t4: B만 참가 / t3: 진행중 맞대결 /
+    // t2: 서로 다른 팀(맞대결) / t1: 같은 팀으로 우승
     mockModels.tournament.findAll.mockResolvedValue([
-      // t1: 같은 팀으로 우승 / t2: 서로 다른 팀(맞대결) / t3: 진행중 맞대결 / t4: B만 참가
-      { id: 1, name: '1회 대회', status: 'finished', championTeamId: 11, heldAt: new Date('2026-05-01') },
-      { id: 2, name: '2회 대회', status: 'finished', championTeamId: 99, heldAt: new Date('2026-06-01') },
-      { id: 3, name: '3회 대회', status: 'in_progress', championTeamId: null, heldAt: new Date('2026-07-01') },
+      { id: 5, name: '5회 대회', status: 'in_progress', championTeamId: null, heldAt: new Date('2026-07-10') },
       { id: 4, name: '4회 대회', status: 'finished', championTeamId: 41, heldAt: new Date('2026-07-05') },
+      { id: 3, name: '3회 대회', status: 'in_progress', championTeamId: null, heldAt: new Date('2026-07-01') },
+      { id: 2, name: '2회 대회', status: 'finished', championTeamId: 99, heldAt: new Date('2026-06-01') },
+      { id: 1, name: '1회 대회', status: 'finished', championTeamId: 11, heldAt: new Date('2026-05-01') },
     ]);
     mockModels.tournament_team.findAll.mockResolvedValue([
       { id: 11, tournamentId: 1, name: '우승팀', members: [{ puuid: 'PA' }, { puuid: 'PB' }] },
@@ -510,12 +513,15 @@ describe('tournament: 토너먼트 인연', () => {
       { id: 31, tournamentId: 3, name: 'A2팀', members: [{ puuid: 'PA' }] },
       { id: 32, tournamentId: 3, name: 'B2팀', members: [{ puuid: 'PB' }] },
       { id: 41, tournamentId: 4, name: 'B만', members: [{ puuid: 'PB' }] },
+      { id: 51, tournamentId: 5, name: 'A3팀', members: [{ puuid: 'PA' }] },
+      { id: 52, tournamentId: 5, name: 'B3팀', members: [{ puuid: 'PB' }] },
     ]);
     mockModels.tournament_match.findAll.mockResolvedValue([
       { tournamentId: 2, team1Id: 21, team2Id: 22, winnerTeamId: 21 }, // A 승
       { tournamentId: 2, team1Id: 22, team2Id: 21, winnerTeamId: 21 }, // 역순 배치, A 승
       { tournamentId: 2, team1Id: 23, team2Id: 24, winnerTeamId: 23 }, // 다른 팀끼리 → 무시
       { tournamentId: 3, team1Id: 31, team2Id: 32, winnerTeamId: 32 }, // B 승
+      // t5는 승자 확정 매치 없음(winnerTeamId != null 쿼리 필터로 애초에 안 옴) → byTournament 제외
     ]);
 
     const { result } = await compareController.compareUsers(1, 'PA', 'PB');
@@ -523,8 +529,21 @@ describe('tournament: 토너먼트 인연', () => {
       { tournamentId: 1, name: '1회 대회', teamName: '우승팀', heldAt: new Date('2026-05-01') },
     ]);
     expect(result.tournament.togetherChampionships).toEqual(result.tournament.sameTeam);
-    expect(result.tournament.vs).toEqual({ matches: 3, aWins: 2, bWins: 1 });
-    // 승자 미확정 매치만 있으면 조회 자체가 winnerTeamId != null 필터라 집계 제외 (mock 상 생략)
+    // 대회별 전적: 최신 대회 순, 승패 확정 맞대결이 있는 대회만(t5 제외)
+    expect(result.tournament.vs).toEqual({
+      matches: 3,
+      aWins: 2,
+      bWins: 1,
+      byTournament: [
+        { tournamentId: 3, name: '3회 대회', aWins: 0, bWins: 1 },
+        { tournamentId: 2, name: '2회 대회', aWins: 2, bWins: 0 },
+      ],
+    });
+    // 대회별 합 == 전체 합산 (하위호환 값과 정확히 일치)
+    const sumA = result.tournament.vs.byTournament.reduce((s, t) => s + t.aWins, 0);
+    const sumB = result.tournament.vs.byTournament.reduce((s, t) => s + t.bWins, 0);
+    expect(sumA).toBe(result.tournament.vs.aWins);
+    expect(sumB).toBe(result.tournament.vs.bWins);
   });
 
   test('토너먼트가 없으면 빈 결과', async () => {
@@ -537,7 +556,7 @@ describe('tournament: 토너먼트 인연', () => {
     expect(result.tournament).toEqual({
       togetherChampionships: [],
       sameTeam: [],
-      vs: { matches: 0, aWins: 0, bWins: 0 },
+      vs: { matches: 0, aWins: 0, bWins: 0, byTournament: [] },
     });
     expect(mockModels.tournament_team.findAll).not.toHaveBeenCalled();
   });
