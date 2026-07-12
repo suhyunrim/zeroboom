@@ -615,10 +615,25 @@ module.exports = (app) => {
         return res.status(403).json({ result: '관리자 또는 팀장만 수정할 수 있습니다.' });
       }
 
-      // 경매 토너먼트는 경매 단계에서 멤버가 입찰로 결정되므로 일반 팀 PATCH 경로로
-      // 멤버를 통째로 갈아끼우지 못하게 막는다. (팀명/팀장 변경 등은 경매 전용 API로 별도 처리)
+      // 경매 토너먼트는 멤버가 입찰로 결정되므로 멤버/팀장 교체는 막고, 팀명만 갱신을 허용한다.
       if (tournament.type === tournamentController.TYPES.AUCTION) {
-        return res.status(409).json({ result: '경매 토너먼트의 팀은 경매 API로만 수정할 수 있습니다.' });
+        if (!name || !name.trim()) {
+          return res.status(400).json({ result: '팀명이 필요합니다.' });
+        }
+        team.name = name.trim();
+        await team.save();
+
+        const { discordId, actorName } = auditUser(req);
+        auditLog.log({
+          groupId: tournament.groupId,
+          actorDiscordId: discordId,
+          actorName,
+          action: 'tournament.team_update',
+          details: { tournamentId: tournament.id, teamId, name: team.name, auctionNameOnly: true },
+          source: 'web',
+        });
+
+        return res.status(200).json({ result: 'ok', team });
       }
 
       const validationError = tournamentController.validateTeamInput({ name, captainPuuid, members });
