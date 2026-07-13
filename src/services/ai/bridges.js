@@ -213,19 +213,51 @@ const SYN_MIN_GAMES = 5;
 // 스크림 맞대결 블렌드의 사전분포 가상판수(관측이 이만큼 쌓여야 Elo와 반반).
 const SCRIM_PRIOR = 4;
 
+// 대회 팀 members의 포지션 표기(top/jungle/mid/adc/support)를 소환사 mainPosition의
+// Riot 표기(TOP/JUNGLE/MIDDLE/BOTTOM/SUPPORT)로 변환. 표기가 다르면 comfortAt 비교가
+// 전부 불일치해 전원 오프포지션으로 계산되므로 반드시 같은 공간으로 맞춘다.
+const TOURNAMENT_POS_TO_RIOT = {
+  top: 'TOP',
+  jungle: 'JUNGLE',
+  jgl: 'JUNGLE',
+  mid: 'MIDDLE',
+  middle: 'MIDDLE',
+  adc: 'BOTTOM',
+  bot: 'BOTTOM',
+  bottom: 'BOTTOM',
+  support: 'SUPPORT',
+  sup: 'SUPPORT',
+  utility: 'SUPPORT',
+};
+function toRiotPosition(pos) {
+  if (!pos) return null;
+  return TOURNAMENT_POS_TO_RIOT[String(pos).toLowerCase()] || normalizePosition(String(pos).toUpperCase()) || null;
+}
+
+// 내전 포지션 이력 블렌드의 사전분포 가상판수(내전 판수가 이만큼 쌓이면 솔랭 기준과 반반).
+const INTERNAL_POS_PRIOR = 10;
+
 /**
  * 한 팀(5명)의 "배정된 포지션" 적합도 점수 0~100 (순수). 5명이 아니거나 배정 포지션이 없으면 null.
  * 플랜용 computeTeamPositionScore(최선 배정 탐색)와 달리, 대회 팀은 포지션이 이미 정해져 있어
- * 실제 배정 포지션에서의 편안도를 그대로 쓴다.
- * @param {Array} players - [{ assigned, mainPos, subPos, mainPositionRate, subPositionRate }] (정규화 완료)
+ * 실제 배정 포지션에서의 편안도를 쓴다.
+ * 편안도 = 솔랭 기준(메인/서브 포지션 비율, comfortAt)에 내전에서 실제 소화한 포지션 비율
+ * (internalRate)을 내전 판수만큼 표본가중(w=n/(n+PRIOR))으로 혼합. 내전 이력 없으면 솔랭만.
+ * @param {Array} players - [{ assigned, mainPos, subPos, mainPositionRate, subPositionRate,
+ *                             internalRate?:number|null, internalGames?:number }] (정규화 완료)
  */
 function assignedPositionFit(players) {
   if (!players || players.length !== 5) return null;
   if (players.some((p) => !p.assigned)) return null;
-  const sum = players.reduce(
-    (acc, p) => acc + Math.min(1, comfortAt(p, p.assigned) / FIT_CEILING),
-    0,
-  );
+  const sum = players.reduce((acc, p) => {
+    const solo = comfortAt(p, p.assigned);
+    let comfort = solo;
+    if (p.internalRate != null && p.internalGames > 0) {
+      const w = p.internalGames / (p.internalGames + INTERNAL_POS_PRIOR);
+      comfort = (w * p.internalRate) + ((1 - w) * solo);
+    }
+    return acc + Math.min(1, comfort / FIT_CEILING);
+  }, 0);
   return Math.round((sum / 5) * 100);
 }
 
@@ -410,11 +442,12 @@ async function resolvePuuid(groupId, name) {
   return { puuid: matched.puuid, name: matched.name };
 }
 
-// 그룹의 완료 매치를 1회 스캔해, 타깃 puuid들의 개인 통산과 팀 내 페어 동반 통산을 집계(시너지용).
-// { indiv: {puuid:{games,wins}}, pairStats: {"a|b":{games,wins}} }
+// 그룹의 완료 매치를 1회 스캔해, 타깃 puuid들의 개인 통산·팀 내 페어 동반 통산(시너지용)과
+// 내전에서 실제 소화한 포지션 이력(포지션 적합도의 내전 기준)을 집계.
+// { indiv: {puuid:{games,wins}}, pairStats: {"a|b":{games,wins}}, posCounts: {puuid:{RIOT포지션:판수}} }
 async function fetchSynergyStats(groupId, targetPuuids) {
   const set = new Set(targetPuuids);
-  if (!set.size) return { indiv: {}, pairStats: {} };
+  if (!set.size) return { indiv: {}, pairStats: {}, posCounts: {} };
   const rows = await models.match.findAll({
     where: { groupId, winTeam: { [Op.ne]: null } },
     attributes: ['team1', 'team2', 'winTeam'],
@@ -424,15 +457,24 @@ async function fetchSynergyStats(groupId, targetPuuids) {
   const puuidOf = (p) => (Array.isArray(p) ? p[0] : p);
   const indiv = {};
   const pairStats = {};
+  const posCounts = {};
   for (const m of rows) {
     if (m.winTeam !== 1 && m.winTeam !== 2) continue;
     for (const teamNo of [1, 2]) {
-      const arr = (teamNo === 1 ? parse(m.team1) : parse(m.team2)).map(puuidOf).filter((p) => set.has(p));
+      const entries = (teamNo === 1 ? parse(m.team1) : parse(m.team2)).filter((p) => set.has(puuidOf(p)));
+      const arr = entries.map(puuidOf);
       const won = m.winTeam === teamNo;
-      arr.forEach((p) => {
-        const s = indiv[p] || (indiv[p] = { games: 0, wins: 0 });
+      entries.forEach((p) => {
+        const puuid = puuidOf(p);
+        const s = indiv[puuid] || (indiv[puuid] = { games: 0, wins: 0 });
         s.games += 1;
         if (won) s.wins += 1;
+        // 스냅샷 [puuid, name, rating, position]의 포지션(구포맷엔 없음 → 스킵)
+        const pos = Array.isArray(p) ? toRiotPosition(p[3]) : null;
+        if (pos) {
+          const pcs = posCounts[puuid] || (posCounts[puuid] = {});
+          pcs[pos] = (pcs[pos] || 0) + 1;
+        }
       });
       for (let x = 0; x < arr.length; x += 1) {
         for (let y = x + 1; y < arr.length; y += 1) {
@@ -444,7 +486,7 @@ async function fetchSynergyStats(groupId, targetPuuids) {
       }
     }
   }
-  return { indiv, pairStats };
+  return { indiv, pairStats, posCounts };
 }
 
 // ───────────────────────── 브릿지 (AI가 호출) ─────────────────────────
@@ -802,12 +844,19 @@ async function predictTournament(groupId, { name } = {}) {
     // 포지션 적합도(실제 배정 포지션 기준)
     const fitPlayers = rawMembers.map((m) => {
       const s = summonerByPuuid[m.puuid] || {};
+      const assigned = toRiotPosition(m.position); // 대회 표기(adc 등) → Riot 표기(BOTTOM 등)
+      // 내전에서 실제 소화한 포지션 비율(포지션 스냅샷 있는 완료 매치 기준)
+      const pc = synergy.posCounts[m.puuid];
+      const internalGames = pc ? Object.values(pc).reduce((a, b) => a + b, 0) : 0;
+      const internalRate = assigned && internalGames > 0 ? ((pc[assigned] || 0) / internalGames) * 100 : null;
       return {
-        assigned: normalizePosition(m.position) || null,
+        assigned,
         mainPos: normalizePosition(s.mainPosition) || null,
         subPos: normalizePosition(s.subPosition) || null,
         mainPositionRate: s.mainPositionRate || 0,
         subPositionRate: s.subPositionRate || 0,
+        internalRate,
+        internalGames,
       };
     });
     return {
@@ -844,7 +893,7 @@ async function predictTournament(groupId, { name } = {}) {
     standings,
     scrimCount: scrims.length,
     note: '예상 순위는 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 이 대회 팀끼리의 스크림 맞대결이 있으면 그 결과를 표본 크기만큼 가중해 합산한 종합 추정치예요(실제 결과와 다를 수 있어요). '
-      + 'expectedWinRate=다른 팀 전체 상대 평균 승리 확률(%), positionFitScore=배정 포지션 적합도(0~100, 높을수록 제 포지션), '
+      + 'expectedWinRate=다른 팀 전체 상대 평균 승리 확률(%), positionFitScore=배정 포지션 적합도(0~100, 높을수록 제 포지션 — 솔랭 포지션 비율과 내전에서 실제 소화한 포지션 이력을 내전 판수만큼 가중해 혼합), '
       + 'synergyPct=팀 내 같은팀 시너지(개인 기대치 대비 %p, +면 손발이 잘 맞음, null이면 표본 부족), scrimRecord=대회 내 스크림 세트 전적. '
       + '레이팅 없는 신규 멤버는 팀 평균에서 제외돼요.',
   };
@@ -860,6 +909,7 @@ module.exports = {
   computeCompositeStandings,
   assignedPositionFit,
   teamSynergyPct,
+  toRiotPosition,
   projectBracketMatches,
   METRICS,
   // 브릿지
