@@ -1,6 +1,10 @@
 const {
   rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress, projectCompareReport,
+  computeCompositeStandings, teamSynergyPct,
 } = require('../../../src/services/ai/bridges');
+
+// 표준 Elo 기대승률(스케일 400) — 예상 순위 테스트용 stub
+const elo = (a, b) => 1 / (1 + 10 ** ((b - a) / 400));
 
 const P = (name, win, lose, rating = 500, firstMatchDate = null) => ({
   name, win, lose, rating, firstMatchDate, rankTier: null, mainPosition: null,
@@ -279,5 +283,92 @@ describe('projectCompareReport (compare_players 투영, 순수 코어)', () => {
     expect(r.timeline.firstVsDate).toBeNull();
     expect(r.timeline.firstVsWinnerName).toBeNull();
     expect(r.relationTitles).toEqual([]);
+  });
+});
+
+describe('computeCompositeStandings (순수 코어)', () => {
+  const T = (name, avgRating, extra = {}) => ({
+    teamId: name,
+    name,
+    avgRating,
+    teamRatingTier: avgRating == null ? null : `T${avgRating}`,
+    positionFitScore: null,
+    synergyPct: null,
+    scrimRecord: { won: 0, lost: 0, played: 0 },
+    members: [],
+    ...extra,
+  });
+  const opts = (over = {}) => ({ expected: elo, ...over });
+
+  test('요소 없으면 평균 레이팅 순서(강팀 1위)', () => {
+    const r = computeCompositeStandings([T('약체', 400), T('강팀', 900), T('중간', 600)], opts());
+    expect(r.map((t) => t.name)).toEqual(['강팀', '중간', '약체']);
+    expect(r.map((t) => t.predictedRank)).toEqual([1, 2, 3]);
+  });
+
+  test('expectedWinRate: 두 팀이면 서로 상대라 합 100%', () => {
+    const r = computeCompositeStandings([T('강팀', 800), T('약팀', 400)], opts());
+    const strong = r.find((t) => t.name === '강팀');
+    const weak = r.find((t) => t.name === '약팀');
+    expect(strong.expectedWinRate).toBeGreaterThan(50);
+    expect(strong.expectedWinRate + weak.expectedWinRate).toBeCloseTo(100, 1);
+  });
+
+  test('포지션 적합도가 낮으면 유효레이팅이 깎여 순위가 밀린다', () => {
+    // 레이팅 동률이지만 A는 포지션 100(제자리), B는 60(오프)
+    const r = computeCompositeStandings([T('A', 600, { positionFitScore: 100 }), T('B', 600, { positionFitScore: 60 })], opts());
+    expect(r[0].name).toBe('A');
+    expect(r.find((t) => t.name === 'A').expectedWinRate).toBeGreaterThan(50);
+  });
+
+  test('시너지가 높으면 순위가 오른다', () => {
+    const r = computeCompositeStandings([T('A', 600, { synergyPct: 0 }), T('B', 600, { synergyPct: 20 })], opts());
+    expect(r[0].name).toBe('B');
+  });
+
+  test('스크림 맞대결 결과가 레이팅 열세를 뒤집는다', () => {
+    // A가 레이팅 우위(700 vs 500)지만 스크림에서 B에 0-6 대패 → B가 1위
+    const teams = [T('A', 700), T('B', 500)];
+    const pairScrim = (tA, tB) => {
+      if (tA.name === 'A' && tB.name === 'B') return { aWon: 0, aLost: 6 };
+      if (tA.name === 'B' && tB.name === 'A') return { aWon: 6, aLost: 0 };
+      return { aWon: 0, aLost: 0 };
+    };
+    const r = computeCompositeStandings(teams, opts({ pairScrim }));
+    expect(r[0].name).toBe('B');
+    expect(r.find((t) => t.name === 'B').expectedWinRate).toBeGreaterThan(50);
+  });
+
+  test('raw avgRating은 제거, factor(포지션/시너지/스크림)는 노출', () => {
+    const r = computeCompositeStandings([T('A', 500, { positionFitScore: 88, synergyPct: 3 })], opts());
+    expect(r[0].avgRating).toBeUndefined();
+    expect(r[0].positionFitScore).toBe(88);
+    expect(r[0].synergyPct).toBe(3);
+    expect(r[0].scrimRecord).toEqual({ won: 0, lost: 0, played: 0 });
+    expect(r[0].teamRatingTier).toBeDefined();
+  });
+
+  test('레이팅 없는 팀은 순위 끝으로, expectedWinRate=null', () => {
+    const r = computeCompositeStandings([T('신생', null), T('강팀', 800), T('약팀', 500)], opts());
+    expect(r.map((t) => t.name)).toEqual(['강팀', '약팀', '신생']);
+    expect(r[2].predictedRank).toBe(3);
+    expect(r[2].expectedWinRate).toBeNull();
+  });
+});
+
+describe('teamSynergyPct (순수 코어)', () => {
+  test('같은팀 승률이 개인 기대치보다 높으면 +, 표본 부족 페어는 제외', () => {
+    const indiv = { a: { games: 20, wins: 10 }, b: { games: 20, wins: 10 }, c: { games: 20, wins: 10 } };
+    const pairStats = {
+      'a|b': { games: 10, wins: 8 }, // 함께 80% vs 기대 50% → +30
+      'a|c': { games: 2, wins: 2 }, // 표본 2판 < 5 → 제외
+    };
+    const r = teamSynergyPct(['a', 'b', 'c'], indiv, pairStats);
+    expect(r).toBe(30);
+  });
+
+  test('인정 페어가 없으면 null', () => {
+    const r = teamSynergyPct(['a', 'b'], { a: { games: 5, wins: 2 }, b: { games: 5, wins: 2 } }, {});
+    expect(r).toBeNull();
   });
 });

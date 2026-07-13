@@ -119,6 +119,45 @@ const TOOLS = [
       required: ['nameA', 'nameB'],
     },
   },
+  {
+    name: 'list_tournaments',
+    description:
+      '이 그룹의 대회(토너먼트) 목록을 반환한다. ★진행 중/준비 중 대회도 포함한다(종료된 대회만이 아님). '
+      + '각 대회: name, type(normal/auction), status(preparing/auction/in_progress/finished), '
+      + 'statusLabel(한글), teamCount, heldAt, championDecided. '
+      + '"무슨 대회 있어?", "진행 중인 대회 뭐야?", "○○ 대회 있어?" 류 질문에 쓴다. '
+      + 'status로 특정 상태만 거를 수 있다(예: in_progress).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['preparing', 'auction', 'in_progress', 'finished'],
+          description: '상태 필터(생략 시 전체)',
+        },
+      },
+    },
+  },
+  {
+    name: 'predict_tournament',
+    description:
+      '한 대회의 팀 로스터와 "예상 순위"를 반환한다. ★진행 중/준비 중 대회도 조회 가능. '
+      + '순위는 팀 평균 내전 레이팅에 ①포지션 적합도 ②팀 시너지 ③이 대회 팀끼리의 스크림 맞대결을 '
+      + '함께 반영한 종합 추정치다(응답 note에 계산 방식이 있으니 함께 전한다). '
+      + '각 팀: name, teamRatingTier(팀 평균 내전 티어), predictedRank(예상 순위), '
+      + 'expectedWinRate(다른 팀 전체 상대 평균 승리 확률 %), positionFitScore(0~100), '
+      + 'synergyPct(시너지 %p, null=표본부족), scrimRecord({won,lost,played}), '
+      + 'members([{name, position, ratingTier, isCaptain}]). scrimCount=대회 내 스크림 수. '
+      + '"○○ 대회 팀 목록", "각 팀 예상 순위", "우승 예상", "어느 팀이 제일 세?", "왜 이 팀이 위야?" 류에 쓴다. '
+      + '순위 근거를 물으면 레이팅·포지션·시너지·스크림 중 무엇이 작용했는지 factor 값으로 설명한다. '
+      + 'name 생략 시 진행 중(가장 최근) 대회를 자동 선택한다. 대회를 못 찾으면 available에 후보 이름 목록이 온다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '대회 이름(부분 일치 가능). 생략 시 진행 중인 대회 자동 선택' },
+      },
+    },
+  },
 ];
 
 // run_sql: 읽기 전용 SQL 탈출구. 전용 도구(query_*, get_*)로 답 못 하는 드문/복합 질문용.
@@ -156,6 +195,8 @@ const DISPATCH = {
   get_player: (groupId, input) => bridges.getPlayer(groupId, input),
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
   compare_players: (groupId, input) => bridges.comparePlayers(groupId, input),
+  list_tournaments: (groupId, input) => bridges.listTournaments(groupId, input),
+  predict_tournament: (groupId, input) => bridges.predictTournament(groupId, input),
   run_sql: (groupId, input) => readonlySql.runReadonlyQuery(groupId, input),
 };
 
@@ -172,6 +213,7 @@ function buildSystem(askerName, schemaDoc = '') {
     '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
     '- "최근 N판/요즘/최근에" 처럼 최근성(기간)을 묻는 승리·승률 질문은 query_recent_wins를 쓴다. query_players의 승수는 전체 누적이므로 최근 N판엔 쓰지 말 것. 최근성 질문에 "전체 누적만 가능하다"고 답하지 말 것. 단 실제 집계된 매치 수(matchesConsidered)가 요청보다 적으면 그 수를 솔직히 밝힌다(예: "최근 80판 기준").',
     '- 두 사람의 상대전적/맞대결/듀오 궁합/천적 관계 질문은 compare_players 한 번으로 답한다. run_sql로 직접 집계하지 말 것.',
+    '- 대회(토너먼트) 질문: "무슨 대회 있어/진행 중인 대회"는 list_tournaments, "○○ 대회 팀 목록/각 팀 예상 순위/우승 예상/어느 팀이 세?"는 predict_tournament로 답한다. 진행 중·준비 중 대회도 조회되니 "종료된 대회만 있다/못 본다"고 하지 말 것. 예상 순위는 팀 평균 레이팅 기반 추정치임을 함께 밝힌다.',
     schemaDoc
       ? '- 위 전용 도구들로 답할 수 없는 드문/복합 통계 질문(티어 분포, 특정 포지션 승률, 요일별 판수, 대회 트로피 등)은 run_sql로 직접 SELECT해서 시도한다. "그건 못 한다"고 먼저 포기하지 말 것. run_sql 결과로도 답할 수 없을 때만 솔직히 모른다고 한다. SQL 오류가 나면 메시지를 보고 한 번 더 고쳐 시도한다.'
       : null,

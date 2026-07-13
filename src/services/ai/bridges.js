@@ -11,7 +11,8 @@ const { Op } = require('sequelize');
 const models = require('../../db/models');
 const { definitions } = require('../achievement/definitions');
 const { resolveStatType } = require('../../controller/achievement');
-const { formatTier } = require('../../utils/tierUtils');
+const { formatTier, normalizePosition } = require('../../utils/tierUtils');
+const { comfortAt, FIT_CEILING } = require('../../match-maker/position-balance');
 
 // ───────────────────────── 순수 코어 (테스트 대상) ─────────────────────────
 
@@ -192,6 +193,142 @@ function computeAchievementProgress(defs, unlockedIds, statsByType, statTypeOf, 
   };
 }
 
+const TOURNAMENT_STATUS_LABEL = {
+  preparing: '준비중',
+  auction: '경매 진행중',
+  in_progress: '진행중',
+  finished: '종료',
+};
+const ACTIVE_TOURNAMENT_STATUSES = ['preparing', 'auction', 'in_progress'];
+
+// ── 예상 순위 종합 모델의 튜닝 상수 (근거는 프로젝트 밸런스 분석; 보수적으로 잡음) ──
+// 포지션 적합도 1점당 유효레이팅 델타(Elo). 100점=페널티 0, 낮을수록 감점.
+// (2026-06-23 분석: +10점 ≈ OR 1.16. 레이팅이 주효과라 계수는 보수적으로 1.5)
+const POS_ELO_PER_POINT = 1.5;
+const POS_FIT_REF = 100;
+// 시너지 +1%p(같은팀 승률이 개인 기대치보다 높은 정도)당 유효레이팅 델타(Elo).
+const SYN_ELO_PER_PCT = 1.0;
+// 시너지 페어로 인정할 최소 동반 판수(표본 적으면 노이즈).
+const SYN_MIN_GAMES = 5;
+// 스크림 맞대결 블렌드의 사전분포 가상판수(관측이 이만큼 쌓여야 Elo와 반반).
+const SCRIM_PRIOR = 4;
+
+/**
+ * 한 팀(5명)의 "배정된 포지션" 적합도 점수 0~100 (순수). 5명이 아니거나 배정 포지션이 없으면 null.
+ * 플랜용 computeTeamPositionScore(최선 배정 탐색)와 달리, 대회 팀은 포지션이 이미 정해져 있어
+ * 실제 배정 포지션에서의 편안도를 그대로 쓴다.
+ * @param {Array} players - [{ assigned, mainPos, subPos, mainPositionRate, subPositionRate }] (정규화 완료)
+ */
+function assignedPositionFit(players) {
+  if (!players || players.length !== 5) return null;
+  if (players.some((p) => !p.assigned)) return null;
+  const sum = players.reduce(
+    (acc, p) => acc + Math.min(1, comfortAt(p, p.assigned) / FIT_CEILING),
+    0,
+  );
+  return Math.round((sum / 5) * 100);
+}
+
+/**
+ * 팀 시너지 지표(%p, 순수). 팀 내 모든 페어에 대해 (같은팀 승률 − 두 명 개인 승률 평균)을 구해 평균낸다.
+ * 동반 판수가 SYN_MIN_GAMES 미만인 페어는 제외. 인정 페어가 없으면 null.
+ * @param {string[]} memberPuuids
+ * @param {Object} indiv - { puuid: {games, wins} } 개인 통산
+ * @param {Object} pairStats - { "a|b"(정렬): {games, wins} } 페어 동반 통산
+ */
+function teamSynergyPct(memberPuuids, indiv, pairStats, minGames = SYN_MIN_GAMES) {
+  const deltas = [];
+  for (let x = 0; x < memberPuuids.length; x += 1) {
+    for (let y = x + 1; y < memberPuuids.length; y += 1) {
+      const a = memberPuuids[x];
+      const b = memberPuuids[y];
+      const pr = pairStats[[a, b].sort().join('|')];
+      const ia = indiv[a];
+      const ib = indiv[b];
+      if (!pr || pr.games < minGames || !ia || !ib || !ia.games || !ib.games) continue;
+      const together = (pr.wins / pr.games) * 100;
+      const expected = (((ia.wins / ia.games) + (ib.wins / ib.games)) / 2) * 100;
+      deltas.push(together - expected);
+    }
+  }
+  if (!deltas.length) return null;
+  return Math.round((deltas.reduce((s, d) => s + d, 0) / deltas.length) * 10) / 10;
+}
+
+/**
+ * 대회 팀들의 "예상 순위" 종합 모델 (순수).
+ * 유효레이팅 = 평균 내전레이팅 + 포지션델타 + 시너지델타.
+ * 팀 간 기대승률 = Elo(유효레이팅)에 스크림 맞대결이 있으면 관측 승률을 표본가중 블렌드.
+ * 순위 = 나머지 팀 전체를 상대한 평균 기대승률(라운드로빈) 내림차순.
+ * - 평균레이팅이 null인 팀(레이팅 멤버 없음)은 추정 불가 → 끝으로, expectedWinRate=null.
+ * - raw 유효/평균 레이팅은 응답에서 제외(teamRatingTier·factor 수치만 노출).
+ * @param {Array} teams - [{ teamId, name, avgRating:number|null, teamRatingTier, positionFitScore, synergyPct, scrimRecord, members }]
+ * @param {Object} opts
+ * @param {(a:number,b:number)=>number} opts.expected - expectedScore(ratingA, ratingB) → 0~1
+ * @param {(tA:object,tB:object)=>{aWon:number,aLost:number}} [opts.pairScrim] - tA 관점 스크림 세트 전적
+ */
+function computeCompositeStandings(teams, opts = {}) {
+  const {
+    expected,
+    pairScrim = () => ({ aWon: 0, aLost: 0 }),
+    posEloPerPoint = POS_ELO_PER_POINT,
+    synEloPerPct = SYN_ELO_PER_PCT,
+    scrimPrior = SCRIM_PRIOR,
+    posRef = POS_FIT_REF,
+  } = opts;
+
+  // 유효레이팅(레이팅 없으면 null)
+  const eff = teams.map((t) => {
+    if (t.avgRating == null) return null;
+    const posDelta = t.positionFitScore != null ? (t.positionFitScore - posRef) * posEloPerPoint : 0;
+    const synDelta = t.synergyPct != null ? t.synergyPct * synEloPerPct : 0;
+    return t.avgRating + posDelta + synDelta;
+  });
+
+  const scored = teams.map((t, i) => {
+    if (eff[i] == null) return { t, i, expectedWinRate: null };
+    let sum = 0;
+    let cnt = 0;
+    teams.forEach((o, j) => {
+      if (j === i || eff[j] == null) return;
+      const eloProb = expected(eff[i], eff[j]);
+      const s = pairScrim(t, o) || {};
+      const games = (s.aWon || 0) + (s.aLost || 0);
+      let prob = eloProb;
+      if (games > 0) {
+        const observed = s.aWon / games;
+        const w = games / (games + scrimPrior);
+        prob = (w * observed) + ((1 - w) * eloProb);
+      }
+      sum += prob;
+      cnt += 1;
+    });
+    return { t, i, expectedWinRate: cnt ? Math.round((sum / cnt) * 1000) / 10 : null };
+  });
+
+  scored.sort((a, b) => {
+    const ea = eff[a.i];
+    const eb = eff[b.i];
+    if (ea == null && eb == null) return 0;
+    if (ea == null) return 1;
+    if (eb == null) return -1;
+    const wa = a.expectedWinRate == null ? -1 : a.expectedWinRate;
+    const wb = b.expectedWinRate == null ? -1 : b.expectedWinRate;
+    return wb - wa || eb - ea;
+  });
+
+  return scored.map((s, rank) => ({
+    predictedRank: rank + 1,
+    name: s.t.name,
+    teamRatingTier: s.t.teamRatingTier,
+    expectedWinRate: s.expectedWinRate,
+    positionFitScore: s.t.positionFitScore ?? null,
+    synergyPct: s.t.synergyPct ?? null,
+    scrimRecord: s.t.scrimRecord || { won: 0, lost: 0, played: 0 },
+    members: s.t.members,
+  }));
+}
+
 // ───────────────────────── DB 조회 헬퍼 ─────────────────────────
 
 // 그룹의 활성 본캐(부캐/외부인/탈퇴 제외) + 소환사 정보
@@ -238,6 +375,43 @@ async function resolvePuuid(groupId, name) {
   if (!user) return null;
   const matched = summoners.find((s) => s.puuid === user.puuid);
   return { puuid: matched.puuid, name: matched.name };
+}
+
+// 그룹의 완료 매치를 1회 스캔해, 타깃 puuid들의 개인 통산과 팀 내 페어 동반 통산을 집계(시너지용).
+// { indiv: {puuid:{games,wins}}, pairStats: {"a|b":{games,wins}} }
+async function fetchSynergyStats(groupId, targetPuuids) {
+  const set = new Set(targetPuuids);
+  if (!set.size) return { indiv: {}, pairStats: {} };
+  const rows = await models.match.findAll({
+    where: { groupId, winTeam: { [Op.ne]: null } },
+    attributes: ['team1', 'team2', 'winTeam'],
+    raw: true,
+  });
+  const parse = (v) => { try { return JSON.parse(v); } catch (e) { return []; } };
+  const puuidOf = (p) => (Array.isArray(p) ? p[0] : p);
+  const indiv = {};
+  const pairStats = {};
+  for (const m of rows) {
+    if (m.winTeam !== 1 && m.winTeam !== 2) continue;
+    for (const teamNo of [1, 2]) {
+      const arr = (teamNo === 1 ? parse(m.team1) : parse(m.team2)).map(puuidOf).filter((p) => set.has(p));
+      const won = m.winTeam === teamNo;
+      arr.forEach((p) => {
+        const s = indiv[p] || (indiv[p] = { games: 0, wins: 0 });
+        s.games += 1;
+        if (won) s.wins += 1;
+      });
+      for (let x = 0; x < arr.length; x += 1) {
+        for (let y = x + 1; y < arr.length; y += 1) {
+          const key = [arr[x], arr[y]].sort().join('|');
+          const s = pairStats[key] || (pairStats[key] = { games: 0, wins: 0 });
+          s.games += 1;
+          if (won) s.wins += 1;
+        }
+      }
+    }
+  }
+  return { indiv, pairStats };
 }
 
 // ───────────────────────── 브릿지 (AI가 호출) ─────────────────────────
@@ -452,6 +626,153 @@ async function getAchievementProgress(groupId, { name }) {
   };
 }
 
+// 대회 메타(LLM 안전 투영) — id/championTeamId 원시값은 노출하지 않는다.
+function projectTournamentMeta(t) {
+  return {
+    name: t.name,
+    type: t.type,
+    status: t.status,
+    statusLabel: TOURNAMENT_STATUS_LABEL[t.status] || t.status,
+    teamCount: t.teamCount ?? null,
+    heldAt: t.heldAt || null,
+    championDecided: !!t.championTeamId,
+  };
+}
+
+// 그룹의 대회를 이름(부분일치)으로 찾는다. 이름 생략 시 진행 중(가장 최근) 대회를 고른다.
+// 못 찾으면 { error, available? }, 찾으면 { tournament }.
+async function resolveTournament(groupId, name) {
+  const rows = await models.tournament.findAll({
+    where: { groupId },
+    attributes: ['id', 'name', 'type', 'status', 'teamCount', 'heldAt', 'championTeamId'],
+    order: [['id', 'DESC']],
+    raw: true,
+  });
+  if (!rows.length) return { error: '이 그룹에는 아직 등록된 대회가 없어요.' };
+
+  let pool;
+  if (name && name.trim()) {
+    const q = name.trim().toLowerCase();
+    pool = rows.filter((r) => (r.name || '').toLowerCase().includes(q));
+    if (!pool.length) return { error: `'${name}' 대회를 찾지 못했어요.`, available: rows.map((r) => r.name) };
+  } else {
+    const active = rows.filter((r) => ACTIVE_TOURNAMENT_STATUSES.includes(r.status));
+    pool = active.length ? active : rows;
+  }
+  // 여러 개면 진행 중 우선, 그다음 최신(id desc)
+  pool.sort((a, b) => {
+    const aa = ACTIVE_TOURNAMENT_STATUSES.includes(a.status) ? 0 : 1;
+    const bb = ACTIVE_TOURNAMENT_STATUSES.includes(b.status) ? 0 : 1;
+    return aa - bb || b.id - a.id;
+  });
+  return { tournament: pool[0] };
+}
+
+/**
+ * 그룹의 대회 목록. 진행 중/준비 중 대회도 포함한다(종료된 대회만이 아님).
+ * "무슨 대회 있어?", "진행 중인 대회 뭐야?" 류에 사용. status로 거를 수 있다.
+ */
+async function listTournaments(groupId, { status } = {}) {
+  const rows = await models.tournament.findAll({
+    where: { groupId },
+    attributes: ['id', 'name', 'type', 'status', 'teamCount', 'heldAt', 'championTeamId'],
+    order: [['id', 'DESC']],
+    raw: true,
+  });
+  const filtered = status ? rows.filter((r) => r.status === status) : rows;
+  return { count: filtered.length, tournaments: filtered.map(projectTournamentMeta) };
+}
+
+/**
+ * 한 대회의 팀 로스터 + "예상 순위". 진행 중/준비 중 대회도 가능.
+ * 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 스크림 맞대결이 있으면 그 결과를 가중 반영한
+ * 종합 추정치로 순위를 매긴다. "○○ 대회 팀 목록", "각 팀 예상 순위", "우승 예상" 류에 사용.
+ */
+async function predictTournament(groupId, { name } = {}) {
+  const resolved = await resolveTournament(groupId, name);
+  if (resolved.error) return resolved;
+  const t = resolved.tournament;
+
+  const teamsRaw = await models.tournament_team.findAll({
+    where: { tournamentId: t.id },
+    attributes: ['id', 'name', 'captainPuuid', 'members'],
+    raw: true,
+  });
+  if (!teamsRaw.length) {
+    return { tournament: projectTournamentMeta(t), error: `'${t.name}' 대회에 아직 등록된 팀이 없어요.` };
+  }
+
+  const puuids = [...new Set(teamsRaw.flatMap((tm) => (tm.members || []).map((m) => m.puuid)).filter(Boolean))];
+  const [users, summoners, scrims, synergy] = await Promise.all([
+    puuids.length
+      ? models.user.findAll({ where: { groupId, puuid: puuids }, attributes: ['puuid', 'defaultRating', 'additionalRating'], raw: true })
+      : [],
+    puuids.length
+      ? models.summoner.findAll({ where: { puuid: puuids }, attributes: ['puuid', 'name', 'mainPosition', 'mainPositionRate', 'subPosition', 'subPositionRate'], raw: true })
+      : [],
+    models.tournament_scrim.findAll({ where: { tournamentId: t.id }, attributes: ['team1Id', 'team2Id', 'team1Score', 'team2Score'], raw: true }),
+    fetchSynergyStats(groupId, puuids),
+  ]);
+  const ratingByPuuid = {};
+  users.forEach((u) => { ratingByPuuid[u.puuid] = (u.defaultRating || 0) + (u.additionalRating || 0); });
+  const summonerByPuuid = {};
+  summoners.forEach((s) => { summonerByPuuid[s.puuid] = s; });
+
+  const tournamentController = require('../../controller/tournament');
+  const teams = teamsRaw.map((tm) => {
+    const rawMembers = tm.members || [];
+    const avgRating = tournamentController.computeTeamAvgRating(rawMembers, ratingByPuuid);
+    // 포지션 적합도(실제 배정 포지션 기준)
+    const fitPlayers = rawMembers.map((m) => {
+      const s = summonerByPuuid[m.puuid] || {};
+      return {
+        assigned: normalizePosition(m.position) || null,
+        mainPos: normalizePosition(s.mainPosition) || null,
+        subPos: normalizePosition(s.subPosition) || null,
+        mainPositionRate: s.mainPositionRate || 0,
+        subPositionRate: s.subPositionRate || 0,
+      };
+    });
+    return {
+      teamId: tm.id,
+      name: tm.name,
+      teamRatingTier: avgRating != null ? formatTier(avgRating) : null,
+      avgRating, // 계산용 — 응답에선 제거됨
+      positionFitScore: assignedPositionFit(fitPlayers),
+      synergyPct: teamSynergyPct(rawMembers.map((m) => m.puuid), synergy.indiv, synergy.pairStats),
+      scrimRecord: tournamentController.computeTeamScrimRecord(tm.id, scrims),
+      members: rawMembers.map((m) => ({
+        name: summonerByPuuid[m.puuid]?.name || '알 수 없음',
+        position: m.position || null,
+        ratingTier: ratingByPuuid[m.puuid] != null ? formatTier(ratingByPuuid[m.puuid]) : null,
+        isCaptain: m.puuid === tm.captainPuuid,
+      })),
+    };
+  });
+
+  const teamById = {};
+  teams.forEach((tm) => { teamById[tm.teamId] = tm; });
+  const pairScrim = (tA, tB) => {
+    const h = tournamentController.computeHeadToHeadScrim(tA.teamId, tB.teamId, scrims);
+    return { aWon: h.team1.won, aLost: h.team1.lost };
+  };
+
+  const standings = computeCompositeStandings(teams, {
+    expected: tournamentController.computeWinProbability,
+    pairScrim,
+  });
+
+  return {
+    tournament: { ...projectTournamentMeta(t), teamCount: teamsRaw.length },
+    standings,
+    scrimCount: scrims.length,
+    note: '예상 순위는 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 이 대회 팀끼리의 스크림 맞대결이 있으면 그 결과를 표본 크기만큼 가중해 합산한 종합 추정치예요(실제 결과와 다를 수 있어요). '
+      + 'expectedWinRate=다른 팀 전체 상대 평균 승리 확률(%), positionFitScore=배정 포지션 적합도(0~100, 높을수록 제 포지션), '
+      + 'synergyPct=팀 내 같은팀 시너지(개인 기대치 대비 %p, +면 손발이 잘 맞음, null이면 표본 부족), scrimRecord=대회 내 스크림 세트 전적. '
+      + '레이팅 없는 신규 멤버는 팀 평균에서 제외돼요.',
+  };
+}
+
 module.exports = {
   // 순수 코어 (테스트)
   rankPlayers,
@@ -459,6 +780,9 @@ module.exports = {
   tallyRecentWins,
   computeAchievementProgress,
   projectCompareReport,
+  computeCompositeStandings,
+  assignedPositionFit,
+  teamSynergyPct,
   METRICS,
   // 브릿지
   queryPlayers,
@@ -467,6 +791,8 @@ module.exports = {
   getPlayer,
   getAchievementProgress,
   comparePlayers,
+  listTournaments,
+  predictTournament,
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)
-  _internal: { fetchActivePlayers, resolvePuuid },
+  _internal: { fetchActivePlayers, resolvePuuid, resolveTournament, projectTournamentMeta },
 };
