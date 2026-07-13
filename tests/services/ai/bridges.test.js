@@ -1,6 +1,6 @@
 const {
   rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress, projectCompareReport,
-  computeCompositeStandings, teamSynergyPct, projectBracketMatches,
+  computeCompositeStandings, teamSynergyPct, projectBracketMatches, assignedPositionFit, toRiotPosition,
 } = require('../../../src/services/ai/bridges');
 
 // 표준 Elo 기대승률(스케일 400) — 예상 순위 테스트용 stub
@@ -353,6 +353,64 @@ describe('computeCompositeStandings (순수 코어)', () => {
     expect(r.map((t) => t.name)).toEqual(['강팀', '약팀', '신생']);
     expect(r[2].predictedRank).toBe(3);
     expect(r[2].expectedWinRate).toBeNull();
+  });
+});
+
+describe('toRiotPosition / assignedPositionFit (순수 코어)', () => {
+  test('대회 표기(소문자 약어) → Riot 표기 매핑', () => {
+    expect(toRiotPosition('adc')).toBe('BOTTOM');
+    expect(toRiotPosition('mid')).toBe('MIDDLE');
+    expect(toRiotPosition('support')).toBe('SUPPORT');
+    expect(toRiotPosition('top')).toBe('TOP');
+    expect(toRiotPosition('jungle')).toBe('JUNGLE');
+    expect(toRiotPosition('UTILITY')).toBe('SUPPORT'); // Riot 표기가 들어와도 정규화
+    expect(toRiotPosition(null)).toBeNull();
+  });
+
+  test('회귀: 대회 표기 배정이 Riot 표기 메인포지션과 매칭돼야 제 포지션으로 인정', () => {
+    // 실 라이브 데이터 형태: 배정='adc'(소문자), 소환사 메인='BOTTOM'(Riot). 매핑 없으면 전원 오프 처리됐던 버그.
+    const onRole = (assigned, mainPos) => ({
+      assigned: toRiotPosition(assigned), mainPos, subPos: null, mainPositionRate: 90, subPositionRate: 0,
+    });
+    const players = [
+      onRole('top', 'TOP'), onRole('jungle', 'JUNGLE'), onRole('mid', 'MIDDLE'),
+      onRole('adc', 'BOTTOM'), onRole('support', 'SUPPORT'),
+    ];
+    const fit = assignedPositionFit(players);
+    expect(fit).toBeGreaterThan(90); // 전원 메인 90% → 만점 근접 (버그 시 ~3점)
+  });
+
+  test('내전 이력 블렌드: 솔랭 오프포지션이라도 내전에서 그 포지션을 많이 소화했으면 적합도 상승', () => {
+    // 솔랭은 탑 메인(서폿 경험 거의 0)이지만 내전 40판 전부 서폿으로 소화한 플레이어
+    const base = {
+      assigned: 'SUPPORT', mainPos: 'TOP', subPos: null, mainPositionRate: 90, subPositionRate: 0,
+    };
+    const soloOnly = [
+      base, // internalRate 없음 → 솔랭 기준(오프, comfort≈3.3)
+      ...['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM'].map((p) => ({
+        assigned: p, mainPos: p, subPos: null, mainPositionRate: 95, subPositionRate: 0,
+      })),
+    ];
+    const withInternal = [
+      { ...base, internalRate: 100, internalGames: 40 }, // w=40/50=0.8 → comfort≈80.6
+      ...soloOnly.slice(1),
+    ];
+    const fitSolo = assignedPositionFit(soloOnly);
+    const fitBlended = assignedPositionFit(withInternal);
+    expect(fitBlended).toBeGreaterThan(fitSolo);
+    expect(fitBlended - fitSolo).toBeGreaterThan(10); // 한 명 몫(1/5)이 크게 회복
+  });
+
+  test('내전 이력 블렌드: 솔랭 메인이라도 내전에서 그 포지션을 안 갔으면 적합도 하락', () => {
+    const base = {
+      assigned: 'TOP', mainPos: 'TOP', subPos: null, mainPositionRate: 95, subPositionRate: 0,
+    };
+    const rest = ['JUNGLE', 'MIDDLE', 'BOTTOM', 'SUPPORT'].map((p) => ({
+      assigned: p, mainPos: p, subPos: null, mainPositionRate: 95, subPositionRate: 0,
+    }));
+    const fitSolo = assignedPositionFit([base, ...rest]);
+    const fitBlended = assignedPositionFit([{ ...base, internalRate: 0, internalGames: 40 }, ...rest]);
+    expect(fitBlended).toBeLessThan(fitSolo);
   });
 });
 

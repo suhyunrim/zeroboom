@@ -161,7 +161,7 @@ const TOOLS = [
       + '순위는 팀 평균 내전 레이팅에 ①포지션 적합도 ②팀 시너지 ③이 대회 팀끼리의 스크림 맞대결을 '
       + '함께 반영한 종합 추정치다(응답 note에 계산 방식이 있으니 함께 전한다). '
       + '각 팀: name, teamRatingTier(팀 평균 내전 티어), predictedRank(예상 순위), '
-      + 'expectedWinRate(다른 팀 전체 상대 평균 승리 확률 %), positionFitScore(0~100), '
+      + 'expectedWinRate(다른 팀 전체 상대 평균 승리 확률 %), positionFitScore(0~100, 솔랭 포지션 비율+내전 실제 포지션 이력 혼합), '
       + 'synergyPct(시너지 %p, null=표본부족), scrimRecord({won,lost,played}), '
       + 'members([{name, position, ratingTier, isCaptain}]). scrimCount=대회 내 스크림 수. '
       + '"○○ 대회 팀 목록", "각 팀 예상 순위", "우승 예상", "어느 팀이 제일 세?", "왜 이 팀이 위야?" 류에 쓴다. '
