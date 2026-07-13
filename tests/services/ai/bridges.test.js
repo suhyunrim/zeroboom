@@ -1,6 +1,6 @@
 const {
   rankPlayers, rankVeterans, tallyRecentWins, computeAchievementProgress, projectCompareReport,
-  computeCompositeStandings, teamSynergyPct,
+  computeCompositeStandings, teamSynergyPct, projectBracketMatches,
 } = require('../../../src/services/ai/bridges');
 
 // 표준 Elo 기대승률(스케일 400) — 예상 순위 테스트용 stub
@@ -353,6 +353,44 @@ describe('computeCompositeStandings (순수 코어)', () => {
     expect(r.map((t) => t.name)).toEqual(['강팀', '약팀', '신생']);
     expect(r[2].predictedRank).toBe(3);
     expect(r[2].expectedWinRate).toBeNull();
+  });
+});
+
+describe('projectBracketMatches (순수 코어)', () => {
+  const NAMES = { 1: 'A팀', 2: 'B팀', 3: 'C팀' };
+  const LABELS = { 1: '4강', 2: '결승' };
+  const M = (over = {}) => ({
+    round: 1, bracketSlot: 0, team1Id: null, team2Id: null, team1Score: 0, team2Score: 0,
+    winnerTeamId: null, bestOf: 3, scheduledAt: null, ...over,
+  });
+
+  test('완료 매치: 팀명/스코어/승자/finished', () => {
+    const r = projectBracketMatches(
+      [M({ team1Id: 1, team2Id: 2, team1Score: 2, team2Score: 1, winnerTeamId: 1 })], NAMES, LABELS,
+    );
+    expect(r[0]).toMatchObject({
+      roundLabel: '4강', team1: 'A팀', team2: 'B팀', score: '2:1', status: 'finished', winner: 'A팀',
+    });
+    expect(r[0].bye).toBeUndefined();
+  });
+
+  test('양팀 확정·경기 전 = scheduled, 대진 미정 = waiting', () => {
+    const r = projectBracketMatches(
+      [M({ team1Id: 1, team2Id: 3 }), M({ round: 2, team1Id: 1 })], NAMES, LABELS,
+    );
+    expect(r[0].status).toBe('scheduled');
+    expect(r[0].winner).toBeNull();
+    expect(r[1]).toMatchObject({ roundLabel: '결승', status: 'waiting', team2: null });
+  });
+
+  test('부전승(상대 없이 승자 확정) = bye:true', () => {
+    const r = projectBracketMatches([M({ team1Id: 3, winnerTeamId: 3 })], NAMES, LABELS);
+    expect(r[0]).toMatchObject({ status: 'finished', winner: 'C팀', bye: true });
+  });
+
+  test('라벨 없는 라운드는 폴백 라벨', () => {
+    const r = projectBracketMatches([M({ round: 9 })], NAMES, {});
+    expect(r[0].roundLabel).toBe('라운드9');
   });
 });
 

@@ -329,6 +329,39 @@ function computeCompositeStandings(teams, opts = {}) {
   }));
 }
 
+/**
+ * 대진표 매치들의 LLM 안전 투영 (순수). 팀 id → 이름 치환, 라운드 라벨 부여, 상태 계산.
+ * 상태: finished(승자 확정, 한쪽 팀 없으면 bye=true) | scheduled(양팀 확정·경기 전) | waiting(대진 미정).
+ * @param {Array} matches - tournament_match rows (round ASC, bracketSlot ASC)
+ * @param {Object} nameById - { teamId: teamName }
+ * @param {Object} roundLabels - { round: '8강'|'결승'|... } (computeRoundLabels 결과)
+ */
+function projectBracketMatches(matches, nameById, roundLabels) {
+  return (matches || []).map((m) => {
+    const team1Name = m.team1Id != null ? nameById[m.team1Id] || null : null;
+    const team2Name = m.team2Id != null ? nameById[m.team2Id] || null : null;
+    let status;
+    if (m.winnerTeamId != null) status = 'finished';
+    else if (m.team1Id != null && m.team2Id != null) status = 'scheduled';
+    else status = 'waiting';
+    const row = {
+      roundLabel: roundLabels[m.round] || `라운드${m.round}`,
+      round: m.round,
+      slot: m.bracketSlot,
+      team1: team1Name,
+      team2: team2Name,
+      score: `${m.team1Score || 0}:${m.team2Score || 0}`,
+      bestOf: m.bestOf,
+      status,
+      winner: m.winnerTeamId != null ? nameById[m.winnerTeamId] || null : null,
+      scheduledAt: m.scheduledAt || null,
+    };
+    // 부전승(BYE): 승자는 있는데 상대 팀이 없는 매치
+    if (status === 'finished' && (m.team1Id == null || m.team2Id == null)) row.bye = true;
+    return row;
+  });
+}
+
 // ───────────────────────── DB 조회 헬퍼 ─────────────────────────
 
 // 그룹의 활성 본캐(부캐/외부인/탈퇴 제외) + 소환사 정보
@@ -644,7 +677,7 @@ function projectTournamentMeta(t) {
 async function resolveTournament(groupId, name) {
   const rows = await models.tournament.findAll({
     where: { groupId },
-    attributes: ['id', 'name', 'type', 'status', 'teamCount', 'heldAt', 'championTeamId'],
+    attributes: ['id', 'name', 'type', 'status', 'teamCount', 'bracketSize', 'heldAt', 'championTeamId'],
     order: [['id', 'DESC']],
     raw: true,
   });
@@ -681,6 +714,50 @@ async function listTournaments(groupId, { status } = {}) {
   });
   const filtered = status ? rows.filter((r) => r.status === status) : rows;
   return { count: filtered.length, tournaments: filtered.map(projectTournamentMeta) };
+}
+
+/**
+ * 한 대회의 대진표(브라켓). 라운드별 매치(팀명/스코어/승자/상태)를 라운드 라벨과 함께 반환.
+ * "대진표 보여줘", "누구랑 누구 붙어?", "결승 어디까지 왔어?" 류에 사용.
+ */
+async function getTournamentBracket(groupId, { name } = {}) {
+  const resolved = await resolveTournament(groupId, name);
+  if (resolved.error) return resolved;
+  const t = resolved.tournament;
+
+  const [matches, teams] = await Promise.all([
+    models.tournament_match.findAll({
+      where: { tournamentId: t.id },
+      attributes: ['round', 'bracketSlot', 'team1Id', 'team2Id', 'team1Score', 'team2Score', 'winnerTeamId', 'bestOf', 'scheduledAt'],
+      order: [['round', 'ASC'], ['bracketSlot', 'ASC']],
+      raw: true,
+    }),
+    models.tournament_team.findAll({
+      where: { tournamentId: t.id },
+      attributes: ['id', 'name'],
+      raw: true,
+    }),
+  ]);
+  if (!matches.length) {
+    return { tournament: projectTournamentMeta(t), error: `'${t.name}' 대회는 아직 대진표가 생성되지 않았어요.` };
+  }
+
+  const nameById = {};
+  teams.forEach((tm) => { nameById[tm.id] = tm.name; });
+
+  const tournamentController = require('../../controller/tournament');
+  const roundLabels = tournamentController.computeRoundLabels(t.bracketSize, t.teamCount || teams.length);
+  const projected = projectBracketMatches(matches, nameById, roundLabels);
+
+  return {
+    tournament: {
+      ...projectTournamentMeta(t),
+      teamCount: teams.length,
+      championName: t.championTeamId != null ? nameById[t.championTeamId] || null : null,
+    },
+    matches: projected,
+    note: 'status: finished=경기 완료(bye=true면 부전승), scheduled=양팀 확정·경기 전, waiting=이전 라운드 결과 대기(대진 미정). score는 세트 스코어예요.',
+  };
 }
 
 /**
@@ -783,6 +860,7 @@ module.exports = {
   computeCompositeStandings,
   assignedPositionFit,
   teamSynergyPct,
+  projectBracketMatches,
   METRICS,
   // 브릿지
   queryPlayers,
@@ -792,6 +870,7 @@ module.exports = {
   getAchievementProgress,
   comparePlayers,
   listTournaments,
+  getTournamentBracket,
   predictTournament,
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)
   _internal: { fetchActivePlayers, resolvePuuid, resolveTournament, projectTournamentMeta },

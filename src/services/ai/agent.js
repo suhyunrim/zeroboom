@@ -139,6 +139,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_tournament_bracket',
+    description:
+      '한 대회의 대진표(브라켓)를 반환한다. ★진행 중/준비 중 대회도 조회 가능. '
+      + '각 매치: roundLabel(예선/8강/4강/결승), team1/team2(팀명, null=대진 미정), score(세트 스코어), '
+      + 'bestOf, status(finished=완료/scheduled=예정/waiting=대진 미정), winner(승리 팀명), bye(부전승), scheduledAt. '
+      + 'tournament.championName=우승팀(확정 시). '
+      + '"대진표 보여줘", "누구랑 누구 붙어?", "다음 경기 뭐야?", "몇 강까지 진행됐어?" 류에 쓴다. '
+      + 'name 생략 시 진행 중(가장 최근) 대회를 자동 선택한다. 예상 순위/전력 분석은 predict_tournament를 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '대회 이름(부분 일치 가능). 생략 시 진행 중인 대회 자동 선택' },
+      },
+    },
+  },
+  {
     name: 'predict_tournament',
     description:
       '한 대회의 팀 로스터와 "예상 순위"를 반환한다. ★진행 중/준비 중 대회도 조회 가능. '
@@ -196,6 +212,7 @@ const DISPATCH = {
   get_achievement_progress: (groupId, input) => bridges.getAchievementProgress(groupId, input),
   compare_players: (groupId, input) => bridges.comparePlayers(groupId, input),
   list_tournaments: (groupId, input) => bridges.listTournaments(groupId, input),
+  get_tournament_bracket: (groupId, input) => bridges.getTournamentBracket(groupId, input),
   predict_tournament: (groupId, input) => bridges.predictTournament(groupId, input),
   run_sql: (groupId, input) => readonlySql.runReadonlyQuery(groupId, input),
 };
@@ -213,7 +230,7 @@ function buildSystem(askerName, schemaDoc = '') {
     '- "고인물/올드비/짬" 질문은 query_veterans 한 번으로 답한다. 판수·가입기간 종합 순위가 이미 계산돼 나오니 query_players를 두 번 호출해 직접 합치지 말 것.',
     '- "최근 N판/요즘/최근에" 처럼 최근성(기간)을 묻는 승리·승률 질문은 query_recent_wins를 쓴다. query_players의 승수는 전체 누적이므로 최근 N판엔 쓰지 말 것. 최근성 질문에 "전체 누적만 가능하다"고 답하지 말 것. 단 실제 집계된 매치 수(matchesConsidered)가 요청보다 적으면 그 수를 솔직히 밝힌다(예: "최근 80판 기준").',
     '- 두 사람의 상대전적/맞대결/듀오 궁합/천적 관계 질문은 compare_players 한 번으로 답한다. run_sql로 직접 집계하지 말 것.',
-    '- 대회(토너먼트) 질문: "무슨 대회 있어/진행 중인 대회"는 list_tournaments, "○○ 대회 팀 목록/각 팀 예상 순위/우승 예상/어느 팀이 세?"는 predict_tournament로 답한다. 진행 중·준비 중 대회도 조회되니 "종료된 대회만 있다/못 본다"고 하지 말 것. 예상 순위는 팀 평균 레이팅 기반 추정치임을 함께 밝힌다.',
+    '- 대회(토너먼트) 질문: "무슨 대회 있어/진행 중인 대회"는 list_tournaments, "대진표/누구랑 붙어/다음 경기/몇 강"은 get_tournament_bracket, "○○ 대회 팀 목록/각 팀 예상 순위/우승 예상/어느 팀이 세?"는 predict_tournament로 답한다. 진행 중·준비 중 대회도 조회되니 "종료된 대회만 있다/못 본다"고 하지 말 것. 예상 순위는 팀 평균 레이팅 기반 추정치임을 함께 밝힌다.',
     schemaDoc
       ? '- 위 전용 도구들로 답할 수 없는 드문/복합 통계 질문(티어 분포, 특정 포지션 승률, 요일별 판수, 대회 트로피 등)은 run_sql로 직접 SELECT해서 시도한다. "그건 못 한다"고 먼저 포기하지 말 것. run_sql 결과로도 답할 수 없을 때만 솔직히 모른다고 한다. SQL 오류가 나면 메시지를 보고 한 번 더 고쳐 시도한다.'
       : null,
