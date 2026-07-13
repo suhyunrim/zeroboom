@@ -351,6 +351,7 @@ function computeCompositeStandings(teams, opts = {}) {
 
   return scored.map((s, rank) => ({
     predictedRank: rank + 1,
+    teamId: s.t.teamId, // 서버 내부 식별용(AI 예측 저장 등). puuid와 달리 REST 상세에도 노출되는 값.
     name: s.t.name,
     teamRatingTier: s.t.teamRatingTier,
     expectedWinRate: s.expectedWinRate,
@@ -802,24 +803,16 @@ async function getTournamentBracket(groupId, { name } = {}) {
   };
 }
 
-/**
- * 한 대회의 팀 로스터 + "예상 순위". 진행 중/준비 중 대회도 가능.
- * 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 스크림 맞대결이 있으면 그 결과를 가중 반영한
- * 종합 추정치로 순위를 매긴다. "○○ 대회 팀 목록", "각 팀 예상 순위", "우승 예상" 류에 사용.
- */
-async function predictTournament(groupId, { name } = {}) {
-  const resolved = await resolveTournament(groupId, name);
-  if (resolved.error) return resolved;
-  const t = resolved.tournament;
-
+// 대회 팀들의 종합 예측 팩터(평균레이팅/포지션적합도/시너지/스크림)를 빌드.
+// predictTournament(AI 도구)와 predictMatchup(REST 팝업)이 공유한다.
+// @returns { teams, teamById, scrims, pairScrim, expected } — teams는 avgRating(raw) 포함(응답 전 제거 필요)
+async function buildTeamFactors(groupId, tournamentId) {
   const teamsRaw = await models.tournament_team.findAll({
-    where: { tournamentId: t.id },
+    where: { tournamentId },
     attributes: ['id', 'name', 'captainPuuid', 'members'],
     raw: true,
   });
-  if (!teamsRaw.length) {
-    return { tournament: projectTournamentMeta(t), error: `'${t.name}' 대회에 아직 등록된 팀이 없어요.` };
-  }
+  if (!teamsRaw.length) return { teams: [] };
 
   const puuids = [...new Set(teamsRaw.flatMap((tm) => (tm.members || []).map((m) => m.puuid)).filter(Boolean))];
   const [users, summoners, scrims, synergy] = await Promise.all([
@@ -829,7 +822,7 @@ async function predictTournament(groupId, { name } = {}) {
     puuids.length
       ? models.summoner.findAll({ where: { puuid: puuids }, attributes: ['puuid', 'name', 'mainPosition', 'mainPositionRate', 'subPosition', 'subPositionRate'], raw: true })
       : [],
-    models.tournament_scrim.findAll({ where: { tournamentId: t.id }, attributes: ['team1Id', 'team2Id', 'team1Score', 'team2Score'], raw: true }),
+    models.tournament_scrim.findAll({ where: { tournamentId }, attributes: ['team1Id', 'team2Id', 'team1Score', 'team2Score'], raw: true }),
     fetchSynergyStats(groupId, puuids),
   ]);
   const ratingByPuuid = {};
@@ -883,13 +876,31 @@ async function predictTournament(groupId, { name } = {}) {
     return { aWon: h.team1.won, aLost: h.team1.lost };
   };
 
-  const standings = computeCompositeStandings(teams, {
-    expected: tournamentController.computeWinProbability,
-    pairScrim,
-  });
+  return {
+    teams, teamById, scrims, pairScrim, expected: tournamentController.computeWinProbability,
+  };
+}
+
+/**
+ * 한 대회의 팀 로스터 + "예상 순위". 진행 중/준비 중 대회도 가능.
+ * 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 스크림 맞대결이 있으면 그 결과를 가중 반영한
+ * 종합 추정치로 순위를 매긴다. "○○ 대회 팀 목록", "각 팀 예상 순위", "우승 예상" 류에 사용.
+ */
+async function predictTournament(groupId, { name } = {}) {
+  const resolved = await resolveTournament(groupId, name);
+  if (resolved.error) return resolved;
+  const t = resolved.tournament;
+
+  const factors = await buildTeamFactors(groupId, t.id);
+  if (!factors.teams.length) {
+    return { tournament: projectTournamentMeta(t), error: `'${t.name}' 대회에 아직 등록된 팀이 없어요.` };
+  }
+  const { teams, scrims, pairScrim, expected } = factors;
+
+  const standings = computeCompositeStandings(teams, { expected, pairScrim });
 
   return {
-    tournament: { ...projectTournamentMeta(t), teamCount: teamsRaw.length },
+    tournament: { ...projectTournamentMeta(t), teamCount: teams.length },
     standings,
     scrimCount: scrims.length,
     note: '예상 순위는 팀 평균 내전 레이팅에 포지션 적합도·시너지를 반영하고, 이 대회 팀끼리의 스크림 맞대결이 있으면 그 결과를 표본 크기만큼 가중해 합산한 종합 추정치예요(실제 결과와 다를 수 있어요). '
@@ -922,6 +933,7 @@ module.exports = {
   listTournaments,
   getTournamentBracket,
   predictTournament,
+  buildTeamFactors, // AI 승부예측 저장 서비스(tournament-ai-prediction)와 공유
   // 헬퍼 (에이전트에서 도구 디스패치에 사용)
   _internal: { fetchActivePlayers, resolvePuuid, resolveTournament, projectTournamentMeta },
 };

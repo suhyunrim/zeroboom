@@ -7,6 +7,7 @@ const tournamentController = require('../../controller/tournament');
 const honorController = require('../../controller/honor');
 const userController = require('../../controller/user');
 const auctionScout = require('../../services/auction-scout');
+const aiPrediction = require('../../services/tournament-ai-prediction');
 const { extractTopAchievementsPerCategory } = require('../../services/achievement/topPerCategory');
 
 const { STATUS } = tournamentController;
@@ -153,7 +154,7 @@ const buildCandidateDetail = async (tournament, puuid) => {
 };
 
 const buildDetail = async (tournament) => {
-  const [teamsRaw, matchesRaw, scrims, predictionsRaw] = await Promise.all([
+  const [teamsRaw, matchesRaw, scrims, predictionsRaw, aiPredictionRows] = await Promise.all([
     models.tournament_team.findAll({
       where: { tournamentId: tournament.id },
       order: [['id', 'ASC']],
@@ -174,6 +175,10 @@ const buildDetail = async (tournament) => {
         required: true,
       }],
       order: [['updatedAt', 'ASC']],
+    }),
+    models.tournament_match_ai_prediction.findAll({
+      where: { tournamentId: tournament.id },
+      raw: true,
     }),
   ]);
 
@@ -208,6 +213,9 @@ const buildDetail = async (tournament) => {
     summonerName: summonerByPuuid[p.userPuuid] ? summonerByPuuid[p.userPuuid].name : null,
     updatedAt: p.updatedAt,
   }));
+  // AI 가상 참가자 주입 — 매치별 예측 목록·리더보드에 유저와 함께 집계된다("AI를 이겨라").
+  // 저장 테이블이 분리돼 있어 퍼펙트 예측자 업적 등 유저 전용 집계는 오염되지 않는다.
+  predictions.push(...aiPrediction.toPredictionEntries(aiPredictionRows));
   const matchesEnriched = enrichMatchesWithHeadToHead(
     enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId),
     scrims,
@@ -333,6 +341,64 @@ module.exports = (app) => {
       if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
+    } catch (e) {
+      logger.error(e);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // 승부예측 팝업용 매치 AI 예측. 이벤트 훅이 저장해둔 기록을 반환한다(즉석 계산 아님 — AI도
+  // 유저처럼 마감선까지의 예측이 "기록"으로 남는다). 기록이 없으면 한 번 갱신을 시도해 백필
+  // (피처 배포 전에 만들어진 대회 대응). 상세 조회(GET /:id)와 같은 공개 정책.
+  route.get('/:id/matches/:matchId/ai-prediction', async (req, res) => {
+    const id = Number(req.params.id);
+    const matchId = Number(req.params.matchId);
+    if (!id) return res.status(400).json({ result: 'id가 필요합니다.' });
+    if (!matchId) return res.status(400).json({ result: 'matchId가 필요합니다.' });
+    try {
+      const tournament = await models.tournament.findByPk(id);
+      if (!tournament) return res.status(404).json({ result: '토너먼트를 찾을 수 없습니다.' });
+      const match = await models.tournament_match.findOne({ where: { id: matchId, tournamentId: id }, raw: true });
+      if (!match) return res.status(404).json({ result: '매치를 찾을 수 없습니다.' });
+
+      let row = await models.tournament_match_ai_prediction.findOne({ where: { matchId }, raw: true });
+      if (!row) {
+        await aiPrediction.refreshAiPredictions(tournament); // 지연 백필(마감 전 매치만 생성됨)
+        row = await models.tournament_match_ai_prediction.findOne({ where: { matchId }, raw: true });
+      }
+      if (!row) {
+        return res.status(409).json({ result: '대진이 아직 확정되지 않았거나 AI 예측 기록이 없습니다.' });
+      }
+
+      const rolling = tournament.predictionMode === tournamentController.PREDICTION_MODES.ROLLING;
+      let frozen;
+      if (rolling) {
+        frozen = tournamentController.isMatchStarted(match);
+      } else {
+        const matches = await models.tournament_match.findAll({ where: { tournamentId: id }, raw: true });
+        frozen = tournamentController.isTournamentLocked(matches);
+      }
+
+      const factors = row.factors || {};
+      return res.status(200).json({
+        result: 'ok',
+        prediction: {
+          match: {
+            matchId: match.id,
+            round: match.round,
+            bracketSlot: match.bracketSlot,
+            bestOf: match.bestOf,
+            finished: match.winnerTeamId != null,
+          },
+          predictedTeamId: row.predictedTeamId,
+          team1: factors.team1 || null,
+          team2: factors.team2 || null,
+          headToHeadScrim: factors.headToHeadScrim || null,
+          computedAt: row.computedAt,
+          frozen, // true면 마감(매치 시작/대회 잠금) — 이 기록은 더 이상 바뀌지 않음
+          note: aiPrediction.PREDICTION_NOTE,
+        },
+      });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
@@ -633,6 +699,7 @@ module.exports = (app) => {
           source: 'web',
         });
 
+        aiPrediction.refreshInBackground(tournament, 'team_update'); // 저장된 예측 스냅샷의 팀명 갱신
         return res.status(200).json({ result: 'ok', team });
       }
 
@@ -663,6 +730,7 @@ module.exports = (app) => {
         source: 'web',
       });
 
+      aiPrediction.refreshInBackground(tournament, 'team_update'); // 로스터 변경 반영해 예측 갱신
       return res.status(200).json({ result: 'ok', team });
     } catch (e) {
       logger.error(e);
@@ -1174,6 +1242,10 @@ module.exports = (app) => {
       });
 
       await tournament.reload();
+      // AI 승부예측 최초 기록(rolling=대진 확정된 1라운드, bracket=전체 트리 시뮬레이션).
+      // 실패해도 시작 자체는 성공해야 하므로 삼켜 로깅만 한다.
+      await aiPrediction.refreshAiPredictions(tournament)
+        .catch((e) => logger.error(`[ai-prediction] start 훅 실패: ${e.message}`));
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
     } catch (e) {
@@ -1230,6 +1302,10 @@ module.exports = (app) => {
       if (tournament.status === STATUS.FINISHED) {
         setImmediate(() => tournamentController.handleTournamentFinishedAchievements(tournament));
       }
+      // 결과 입력 → propagateWinner로 다음 라운드 대진이 확정됐을 수 있음 → AI 예측 갱신
+      // (rolling만 해당. bracket은 첫 매치 시작 시점부터 잠겨 있어 내부에서 no-op.)
+      await aiPrediction.refreshAiPredictions(tournament)
+        .catch((e) => logger.error(`[ai-prediction] match_result 훅 실패: ${e.message}`));
       const detail = await buildDetail(tournament);
       return res.status(200).json({ result: 'ok', ...detail });
     } catch (e) {
@@ -1368,6 +1444,7 @@ module.exports = (app) => {
         source: 'web',
       });
 
+      aiPrediction.refreshInBackground(tournament, 'scrim_create'); // 스크림 반영해 미시작 매치 예측 갱신
       return res.status(200).json({ result: 'ok', scrim });
     } catch (e) {
       logger.error(e);
@@ -1408,6 +1485,7 @@ module.exports = (app) => {
         source: 'web',
       });
 
+      aiPrediction.refreshInBackground(tournament, 'scrim_update');
       return res.status(200).json({ result: 'ok', scrim });
     } catch (e) {
       logger.error(e);
@@ -1433,6 +1511,7 @@ module.exports = (app) => {
         source: 'web',
       });
 
+      aiPrediction.refreshInBackground(tournament, 'scrim_delete');
       return res.status(200).json({ result: '삭제되었습니다.' });
     } catch (e) {
       logger.error(e);
