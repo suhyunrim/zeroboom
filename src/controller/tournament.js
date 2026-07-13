@@ -648,6 +648,7 @@ const enrichMatchesWithPredictions = (matches, predictions, predictionMode = PRE
         predictedTeamId: p.predictedTeamId,
         updatedAt: p.updatedAt,
         isValid: valid,
+        ...(p.isAi ? { isAi: true } : {}), // AI 가상 참가자 표시(프론트 스타일링용)
       };
     });
     const total = c1 + c2;
@@ -688,6 +689,7 @@ const buildLeaderboard = (matches, predictions, predictionMode = PREDICTION_MODE
         summonerName: p.summonerName || null,
         correctCount: 0,
         settledCount: 0,
+        ...(p.isAi ? { isAi: true } : {}), // AI 가상 참가자 표시
       });
     }
     const entry = byUser.get(p.userPuuid);

@@ -3,7 +3,7 @@
 const mockModels = {
   tournament: { findAll: jest.fn() },
   tournament_team: { findAll: jest.fn() },
-  tournament_match: { findAll: jest.fn() },
+  tournament_match: { findAll: jest.fn(), findOne: jest.fn() },
   tournament_scrim: { findAll: jest.fn() },
   match: { findAll: jest.fn() },
   user: { findAll: jest.fn() },
@@ -22,7 +22,7 @@ const TOURNAMENTS = [
 
 // 7차 CK 대진표: 결승 1매치(양팀 확정, 경기 전)
 const MATCHES_25 = [
-  { round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null, bestOf: 5, scheduledAt: null },
+  { id: 500, round: 1, bracketSlot: 0, team1Id: 1, team2Id: 2, team1Score: 0, team2Score: 0, winnerTeamId: null, bestOf: 5, scheduledAt: null },
 ];
 
 // 7차 CK 팀: A팀(평균 700) > B팀(평균 500)
@@ -43,6 +43,9 @@ beforeEach(() => {
   mockModels.tournament.findAll.mockResolvedValue(TOURNAMENTS);
   mockModels.tournament_team.findAll.mockImplementation(({ where }) => Promise.resolve(where.tournamentId === 25 ? TEAMS_25 : []));
   mockModels.tournament_match.findAll.mockImplementation(({ where }) => Promise.resolve(where.tournamentId === 25 ? MATCHES_25 : []));
+  mockModels.tournament_match.findOne.mockImplementation(({ where }) => Promise.resolve(
+    MATCHES_25.find((m) => m.id === where.id && where.tournamentId === 25) || null,
+  ));
   mockModels.tournament_scrim.findAll.mockResolvedValue([]);
   mockModels.match.findAll.mockResolvedValue([]);
   mockModels.user.findAll.mockImplementation(({ where }) => Promise.resolve((where.puuid || []).map((p) => USERS[p]).filter(Boolean)));
@@ -123,5 +126,16 @@ describe('getTournamentBracket', () => {
     const r = await bridges.getTournamentBracket(4, { name: '6차 CK' });
     expect(r.error).toContain('대진표');
     expect(r.tournament.name).toBe('6차 CK');
+  });
+});
+
+describe('buildTeamFactors (예측 공유 코어)', () => {
+  test('팀 팩터를 빌드하고 teamById/pairScrim/expected를 제공한다', async () => {
+    const f = await bridges.buildTeamFactors(4, 25);
+    expect(f.teams).toHaveLength(2);
+    expect(f.teamById[1].name).toBe('A팀');
+    expect(f.teamById[1].avgRating).toBe(700);
+    expect(typeof f.expected).toBe('function');
+    expect(f.pairScrim(f.teamById[1], f.teamById[2])).toEqual({ aWon: 0, aLost: 0 });
   });
 });
