@@ -1,5 +1,6 @@
 const mockModels = {
   match_player_stat: { findAll: jest.fn() },
+  match_team_stat: { findAll: jest.fn() },
   lcu_game_raw: { findAll: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
@@ -14,6 +15,7 @@ const { getUserInternalStats, getChampionTierlist } = require('../../src/control
 const row = (overrides) => ({
   riotGameKey: 'KR_1',
   puuid: 'me',
+  teamNo: 1,
   position: 'MIDDLE',
   championId: 1,
   kills: 5,
@@ -35,15 +37,18 @@ const row = (overrides) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockModels.match_team_stat.findAll.mockResolvedValue([]);
 });
 
 describe('getUserInternalStats', () => {
   test('챔피언별/포지션별 집계와 라인전 지표', async () => {
-    mockModels.match_player_stat.findAll.mockResolvedValue([
-      row({ riotGameKey: 'KR_1', championId: 1, win: true, kills: 10, deaths: 2, assists: 6 }),
-      row({ riotGameKey: 'KR_2', championId: 1, win: false, kills: 2, deaths: 6, assists: 4, csDiff: -20, goldDiff: -800, damageDiff: -2000 }),
-      row({ riotGameKey: 'KR_3', championId: 7, win: true, position: 'TOP', csDiff: null, goldDiff: null, damageDiff: null }),
-    ]);
+    mockModels.match_player_stat.findAll
+      .mockResolvedValueOnce([
+        row({ riotGameKey: 'KR_1', championId: 1, win: true, kills: 10, deaths: 2, assists: 6 }),
+        row({ riotGameKey: 'KR_2', championId: 1, win: false, kills: 2, deaths: 6, assists: 4, csDiff: -20, goldDiff: -800, damageDiff: -2000 }),
+        row({ riotGameKey: 'KR_3', championId: 7, win: true, position: 'TOP', csDiff: null, goldDiff: null, damageDiff: null }),
+      ])
+      .mockResolvedValueOnce([]); // 팀 총킬 조회 (빈 결과 → killParticipation null)
 
     const stats = await getUserInternalStats({ groupId: 2, puuid: 'me' });
     expect(stats.totalGames).toBe(3);
@@ -67,6 +72,62 @@ describe('getUserInternalStats', () => {
     expect(top.games).toBe(1);
     expect(top.laneGames).toBe(0);
     expect(top.csDiffAvg).toBeNull();
+
+    // 팀킬 정보가 없으면 killParticipation null
+    expect(champ1.killParticipation).toBeNull();
+  });
+
+  test('챔피언별 주 포지션(최빈값) + 포지션 맞춤 지표', async () => {
+    mockModels.match_player_stat.findAll
+      .mockResolvedValueOnce([
+        // champ1: MIDDLE 2판 + TOP 1판 → mainPosition MIDDLE
+        row({ riotGameKey: 'KR_1', championId: 1, position: 'MIDDLE', win: true, kills: 10, deaths: 2, assists: 6, goldDiff: 500 }),
+        row({ riotGameKey: 'KR_2', championId: 1, position: 'MIDDLE', win: false, kills: 2, deaths: 6, assists: 4, csDiff: -20, goldDiff: -800 }),
+        row({ riotGameKey: 'KR_3', championId: 1, position: 'TOP', win: true, kills: 0, deaths: 0, assists: 0, csDiff: null, goldDiff: null }),
+      ])
+      .mockResolvedValueOnce([
+        // KR_1: 본인 팀(win=true) 총킬 18·총딜 50000, 상대 5
+        { riotGameKey: 'KR_1', win: true, kills: 10, damageToChampions: 20000 },
+        { riotGameKey: 'KR_1', win: true, kills: 8, damageToChampions: 30000 },
+        { riotGameKey: 'KR_1', win: false, kills: 5, damageToChampions: 40000 },
+        // KR_2: 본인 팀(win=false) 총킬 7·총딜 40000
+        { riotGameKey: 'KR_2', win: false, kills: 2, damageToChampions: 20000 },
+        { riotGameKey: 'KR_2', win: false, kills: 5, damageToChampions: 20000 },
+        { riotGameKey: 'KR_2', win: true, kills: 20, damageToChampions: 90000 },
+        // KR_3: 본인 팀 총킬 0 → 킬관여 분모/분자 모두 제외 (딜은 20000이라 딜비중엔 포함)
+        { riotGameKey: 'KR_3', win: true, kills: 0, damageToChampions: 20000 },
+      ]);
+    // 팀 오브젝트: KR_1만 존재 — 내 팀(1) 4마리 vs 상대(2) 4마리 → 획득률 50%
+    mockModels.match_team_stat.findAll.mockResolvedValue([
+      { riotGameKey: 'KR_1', teamNo: 1, baronKills: 1, dragonKills: 2, riftHeraldKills: 0, hordeKills: 1 },
+      { riotGameKey: 'KR_1', teamNo: 2, baronKills: 0, dragonKills: 2, riftHeraldKills: 1, hordeKills: 1 },
+    ]);
+
+    const stats = await getUserInternalStats({ groupId: 2, puuid: 'me' });
+    const champ1 = stats.champions.find((c) => c.championId === 1);
+
+    expect(champ1.mainPosition).toBe('MIDDLE'); // 최빈값
+    // 킬관여 = (16 + 6) / (18 + 7) = 88% (KR_3은 팀킬 0이라 제외)
+    expect(champ1.killParticipation).toBe(88);
+    // dpm = 20000*3 / 90분 ≈ 667, visionPerMin = 90 / 90분 = 1
+    expect(champ1.dpm).toBe(667);
+    expect(champ1.visionPerMin).toBe(1);
+    // 맞라인 골드 격차 = (500 - 800) / 2 = -150 (goldDiff 있는 판만)
+    expect(champ1.laneGoldDiffAvg).toBe(-150);
+    // 딜 비중 = (20000*3) / (50000+40000+20000) = 54.5%
+    expect(champ1.damageShare).toBe(54.5);
+    // GPM = 12000*3 / 90분 = 400
+    expect(champ1.gpm).toBe(400);
+    // 오브젝트 획득률 = 4 / 8 = 50% (팀 스탯 있는 KR_1만 집계)
+    expect(champ1.objectiveShare).toBe(50);
+  });
+
+  test('포지션 기록이 전혀 없는 챔피언은 mainPosition null', async () => {
+    mockModels.match_player_stat.findAll
+      .mockResolvedValueOnce([row({ riotGameKey: 'KR_1', championId: 1, position: null })])
+      .mockResolvedValueOnce([]);
+    const stats = await getUserInternalStats({ groupId: 2, puuid: 'me' });
+    expect(stats.champions[0].mainPosition).toBeNull();
   });
 
   test('기록 없으면 빈 결과', async () => {

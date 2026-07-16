@@ -28,6 +28,8 @@ function aggregate(rows, keyFn) {
         cs: 0,
         durationSec: 0,
         damageToChampions: 0,
+        visionScore: 0,
+        goldEarned: 0,
         diffGames: 0,
         csDiffSum: 0,
         goldDiffSum: 0,
@@ -43,6 +45,8 @@ function aggregate(rows, keyFn) {
     g.cs += row.cs;
     g.durationSec += row.gameDurationSec;
     g.damageToChampions += row.damageToChampions;
+    g.visionScore += row.visionScore;
+    g.goldEarned += row.goldEarned;
     if (row.csDiff !== null) {
       g.diffGames += 1;
       g.csDiffSum += row.csDiff;
@@ -70,22 +74,113 @@ async function getUserInternalStats({ groupId, puuid }) {
     return { totalGames: 0, wins: 0, champions: [], positions: [] };
   }
 
+  // 팀 단위 분모 집계: 같은 게임에서 win 값이 같은 행 = 같은 팀 (총킬=킬관여, 총딜=딜비중)
+  const gameKeys = [...new Set(rows.map((r) => r.riotGameKey))];
+  const teamRows = await models.match_player_stat.findAll({
+    where: { riotGameKey: { [Op.in]: gameKeys } },
+    attributes: ['riotGameKey', 'win', 'kills', 'damageToChampions'],
+    raw: true,
+  });
+  const teamKillsByGame = new Map(); // `${gameKey}:${win}` → 팀 총킬
+  const teamDamageByGame = new Map(); // `${gameKey}:${win}` → 팀 총딜
+  for (const r of teamRows) {
+    const key = `${r.riotGameKey}:${r.win ? 1 : 0}`;
+    teamKillsByGame.set(key, (teamKillsByGame.get(key) || 0) + r.kills);
+    teamDamageByGame.set(key, (teamDamageByGame.get(key) || 0) + r.damageToChampions);
+  }
+
+  // 팀 오브젝트(에픽 몬스터) — 게임 길이에 무관한 획득률(내 팀 / 양팀 합) 계산용
+  const teamStatRows = await models.match_team_stat.findAll({
+    where: { riotGameKey: { [Op.in]: gameKeys } },
+    attributes: ['riotGameKey', 'teamNo', 'baronKills', 'dragonKills', 'riftHeraldKills', 'hordeKills'],
+    raw: true,
+  });
+  const epicMonsters = (t) => t.baronKills + t.dragonKills + t.riftHeraldKills + t.hordeKills;
+  const teamObjByGame = new Map(); // `${gameKey}:${teamNo}` → 에픽 몬스터 수
+  for (const t of teamStatRows) {
+    teamObjByGame.set(`${t.riotGameKey}:${t.teamNo}`, epicMonsters(t));
+  }
+
+  // 챔피언별 부가 집계: 포지션 최빈값 + 킬관여/딜비중/오브젝트 획득률 (분모 0인 판은 양쪽 모두 제외)
+  const extras = new Map(); // championId → 부가 누적치
+  for (const row of rows) {
+    if (!extras.has(row.championId)) {
+      extras.set(row.championId, {
+        positionCounts: new Map(),
+        kpKillsAssists: 0,
+        kpTeamKills: 0,
+        myDamage: 0,
+        teamDamage: 0,
+        myEpic: 0,
+        totalEpic: 0,
+      });
+    }
+    const e = extras.get(row.championId);
+    if (row.position) {
+      e.positionCounts.set(row.position, (e.positionCounts.get(row.position) || 0) + 1);
+    }
+    const teamKey = `${row.riotGameKey}:${row.win ? 1 : 0}`;
+    const tk = teamKillsByGame.get(teamKey) || 0;
+    if (tk > 0) {
+      e.kpKillsAssists += row.kills + row.assists;
+      e.kpTeamKills += tk;
+    }
+    const td = teamDamageByGame.get(teamKey) || 0;
+    if (td > 0) {
+      e.myDamage += row.damageToChampions;
+      e.teamDamage += td;
+    }
+    if (row.teamNo) {
+      const my = teamObjByGame.get(`${row.riotGameKey}:${row.teamNo}`);
+      const enemy = teamObjByGame.get(`${row.riotGameKey}:${row.teamNo === 1 ? 2 : 1}`);
+      if (my !== undefined && enemy !== undefined && my + enemy > 0) {
+        e.myEpic += my;
+        e.totalEpic += my + enemy;
+      }
+    }
+  }
+  const mainPositionOf = (e) => {
+    let best = null;
+    let bestCount = 0;
+    for (const [pos, count] of e.positionCounts) {
+      if (count > bestCount) {
+        best = pos;
+        bestCount = count;
+      }
+    }
+    return best;
+  };
+
   const champGroups = aggregate(rows, (r) => r.championId);
   const names = await resolveChampionNames([...champGroups.keys()]);
   const champions = [...champGroups.entries()]
-    .map(([championId, g]) => ({
-      championId,
-      championName: names[championId].name,
-      championKoName: names[championId].koName,
-      games: g.games,
-      wins: g.wins,
-      winRate: winRate(g),
-      kills: round1(g.kills / g.games),
-      deaths: round1(g.deaths / g.games),
-      assists: round1(g.assists / g.games),
-      kda: avgKda(g.kills, g.deaths, g.assists),
-      csPerMin: csPerMin(g),
-    }))
+    .map(([championId, g]) => {
+      const e = extras.get(championId);
+      return {
+        championId,
+        championName: names[championId].name,
+        championKoName: names[championId].koName,
+        games: g.games,
+        wins: g.wins,
+        winRate: winRate(g),
+        kills: round1(g.kills / g.games),
+        deaths: round1(g.deaths / g.games),
+        assists: round1(g.assists / g.games),
+        kda: avgKda(g.kills, g.deaths, g.assists),
+        csPerMin: csPerMin(g),
+        // 포지션 맞춤 표시용 부가 지표
+        mainPosition: mainPositionOf(e),
+        dpm: dpm(g),
+        visionPerMin: g.durationSec > 0 ? round1(g.visionScore / (g.durationSec / 60)) : 0,
+        killParticipation: e.kpTeamKills > 0 ? round1((e.kpKillsAssists / e.kpTeamKills) * 100) : null,
+        laneGoldDiffAvg: g.diffGames > 0 ? Math.round(g.goldDiffSum / g.diffGames) : null,
+        // 공통: 팀 내 딜 비중(%) / 분당 골드
+        damageShare: e.teamDamage > 0 ? round1((e.myDamage / e.teamDamage) * 100) : null,
+        gpm: g.durationSec > 0 ? Math.round(g.goldEarned / (g.durationSec / 60)) : 0,
+        // 정글: 에픽 몬스터(바론+용+전령+유충) 획득률 % — 스폰이 고정 타이밍이라 시간 환산 대신 양팀 합 대비
+        objectiveShare: e.totalEpic > 0 ? round1((e.myEpic / e.totalEpic) * 100) : null,
+      };
+    })
     .sort((a, b) => b.games - a.games || b.wins - a.wins);
 
   const posGroups = aggregate(rows, (r) => r.position);
