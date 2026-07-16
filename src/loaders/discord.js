@@ -2142,7 +2142,14 @@ module.exports = async (app) => {
 
   const commandList = await commandListLoader();
   const commandJsons = commandList.getSlashCommands().map((command) => command.toJSON());
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
+  // Discord는 길드당 하루 200개 명령어 생성 한도가 있고, bulk PUT은 내용이 같아도 개당 생성으로
+  // 카운트한다. 배포(재시작)가 잦으면 한도가 소진되므로 등록된 명령어와 다를 때만 PUT한다.
+  // 한도 초과(30034) 시 discord.js 기본 동작은 리셋까지 무기한 대기라 침묵 장애가 되므로,
+  // 1분 이상 대기가 필요한 rate limit은 즉시 에러로 던져 로그에 남긴다.
+  const rest = new REST({
+    version: '10',
+    rejectOnRateLimit: (data) => data.retryAfter > 60 * 1000,
+  }).setToken(process.env.DISCORD_BOT_TOKEN);
 
   const groups = await models.group.findAll({
     where: { discordGuildId: { [Op.ne]: null } },
@@ -2150,12 +2157,22 @@ module.exports = async (app) => {
   });
   const serverIds = groups.map(g => g.discordGuildId);
 
-  for (let serverId of serverIds) {
-    rest
-      .put(Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, serverId), {
-        body: commandJsons,
-      })
-      .then((data) => console.log(`[${serverId}] Successfully registered ${data.length} application commands.`))
-      .catch(console.error);
-  }
+  // 부팅을 막지 않도록 fire-and-forget, 내부는 rate limit 부담을 줄이기 위해 순차 처리
+  (async () => {
+    const desired = JSON.stringify(commandListLoader.normalizeCommands(commandJsons));
+    for (let serverId of serverIds) {
+      const route = Routes.applicationGuildCommands(process.env.DISCORD_APPLICATION_ID, serverId);
+      try {
+        const current = await rest.get(route);
+        if (JSON.stringify(commandListLoader.normalizeCommands(current)) === desired) {
+          logger.info(`[${serverId}] 슬래시 명령어 변경 없음 - 등록 생략`);
+          continue;
+        }
+        const data = await rest.put(route, { body: commandJsons });
+        logger.info(`[${serverId}] 슬래시 명령어 ${data.length}개 등록 완료`);
+      } catch (e) {
+        logger.error(`[${serverId}] 슬래시 명령어 등록 실패: ${e.message}`);
+      }
+    }
+  })();
 };
