@@ -37,7 +37,7 @@ module.exports = (app) => {
       }
 
       const stats = await internalStats.getUserInternalStats({ groupId, puuid });
-      return res.status(200).json({ puuid, ...stats });
+      return res.status(200).json({ result: { puuid, ...stats } });
     } catch (e) {
       logger.error(`[internal-stats] 유저 통계 조회 실패: ${e.message}`);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
@@ -63,7 +63,7 @@ module.exports = (app) => {
       const minGames = req.query.minGames ? Math.max(1, Number(req.query.minGames)) : undefined;
 
       const result = await internalStats.getChampionTierlist({ groupId, position, minGames });
-      return res.status(200).json(result);
+      return res.status(200).json({ result });
     } catch (e) {
       logger.error(`[internal-stats] 티어리스트 조회 실패: ${e.message}`);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
