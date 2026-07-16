@@ -1,8 +1,9 @@
 const mockModels = {
   user: { findAll: jest.fn() },
+  summoner: { findAll: jest.fn() },
   match: { findAll: jest.fn() },
   lcu_game_raw: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
-  match_player_stat: { bulkCreate: jest.fn() },
+  match_player_stat: { bulkCreate: jest.fn(), findAll: jest.fn(), update: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -13,13 +14,21 @@ const {
   extractPlayers,
   resolveTeamPositions,
   pickBestCandidate,
-  mapRaw,
+  processRaw,
+  resolveDbPuuids,
   ingestGame,
   resolveGroupFromPuuids,
 } = require('../../src/controller/lcu-collector');
 
 // 실제 내전 게임 원본 (현수필 제공, 2026-07-11)
 const realGame = require('../fixtures/lcu-custom-game-8294822545.json');
+
+// LCU puuid ↔ 우리 DB puuid 브릿지 모킹용: Riot ID를 LCU puuid에 그대로 매핑(항등)
+const identitySummoners = (game) =>
+  (game.participantIdentities || []).map((it) => ({
+    name: `${it.player.gameName}#${it.player.tagLine}`,
+    puuid: it.player.puuid,
+  }));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -109,7 +118,21 @@ describe('pickBestCandidate', () => {
   });
 });
 
-describe('mapRaw (실데이터 통합)', () => {
+describe('resolveDbPuuids (Riot ID 브릿지)', () => {
+  test('등록 소환사는 우리 DB puuid로 변환, 미등록은 LCU puuid 폴백', async () => {
+    const players = extractPlayers(realGame);
+    const hyunsupil = players.find((p) => p.gameName === '현수필');
+    const guest = players.find((p) => p.gameName === 'Kanose');
+    // 현수필만 DB에 등록됐다고 가정
+    mockModels.summoner.findAll.mockResolvedValue([{ name: '현수필#KR6', puuid: 'DB_HYUNSUPIL' }]);
+
+    const map = await resolveDbPuuids(players);
+    expect(map.get(hyunsupil.participantId)).toBe('DB_HYUNSUPIL');
+    expect(map.get(guest.participantId)).toBe(guest.puuid); // 미등록 → LCU puuid 폴백
+  });
+});
+
+describe('processRaw (실데이터 통합)', () => {
   test('내전 match와 매핑되어 10행 생성, 포지션/맞라인 diff 포함', async () => {
     const players = extractPlayers(realGame);
     const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
@@ -122,6 +145,8 @@ describe('mapRaw (실데이터 통합)', () => {
       team1: team100Puuids.map((p) => [p, '이름', 500, null]),
       team2: team200Puuids.map((p) => [p, '이름', 500, null]),
     };
+    // summoners가 Riot ID→LCU puuid 항등 매핑 → dbPuuid == LCU puuid (기존 검증 유지)
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
     mockModels.match.findAll.mockResolvedValue([match]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
     mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
@@ -136,12 +161,14 @@ describe('mapRaw (실데이터 통합)', () => {
       save: jest.fn(),
     };
 
-    const result = await mapRaw(raw);
+    const result = await processRaw(raw);
+    expect(result.statsCreated).toBe(true);
     expect(result.mapped).toBe(true);
     expect(result.matchId).toBe(777);
     // team200(내전 team2) 전원 승리 → winTeam 2
     expect(result.winTeam).toBe(2);
     expect(raw.mappedMatchId).toBe(777);
+    expect(raw.statsProcessedAt).toBeInstanceOf(Date);
     expect(raw.save).toHaveBeenCalled();
 
     const rows = mockModels.match_player_stat.bulkCreate.mock.calls[0][0];
@@ -159,9 +186,11 @@ describe('mapRaw (실데이터 통합)', () => {
     expect(team200Rows.every((r) => r.win)).toBe(true);
   });
 
-  test('일치하는 내전 기록이 없으면 미매핑 유지', async () => {
+  test('봇 match가 없어도 통계는 생성(수동 커스텀), matchId/seasonId는 null', async () => {
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
     mockModels.match.findAll.mockResolvedValue([]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
 
     const raw = {
       id: 1,
@@ -173,10 +202,22 @@ describe('mapRaw (실데이터 통합)', () => {
       save: jest.fn(),
     };
 
-    const result = await mapRaw(raw);
+    const result = await processRaw(raw);
+    expect(result.statsCreated).toBe(true);
     expect(result.mapped).toBe(false);
-    expect(raw.save).not.toHaveBeenCalled();
-    expect(mockModels.match_player_stat.bulkCreate).not.toHaveBeenCalled();
+    expect(result.matchId).toBeNull();
+    expect(result.winTeam).toBeNull();
+    expect(raw.mappedMatchId).toBeUndefined();
+    expect(raw.statsProcessedAt).toBeInstanceOf(Date);
+    expect(raw.save).toHaveBeenCalled();
+
+    const rows = mockModels.match_player_stat.bulkCreate.mock.calls[0][0];
+    expect(rows).toHaveLength(10);
+    expect(rows.every((r) => r.matchId === null && r.seasonId === null)).toBe(true);
+    // 포지션/맞라인 diff는 봇 match 없이도 계산됨
+    const diana = rows.find((r) => r.puuid === '54b7656f-303d-564b-81a4-bba767f941fa');
+    expect(diana.position).toBe('JUNGLE');
+    expect(diana.csDiff).toBe(202 - 229);
   });
 });
 
@@ -216,7 +257,8 @@ describe('ingestGame (무설정 자동 인식)', () => {
 
   test('그룹 판별 실패 시 skipped (저장 안 함)', async () => {
     mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
-    mockModels.user.findAll.mockResolvedValue([]); // 아무도 등록 안 됨
+    mockModels.summoner.findAll.mockResolvedValue([]); // 소환사 미등록 → LCU puuid 폴백
+    mockModels.user.findAll.mockResolvedValue([]); // 아무도 그룹 등록 안 됨
     const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
     expect(result.status).toBe('skipped');
     expect(result.reason).toBe('no_group');
@@ -230,8 +272,9 @@ describe('ingestGame (무설정 자동 인식)', () => {
     expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
   });
 
-  test('정상 저장 + 그룹 자동 판별', async () => {
+  test('정상 저장 + 그룹 자동 판별 + 통계 생성', async () => {
     mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame)); // Riot ID→LCU puuid 항등
     // 팀100 5명이 그룹2로 등록됨 → 그룹2 판별
     const team100 = extractPlayers(realGame)
       .filter((p) => p.teamId === 100)
@@ -246,15 +289,21 @@ describe('ingestGame (무설정 자동 인식)', () => {
       rawJson: realGame,
       save: jest.fn(),
     });
-    mockModels.match.findAll.mockResolvedValue([]); // 매핑 대상 없음 (저장만 확인)
+    mockModels.match.findAll.mockResolvedValue([]); // 봇 match 없음 → 통계만 생성
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
 
     const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
     expect(result.status).toBe('created');
     expect(result.groupId).toBe(2);
+    expect(result.statsCreated).toBe(true);
+    expect(result.mapped).toBe(false);
     expect(mockModels.lcu_game_raw.create).toHaveBeenCalled();
     const createArg = mockModels.lcu_game_raw.create.mock.calls[0][0];
     expect(createArg.groupId).toBe(2);
     expect(createArg.bansJson).toHaveLength(10);
+    // 봇 match 없어도 10행 생성
+    expect(mockModels.match_player_stat.bulkCreate).toHaveBeenCalled();
+    expect(mockModels.match_player_stat.bulkCreate.mock.calls[0][0]).toHaveLength(10);
   });
 });

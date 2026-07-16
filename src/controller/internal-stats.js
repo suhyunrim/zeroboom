@@ -127,9 +127,9 @@ async function getChampionTierlist({ groupId, position = null, minGames = TIERLI
     return { totalGames: 0, minGames, champions: [] };
   }
 
-  // 밴 집계 (매핑 완료된 raw만)
+  // 밴 집계 (통계 생성된 raw 전체 — 봇 match 매핑 여부와 무관)
   const rawRows = await models.lcu_game_raw.findAll({
-    where: { groupId, mappedMatchId: { [Op.ne]: null } },
+    where: { groupId, statsProcessedAt: { [Op.ne]: null } },
     attributes: ['bansJson'],
     raw: true,
   });

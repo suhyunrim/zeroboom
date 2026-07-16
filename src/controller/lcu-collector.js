@@ -136,14 +136,38 @@ function pickBestCandidate(rawPuuids, gameCreation, candidates) {
   return best;
 }
 
-// raw 1건을 내전 match와 매핑하고 match_player_stats 10행을 생성
-async function mapRaw(raw) {
-  const game = raw.rawJson;
-  const players = extractPlayers(game);
-  if (players.length !== 10 || players.some((p) => !p.puuid)) {
-    return { mapped: false, reason: '참가자 정보 불완전' };
+// LCU가 주는 puuid는 UUID 형식(Riot 내부값)이라 우리 DB의 Riot API puuid와 직접 매칭 불가.
+// 참가자의 gameName#tagLine(Riot ID)으로 summoners.name을 조회해 우리 DB puuid로 변환한다.
+// 미등록/이름 불일치 참가자는 LCU puuid를 그대로 폴백 (게스트 행은 멤버 조회에서 자연히 제외됨).
+// 반환: Map<participantId, dbPuuid>
+async function resolveDbPuuids(players) {
+  const byPidRiotId = new Map();
+  const riotIds = [];
+  for (const p of players) {
+    if (!p.gameName) continue;
+    const riotId = `${p.gameName}#${p.tagLine}`;
+    byPidRiotId.set(p.participantId, riotId);
+    riotIds.push(riotId);
   }
+  const rows = riotIds.length
+    ? await models.summoner.findAll({
+        where: { name: { [Op.in]: riotIds } },
+        attributes: ['name', 'puuid'],
+        raw: true,
+      })
+    : [];
+  const puuidByRiotId = new Map(rows.map((r) => [r.name, r.puuid]));
 
+  const result = new Map();
+  for (const p of players) {
+    const riotId = byPidRiotId.get(p.participantId);
+    result.set(p.participantId, (riotId && puuidByRiotId.get(riotId)) || p.puuid);
+  }
+  return result;
+}
+
+// gameCreation 근접 + puuid 8/10 일치로 봇 생성 내전 match 후보를 찾는다 (없으면 null).
+async function findBotMatch(raw, dbPuuids) {
   const gameTime = new Date(raw.gameCreation).getTime();
   const windowStart = new Date(gameTime - MATCH_TIME_WINDOW_MS);
   const windowEnd = new Date(gameTime + MATCH_TIME_WINDOW_MS);
@@ -173,29 +197,38 @@ async function mapRaw(raw) {
   const usedMatchIds = new Set(usedRows.map((r) => r.mappedMatchId));
   const available = candidates.filter((m) => !usedMatchIds.has(m.gameId));
 
-  const match = pickBestCandidate(players.map((p) => p.puuid), raw.gameCreation, available);
-  if (!match) {
-    return { mapped: false, reason: '일치하는 내전 기록 없음' };
-  }
+  return pickBestCandidate(dbPuuids, raw.gameCreation, available);
+}
 
-  const positions = resolvePositions(players);
+// 승리한 내전 팀 도출 (승리팀 전원 win=true) → 자동 승패확정에 사용
+function deriveWinTeam(match, rows) {
+  const team1Puuids = new Set(match.team1.map((entry) => entry[0]));
+  const team1Wins = rows.filter((r) => team1Puuids.has(r.puuid) && r.win).length;
+  const team2Wins = rows.filter((r) => !team1Puuids.has(r.puuid) && r.win).length;
+  if (team1Wins > team2Wins) return 1;
+  if (team2Wins > team1Wins) return 2;
+  return null;
+}
 
+// 참가자 10명 → match_player_stats 10행 구성. puuid는 우리 DB puuid(dbByPid) 기준.
+// match가 있으면 matchId/seasonId 채움, 없으면 null (수동 커스텀).
+function buildStatRows({ raw, players, dbByPid, positions, match }) {
+  const puuidOf = (p) => dbByPid.get(p.participantId);
   // 맞라인 상대 찾기 (반대 팀 같은 포지션)
   const byPosition = new Map(); // `${teamId}:${position}` → player
   for (const p of players) {
     const pos = positions.get(p.participantId);
     if (pos) byPosition.set(`${p.teamId}:${pos}`, p);
   }
-
-  const rows = players.map((p) => {
+  return players.map((p) => {
     const pos = positions.get(p.participantId);
     const opponent = pos ? byPosition.get(`${p.teamId === 100 ? 200 : 100}:${pos}`) : null;
     return {
-      matchId: match.gameId,
+      matchId: match ? match.gameId : null,
       riotGameKey: raw.riotGameKey,
       groupId: raw.groupId,
-      seasonId: match.seasonId ?? null,
-      puuid: p.puuid,
+      seasonId: match ? (match.seasonId ?? null) : null,
+      puuid: puuidOf(p),
       position: pos,
       championId: p.championId,
       kills: p.kills,
@@ -208,26 +241,64 @@ async function mapRaw(raw) {
       visionScore: p.visionScore,
       gameDurationSec: raw.gameDuration,
       win: p.win,
-      laneOpponentPuuid: opponent ? opponent.puuid : null,
+      laneOpponentPuuid: opponent ? puuidOf(opponent) : null,
       csDiff: opponent ? p.cs - opponent.cs : null,
       goldDiff: opponent ? p.goldEarned - opponent.goldEarned : null,
       damageDiff: opponent ? p.damageToChampions - opponent.damageToChampions : null,
     };
   });
+}
 
+// raw 1건 → match_player_stats 10행 생성(항상). 봇 match가 있으면 매핑까지(best-effort).
+// 커스텀이면 봇 match 유무와 무관하게 통계를 만든다.
+async function processRaw(raw) {
+  const game = raw.rawJson;
+  const players = extractPlayers(game);
+  if (players.length !== 10 || players.some((p) => !p.puuid)) {
+    return { statsCreated: false, mapped: false, reason: '참가자 정보 불완전' };
+  }
+
+  const dbByPid = await resolveDbPuuids(players);
+  const positions = resolvePositions(players);
+  const dbPuuids = players.map((p) => dbByPid.get(p.participantId));
+  const match = await findBotMatch(raw, dbPuuids);
+
+  const rows = buildStatRows({ raw, players, dbByPid, positions, match });
   await models.match_player_stat.bulkCreate(rows, { ignoreDuplicates: true });
+
+  raw.statsProcessedAt = new Date();
+  let winTeam = null;
+  if (match) {
+    raw.mappedMatchId = match.gameId;
+    winTeam = deriveWinTeam(match, rows);
+  }
+  await raw.save();
+
+  return { statsCreated: true, mapped: !!match, matchId: match ? match.gameId : null, winTeam };
+}
+
+// 이미 통계가 있는 raw를 봇 match에 뒤늦게 매핑 (승패확정이 업로드보다 늦은 경우 회수).
+// 통계 재생성/puuid 재조회 없이 매핑만 시도한다.
+async function remapRaw(raw) {
+  if (raw.mappedMatchId) return { mapped: false };
+  const statRows = await models.match_player_stat.findAll({
+    where: { riotGameKey: raw.riotGameKey },
+    attributes: ['puuid', 'win'],
+    raw: true,
+  });
+  if (statRows.length === 0) return { mapped: false };
+
+  const match = await findBotMatch(raw, statRows.map((r) => r.puuid));
+  if (!match) return { mapped: false };
+
+  await models.match_player_stat.update(
+    { matchId: match.gameId, seasonId: match.seasonId ?? null },
+    { where: { riotGameKey: raw.riotGameKey } },
+  );
   raw.mappedMatchId = match.gameId;
   await raw.save();
 
-  // 승리한 내전 팀 도출 (승리팀 전원 win=true) → 자동 승패확정에 사용
-  const team1Puuids = new Set(match.team1.map((entry) => entry[0]));
-  const team1Wins = rows.filter((r) => team1Puuids.has(r.puuid) && r.win).length;
-  const team2Wins = rows.filter((r) => !team1Puuids.has(r.puuid) && r.win).length;
-  let winTeam = null;
-  if (team1Wins > team2Wins) winTeam = 1;
-  else if (team2Wins > team1Wins) winTeam = 2;
-
-  return { mapped: true, matchId: match.gameId, winTeam };
+  return { mapped: true, matchId: match.gameId, winTeam: deriveWinTeam(match, statRows) };
 }
 
 const GROUP_RESOLVE_MIN = 4; // 게임 참가자 10명 중 이 그룹 소속으로 등록된 인원이 이 이상이어야 그룹 확정
@@ -252,16 +323,15 @@ async function resolveGroupFromPuuids(puuids) {
   return bestCount >= GROUP_RESOLVE_MIN ? best : null;
 }
 
-// 업로드 수신: 참가자 검증 → 그룹 자동판별 → dedup → raw 저장 → 즉시 매핑
+// 업로드 수신: 참가자 검증 → Riot ID로 그룹 자동판별 → dedup → raw 저장 → 통계 생성(+매핑)
 async function ingestGame({ uploaderPuuid, game }) {
   const riotGameKey = `${game.platformId}_${game.gameId}`;
 
-  const puuids = (game.participantIdentities || [])
+  // 업로더가 실제 참가자여야 함 (LCU puuid 공간에서 비교, 기본 오용 방지)
+  const lcuPuuids = (game.participantIdentities || [])
     .map((it) => it.player && it.player.puuid)
     .filter(Boolean);
-
-  // 업로더가 실제 참가자여야 함 (기본 오용 방지)
-  if (!puuids.includes(uploaderPuuid)) {
+  if (!lcuPuuids.includes(uploaderPuuid)) {
     return { status: 'rejected', reason: 'uploader_not_participant' };
   }
 
@@ -270,7 +340,10 @@ async function ingestGame({ uploaderPuuid, game }) {
     return { status: 'duplicate', riotGameKey };
   }
 
-  const groupId = await resolveGroupFromPuuids(puuids);
+  // Riot ID(gameName#tagLine)로 우리 DB puuid를 조회한 뒤 그룹 판별
+  const players = extractPlayers(game);
+  const dbByPid = await resolveDbPuuids(players);
+  const groupId = await resolveGroupFromPuuids([...dbByPid.values()]);
   if (!groupId) {
     return { status: 'skipped', reason: 'no_group', riotGameKey };
   }
@@ -292,58 +365,83 @@ async function ingestGame({ uploaderPuuid, game }) {
     rawJson: game,
   });
 
-  let mapResult = { mapped: false };
+  let result = { statsCreated: false, mapped: false };
   try {
-    mapResult = await mapRaw(raw);
+    result = await processRaw(raw);
   } catch (e) {
-    logger.error(`[collector] 매핑 실패 (${riotGameKey}): ${e.message}`);
+    logger.error(`[collector] 통계 생성 실패 (${riotGameKey}): ${e.message}`);
   }
 
   return {
     status: 'created',
     riotGameKey,
     groupId,
-    mapped: mapResult.mapped,
-    matchId: mapResult.matchId || null,
-    winTeam: mapResult.winTeam ?? null,
+    statsCreated: result.statsCreated,
+    mapped: result.mapped,
+    matchId: result.matchId || null,
+    winTeam: result.winTeam ?? null,
   };
 }
 
-// 미매핑 raw 재시도 (스케줄러용) — 승패확정이 업로드보다 늦은 경우를 회수.
+// 미처리/미매핑 raw 재시도 (스케줄러용).
+// (1) 통계 미생성 raw → 생성 재시도, (2) 통계는 있으나 봇 match 미매핑 raw → 매핑만 재시도
+//     (승패확정이 헬퍼 업로드보다 늦게 이뤄진 판을 회수)
 // onMapped: 새로 매핑된 건마다 호출 (자동 승패확정 트리거용)
 async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
   const since = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
-  const rows = await models.lcu_game_raw.findAll({
-    where: { mappedMatchId: null, gameCreation: { [Op.gte]: since } },
-  });
+  const fireMapped = async (result) => {
+    if (!result.mapped) return false;
+    if (onMapped) {
+      await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
+        logger.error(`[collector] 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
+      );
+    }
+    return true;
+  };
+
   let mapped = 0;
-  for (const raw of rows) {
+
+  const unprocessed = await models.lcu_game_raw.findAll({
+    where: { statsProcessedAt: null, gameCreation: { [Op.gte]: since } },
+  });
+  for (const raw of unprocessed) {
     try {
-      const result = await mapRaw(raw);
-      if (result.mapped) {
-        mapped += 1;
-        if (onMapped) {
-          await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
-            logger.error(`[collector] 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
-          );
-        }
-      }
+      if (await fireMapped(await processRaw(raw))) mapped += 1;
+    } catch (e) {
+      logger.error(`[collector] 통계 생성 재시도 실패 (${raw.riotGameKey}): ${e.message}`);
+    }
+  }
+
+  const unmapped = await models.lcu_game_raw.findAll({
+    where: {
+      statsProcessedAt: { [Op.ne]: null },
+      mappedMatchId: null,
+      gameCreation: { [Op.gte]: since },
+    },
+  });
+  for (const raw of unmapped) {
+    try {
+      if (await fireMapped(await remapRaw(raw))) mapped += 1;
     } catch (e) {
       logger.error(`[collector] 재매핑 실패 (${raw.riotGameKey}): ${e.message}`);
     }
   }
-  return { total: rows.length, mapped };
+
+  return { total: unprocessed.length + unmapped.length, mapped };
 }
 
 module.exports = {
   ingestGame,
-  mapRaw,
+  processRaw,
+  remapRaw,
   retryUnmappedRaws,
   resolveGroupFromPuuids,
+  resolveDbPuuids,
   // 테스트용 순수 함수
   extractPlayers,
   resolveTeamPositions,
   resolvePositions,
   pickBestCandidate,
+  deriveWinTeam,
   QUEST_ITEM_POSITIONS,
 };

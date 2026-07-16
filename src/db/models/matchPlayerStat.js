@@ -3,7 +3,7 @@ module.exports = (sequelize, DataTypes) => {
     'match_player_stat',
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-      matchId: { type: DataTypes.INTEGER, allowNull: false },
+      matchId: { type: DataTypes.INTEGER, allowNull: true }, // 봇 match 매핑 시에만 채워짐 (수동 커스텀은 null)
       riotGameKey: { type: DataTypes.STRING(32), allowNull: false },
       groupId: { type: DataTypes.INTEGER, allowNull: false },
       seasonId: { type: DataTypes.INTEGER, allowNull: true },

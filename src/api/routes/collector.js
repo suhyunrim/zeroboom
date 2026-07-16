@@ -42,7 +42,7 @@ module.exports = (app) => {
         actorDiscordId: null,
         actorName: `collector(${uploaderPuuid})`,
         action: 'collector.game_upload',
-        details: { riotGameKey: result.riotGameKey, uploaderPuuid, mapped: result.mapped, matchId: result.matchId },
+        details: { riotGameKey: result.riotGameKey, uploaderPuuid, statsCreated: result.statsCreated, mapped: result.mapped, matchId: result.matchId },
         source: 'api',
       });
 
@@ -58,6 +58,7 @@ module.exports = (app) => {
         result: 'created',
         riotGameKey: result.riotGameKey,
         groupId: result.groupId,
+        statsCreated: result.statsCreated,
         mapped: result.mapped,
         matchId: result.matchId,
       });
