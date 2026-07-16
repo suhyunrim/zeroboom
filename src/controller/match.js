@@ -18,6 +18,7 @@ const {
 } = require('../utils/timeUtils');
 const { STAT_TYPES } = require('../services/achievement/definitions');
 const statsRepo = require('../services/achievement/stats');
+const { resolveChampionNames } = require('../utils/champion-map');
 
 /**
  * 매치 생성 + 레이팅 스냅샷 + seasonId 자동 처리
@@ -824,6 +825,48 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
         team1: { players: team1.players, avgRating: null, ratingChange: null },
         team2: { players: team2.players, avgRating: null, ratingChange: null },
       });
+    }
+  }
+
+  // 수집된 챔피언 스탯(match_player_stat)을 additive로 부착 (페이지 matchId IN 쿼리 1번, N+1 금지)
+  if (matchSnapshots.length > 0) {
+    const statRows = await models.match_player_stat.findAll({
+      where: { groupId: group.id, matchId: { [Op.in]: matchSnapshots.map((m) => m.gameId) } },
+      raw: true,
+    });
+    if (statRows.length > 0) {
+      const names = await resolveChampionNames([...new Set(statRows.map((r) => r.championId))]);
+      const rowsByMatch = new Map(); // matchId → rows[]
+      for (const row of statRows) {
+        if (!rowsByMatch.has(row.matchId)) rowsByMatch.set(row.matchId, []);
+        rowsByMatch.get(row.matchId).push(row);
+      }
+      for (const snapshot of matchSnapshots) {
+        const rows = rowsByMatch.get(snapshot.gameId);
+        if (!rows) continue;
+        snapshot.gameDurationSec = rows[0].gameDurationSec; // 같은 매치 행은 모두 동일
+        const byPuuid = new Map(rows.map((r) => [r.puuid, r]));
+        for (const team of [snapshot.team1, snapshot.team2]) {
+          for (const player of team.players) {
+            const row = byPuuid.get(player.puuid);
+            if (!row) continue;
+            player.stat = {
+              championId: row.championId,
+              championName: names[row.championId]?.name ?? null,
+              championKoName: names[row.championId]?.koName ?? null,
+              kills: row.kills,
+              deaths: row.deaths,
+              assists: row.assists,
+              cs: row.cs,
+              goldEarned: row.goldEarned,
+              damageToChampions: row.damageToChampions,
+              visionScore: row.visionScore,
+              position: row.position,
+              gameDurationSec: row.gameDurationSec,
+            };
+          }
+        }
+      }
     }
   }
 
