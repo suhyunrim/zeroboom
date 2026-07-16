@@ -42,6 +42,10 @@ services:
       REDIS_HOST: zeroboom-redis
       REDIS_PORT: 6379
       REDIS_DB: 0
+      ELISE_UPDATES_DIR: /data/elise-updates
+    volumes:
+      # elise 자동 업데이트 피드 (latest.yml + setup exe) — nginx가 /를 앱으로 프록시하므로 별도 설정 불필요
+      - /home/ubuntu/elise-updates:/data/elise-updates:ro
     depends_on:
       db:
         condition: service_healthy
