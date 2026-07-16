@@ -40,7 +40,14 @@ module.exports.createMatchWithSnapshot = async ({ groupId, team1, team2, extra =
   );
   // 입력 원소가 position(3번째)을 실으면 저장 시 4번째 원소로 보존한다. 없으면 null.
   const withRating = (arr) =>
-    arr.map(([puuid, name, position = null]) => [puuid, name, ratingMap.get(puuid) ?? 500, position]);
+    arr.map(([puuid, name, position = null]) => {
+      const rating = ratingMap.get(puuid);
+      if (rating === undefined) {
+        // 미등록 puuid는 500 폴백 — 조용한 스냅샷 오염을 남기지 않도록 기록
+        logger.warn(`[match] 레이팅 스냅샷 매칭 실패 puuid=${puuid} name=${name} groupId=${groupId} → 500 폴백`);
+      }
+      return [puuid, name, rating ?? 500, position];
+    });
 
   const group = await models.group.findByPk(groupId, { attributes: ['settings'] });
   const currentSeason = (group?.settings && group.settings.currentSeason) || 1;
