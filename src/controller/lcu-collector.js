@@ -51,8 +51,55 @@ function extractPlayers(game) {
       damageTaken: s.totalDamageTaken || 0,
       visionScore: s.visionScore || 0,
       win: !!s.win,
+      // 상세 지표 (op.gg식 표시용)
+      item0: s.item0 ?? 0,
+      item1: s.item1 ?? 0,
+      item2: s.item2 ?? 0,
+      item3: s.item3 ?? 0,
+      item4: s.item4 ?? 0,
+      item5: s.item5 ?? 0,
+      item6: s.item6 ?? 0,
+      runeKeystoneId: s.perk0 ?? null,
+      runePrimaryStyleId: s.perkPrimaryStyle ?? null,
+      runeSubStyleId: s.perkSubStyle ?? null,
+      champLevel: s.champLevel ?? null,
+      doubleKills: s.doubleKills ?? 0,
+      tripleKills: s.tripleKills ?? 0,
+      quadraKills: s.quadraKills ?? 0,
+      pentaKills: s.pentaKills ?? 0,
+      largestMultiKill: s.largestMultiKill ?? 0,
+      largestKillingSpree: s.largestKillingSpree ?? 0,
+      firstBloodKill: !!s.firstBloodKill,
+      wardsPlaced: s.wardsPlaced ?? 0,
+      wardsKilled: s.wardsKilled ?? 0,
+      controlWardsBought: s.visionWardsBoughtInGame ?? 0,
     };
   });
+}
+
+// 팀 오브젝트 스탯 추출 (game.teams[] → match_team_stats 2행)
+// LCU 원본의 firstDargon 오타를 firstDragon으로 정정해 저장한다.
+function extractTeamRows({ raw, game, match }) {
+  return (game.teams || []).map((t) => ({
+    riotGameKey: raw.riotGameKey,
+    groupId: raw.groupId,
+    matchId: match ? match.gameId : null,
+    teamNo: t.teamId === 100 ? 1 : 2,
+    win: t.win === 'Win',
+    baronKills: t.baronKills || 0,
+    dragonKills: t.dragonKills || 0,
+    riftHeraldKills: t.riftHeraldKills || 0,
+    hordeKills: t.hordeKills || 0,
+    towerKills: t.towerKills || 0,
+    inhibitorKills: t.inhibitorKills || 0,
+    firstBlood: !!t.firstBlood,
+    firstTower: !!t.firstTower,
+    firstDragon: !!t.firstDargon,
+    firstBaron: !!t.firstBaron,
+    firstInhibitor: !!t.firstInhibitor,
+    bansJson: (t.bans || []).map((b) => ({ championId: b.championId, pickTurn: b.pickTurn })),
+    gameVersion: raw.gameVersion || null,
+  }));
 }
 
 // 한 팀(5명)의 포지션 판정. roleBoundItem 우선, 남는 자리는 휴리스틱+소거법.
@@ -265,6 +312,31 @@ function buildStatRows({ raw, players, dbByPid, positions, match }) {
       csDiff: opponent ? p.cs - opponent.cs : null,
       goldDiff: opponent ? p.goldEarned - opponent.goldEarned : null,
       damageDiff: opponent ? p.damageToChampions - opponent.damageToChampions : null,
+      // 상세 지표
+      teamNo: p.teamId === 100 ? 1 : 2,
+      item0: p.item0,
+      item1: p.item1,
+      item2: p.item2,
+      item3: p.item3,
+      item4: p.item4,
+      item5: p.item5,
+      item6: p.item6,
+      spell1Id: p.spell1Id,
+      spell2Id: p.spell2Id,
+      runeKeystoneId: p.runeKeystoneId,
+      runePrimaryStyleId: p.runePrimaryStyleId,
+      runeSubStyleId: p.runeSubStyleId,
+      champLevel: p.champLevel,
+      doubleKills: p.doubleKills,
+      tripleKills: p.tripleKills,
+      quadraKills: p.quadraKills,
+      pentaKills: p.pentaKills,
+      largestMultiKill: p.largestMultiKill,
+      largestKillingSpree: p.largestKillingSpree,
+      firstBloodKill: p.firstBloodKill,
+      wardsPlaced: p.wardsPlaced,
+      wardsKilled: p.wardsKilled,
+      controlWardsBought: p.controlWardsBought,
     };
   });
 }
@@ -286,6 +358,7 @@ async function processRaw(raw) {
 
   const rows = buildStatRows({ raw, players, dbByPid, positions, match });
   await models.match_player_stat.bulkCreate(rows, { ignoreDuplicates: true });
+  await models.match_team_stat.bulkCreate(extractTeamRows({ raw, game, match }), { ignoreDuplicates: true });
 
   raw.statsProcessedAt = new Date();
   let winTeam = null;
@@ -314,6 +387,10 @@ async function remapRaw(raw) {
 
   await models.match_player_stat.update(
     { matchId: match.gameId, seasonId: match.seasonId ?? null },
+    { where: { riotGameKey: raw.riotGameKey } },
+  );
+  await models.match_team_stat.update(
+    { matchId: match.gameId },
     { where: { riotGameKey: raw.riotGameKey } },
   );
   raw.mappedMatchId = match.gameId;
@@ -461,6 +538,7 @@ module.exports = {
   promoteToPrimaryPuuids,
   // 테스트용 순수 함수
   extractPlayers,
+  extractTeamRows,
   resolveTeamPositions,
   resolvePositions,
   pickBestCandidate,

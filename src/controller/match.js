@@ -828,13 +828,47 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
     }
   }
 
-  // 수집된 챔피언 스탯(match_player_stat)을 additive로 부착 (페이지 matchId IN 쿼리 1번, N+1 금지)
+  // 수집된 챔피언 스탯(match_player_stat)을 additive로 부착 (페이지 matchId IN 쿼리, N+1 금지)
   if (matchSnapshots.length > 0) {
+    const pageMatchIds = matchSnapshots.map((m) => m.gameId);
     const statRows = await models.match_player_stat.findAll({
-      where: { groupId: group.id, matchId: { [Op.in]: matchSnapshots.map((m) => m.gameId) } },
+      where: { groupId: group.id, matchId: { [Op.in]: pageMatchIds } },
       raw: true,
     });
     if (statRows.length > 0) {
+      const teamRows = await models.match_team_stat.findAll({
+        where: { groupId: group.id, matchId: { [Op.in]: pageMatchIds } },
+        raw: true,
+      });
+      const teamRowsByMatch = new Map(); // matchId → rows[]
+      for (const row of teamRows) {
+        if (!teamRowsByMatch.has(row.matchId)) teamRowsByMatch.set(row.matchId, []);
+        teamRowsByMatch.get(row.matchId).push(row);
+      }
+      // 팀 오브젝트 응답 형태 (raw:true라 bansJson getter 미적용 → 직접 파싱)
+      const formatTeamStat = (row) => {
+        let bans = [];
+        try {
+          bans = JSON.parse(row.bansJson) || [];
+        } catch (e) {
+          /* bansJson 파싱 실패 무시 */
+        }
+        return {
+          baronKills: row.baronKills,
+          dragonKills: row.dragonKills,
+          riftHeraldKills: row.riftHeraldKills,
+          hordeKills: row.hordeKills,
+          towerKills: row.towerKills,
+          inhibitorKills: row.inhibitorKills,
+          firstBlood: !!row.firstBlood,
+          firstTower: !!row.firstTower,
+          firstDragon: !!row.firstDragon,
+          firstBaron: !!row.firstBaron,
+          firstInhibitor: !!row.firstInhibitor,
+          bans,
+        };
+      };
+
       const names = await resolveChampionNames([...new Set(statRows.map((r) => r.championId))]);
       const rowsByMatch = new Map(); // matchId → rows[]
       for (const row of statRows) {
@@ -863,7 +897,48 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
               visionScore: row.visionScore,
               position: row.position,
               gameDurationSec: row.gameDurationSec,
+              // 상세 지표 (확장 전 수집분은 null)
+              champLevel: row.champLevel,
+              items: [row.item0, row.item1, row.item2, row.item3, row.item4, row.item5],
+              trinket: row.item6,
+              spell1Id: row.spell1Id,
+              spell2Id: row.spell2Id,
+              runeKeystoneId: row.runeKeystoneId,
+              runePrimaryStyleId: row.runePrimaryStyleId,
+              runeSubStyleId: row.runeSubStyleId,
+              doubleKills: row.doubleKills,
+              tripleKills: row.tripleKills,
+              quadraKills: row.quadraKills,
+              pentaKills: row.pentaKills,
+              largestMultiKill: row.largestMultiKill,
+              largestKillingSpree: row.largestKillingSpree,
+              firstBloodKill: row.firstBloodKill === null ? null : !!row.firstBloodKill,
+              wardsPlaced: row.wardsPlaced,
+              wardsKilled: row.wardsKilled,
+              controlWardsBought: row.controlWardsBought,
             };
+          }
+        }
+
+        // 팀 오브젝트 스탯: 내전 team1/team2 ↔ 인게임 팀(teamNo) 방향을
+        // 스탯이 부착된 플레이어의 teamNo로 판별 (판별 불가 시 생략)
+        const matchTeamRows = teamRowsByMatch.get(snapshot.gameId);
+        if (matchTeamRows && matchTeamRows.length === 2) {
+          let team1No = null;
+          for (const player of snapshot.team1.players) {
+            const row = byPuuid.get(player.puuid);
+            if (row && row.teamNo) {
+              team1No = row.teamNo;
+              break;
+            }
+          }
+          if (team1No) {
+            const t1 = matchTeamRows.find((r) => r.teamNo === team1No);
+            const t2 = matchTeamRows.find((r) => r.teamNo !== team1No);
+            if (t1 && t2) {
+              snapshot.teamStats = { team1: formatTeamStat(t1), team2: formatTeamStat(t2) };
+              if (t1.gameVersion) snapshot.gameVersion = t1.gameVersion;
+            }
           }
         }
       }

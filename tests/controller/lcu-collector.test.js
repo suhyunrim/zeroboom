@@ -4,6 +4,7 @@ const mockModels = {
   match: { findAll: jest.fn() },
   lcu_game_raw: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   match_player_stat: { bulkCreate: jest.fn(), findAll: jest.fn(), update: jest.fn() },
+  match_team_stat: { bulkCreate: jest.fn(), update: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -182,9 +183,25 @@ describe('processRaw (실데이터 통합)', () => {
     expect(diana.csDiff).toBe(202 - 229);
     expect(diana.win).toBe(false);
 
+    // 상세 지표 (실데이터 값)
+    expect(diana.teamNo).toBe(1);
+    expect(typeof diana.item0).toBe('number');
+    expect(diana.champLevel).toBeGreaterThan(0);
+    expect(typeof diana.runeKeystoneId).toBe('number');
+    expect(diana.spell1Id).toBeGreaterThan(0);
+
     // 팀2 전원 승리
     const team200Rows = rows.filter((r) => team200Puuids.includes(r.puuid));
     expect(team200Rows.every((r) => r.win)).toBe(true);
+
+    // 팀 오브젝트 스탯 2행 (firstDargon 오타 정정 포함)
+    const teamRows = mockModels.match_team_stat.bulkCreate.mock.calls[0][0];
+    expect(teamRows).toHaveLength(2);
+    expect(teamRows.every((t) => t.matchId === 777 && t.groupId === 2)).toBe(true);
+    const team2Row = teamRows.find((t) => t.teamNo === 2);
+    expect(team2Row.win).toBe(true);
+    expect(team2Row.firstDragon).toBe(true); // 원본 firstDargon
+    expect(team2Row.bansJson).toHaveLength(5);
   });
 
   test('봇 match가 없어도 통계는 생성(수동 커스텀), matchId/seasonId는 null', async () => {
