@@ -17,6 +17,10 @@ const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 const SMITE_SPELL_ID = 11;
 
 const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000; // 내전 match 기록과 게임 시작 시각 허용 오차
+// 미확정 match(gameCreation null)의 createdAt 폴백 상한. 게임 몇 판을 몰아서 밤에
+// 승패확정하는 운영 패턴이 실재해(그룹4 실측) 게임 시각 +24h까지 허용한다.
+// puuid 8/10 일치가 강한 신호라 창을 넓혀도 오탐 위험은 낮다.
+const FALLBACK_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MIN_PUUID_OVERLAP = 8; // 10명 중 8명 이상 일치해야 같은 판으로 인정
 
 // raw 게임 JSON에서 참가자 10명의 필요한 필드만 추출
@@ -166,6 +170,22 @@ async function resolveDbPuuids(players) {
   return result;
 }
 
+// 부캐로 뛴 판을 본캐 통계에 합산하기 위해 그룹 내 부캐 puuid를 본캐(primaryPuuid)로 승격.
+// 봇 match 로스터는 항상 본캐(부캐는 discordId null이라 인원뽑기에 안 잡힘)라 매핑 일관성도 확보된다.
+// dbByPid: Map<participantId, dbPuuid> → 승격 적용된 새 Map 반환
+async function promoteToPrimaryPuuids(groupId, dbByPid) {
+  const puuids = [...new Set(dbByPid.values())];
+  const subs = await models.user.findAll({
+    where: { groupId, puuid: { [Op.in]: puuids }, primaryPuuid: { [Op.ne]: null } },
+    attributes: ['puuid', 'primaryPuuid'],
+    raw: true,
+  });
+  const primaryBySub = new Map(subs.map((u) => [u.puuid, u.primaryPuuid]));
+  const result = new Map();
+  for (const [pid, puuid] of dbByPid) result.set(pid, primaryBySub.get(puuid) || puuid);
+  return result;
+}
+
 // gameCreation 근접 + puuid 8/10 일치로 봇 생성 내전 match 후보를 찾는다 (없으면 null).
 async function findBotMatch(raw, dbPuuids) {
   const gameTime = new Date(raw.gameCreation).getTime();
@@ -179,7 +199,7 @@ async function findBotMatch(raw, dbPuuids) {
         { gameCreation: { [Op.between]: [windowStart, windowEnd] } },
         {
           gameCreation: null,
-          createdAt: { [Op.between]: [windowStart, new Date(gameTime + MATCH_TIME_WINDOW_MS * 2)] },
+          createdAt: { [Op.between]: [windowStart, new Date(gameTime + FALLBACK_CONFIRM_WINDOW_MS)] },
         },
       ],
     },
@@ -258,7 +278,8 @@ async function processRaw(raw) {
     return { statsCreated: false, mapped: false, reason: '참가자 정보 불완전' };
   }
 
-  const dbByPid = await resolveDbPuuids(players);
+  const resolved = await resolveDbPuuids(players);
+  const dbByPid = await promoteToPrimaryPuuids(raw.groupId, resolved);
   const positions = resolvePositions(players);
   const dbPuuids = players.map((p) => dbByPid.get(p.participantId));
   const match = await findBotMatch(raw, dbPuuids);
@@ -437,6 +458,7 @@ module.exports = {
   retryUnmappedRaws,
   resolveGroupFromPuuids,
   resolveDbPuuids,
+  promoteToPrimaryPuuids,
   // 테스트용 순수 함수
   extractPlayers,
   resolveTeamPositions,

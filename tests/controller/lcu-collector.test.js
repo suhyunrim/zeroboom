@@ -147,6 +147,7 @@ describe('processRaw (실데이터 통합)', () => {
     };
     // summoners가 Riot ID→LCU puuid 항등 매핑 → dbPuuid == LCU puuid (기존 검증 유지)
     mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]); // 부캐 없음
     mockModels.match.findAll.mockResolvedValue([match]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
     mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
@@ -188,6 +189,7 @@ describe('processRaw (실데이터 통합)', () => {
 
   test('봇 match가 없어도 통계는 생성(수동 커스텀), matchId/seasonId는 null', async () => {
     mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
     mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
@@ -218,6 +220,79 @@ describe('processRaw (실데이터 통합)', () => {
     const diana = rows.find((r) => r.puuid === '54b7656f-303d-564b-81a4-bba767f941fa');
     expect(diana.position).toBe('JUNGLE');
     expect(diana.csDiff).toBe(202 - 229);
+  });
+
+  test('부캐로 뛴 판은 본캐 puuid로 승격 저장 + 본캐 로스터 match와 매핑', async () => {
+    const players = extractPlayers(realGame);
+    const KANOSE_LCU = players.find((p) => p.gameName === 'Kanose').puuid;
+
+    // Kanose#8793은 KANOSE_DB로 등록돼 있고, 그룹 내 부캐(본캐=LADAY_DB)
+    const summoners = identitySummoners(realGame).map((s) =>
+      s.name === 'Kanose#8793' ? { ...s, puuid: 'KANOSE_DB' } : s,
+    );
+    mockModels.summoner.findAll.mockResolvedValue(summoners);
+    mockModels.user.findAll.mockResolvedValue([{ puuid: 'KANOSE_DB', primaryPuuid: 'LADAY_DB' }]);
+
+    // 봇 match 로스터는 본캐(LADAY_DB) 기준
+    const teamPuuids = (teamId) =>
+      players.filter((p) => p.teamId === teamId).map((p) => (p.puuid === KANOSE_LCU ? 'LADAY_DB' : p.puuid));
+    const match = {
+      gameId: 888,
+      seasonId: null,
+      gameCreation: new Date(realGame.gameCreation),
+      team1: teamPuuids(100).map((p) => [p, '이름', 500, null]),
+      team2: teamPuuids(200).map((p) => [p, '이름', 500, null]),
+    };
+    mockModels.match.findAll.mockResolvedValue([match]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+
+    const result = await processRaw(raw);
+    expect(result.mapped).toBe(true);
+    expect(result.matchId).toBe(888);
+
+    const rows = mockModels.match_player_stat.bulkCreate.mock.calls[0][0];
+    // Kanose(리신) 스탯이 본캐 puuid로 저장됨
+    const leeSin = rows.find((r) => r.championId === 64);
+    expect(leeSin.puuid).toBe('LADAY_DB');
+    // 맞라인 상대 참조도 승격된 puuid 기준
+    const diana = rows.find((r) => r.championId === 131);
+    expect(diana.laneOpponentPuuid).toBe('LADAY_DB');
+  });
+
+  test('미확정 match의 createdAt 폴백 창은 게임 시각 +24h', async () => {
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+
+    const gameTime = new Date(realGame.gameCreation).getTime();
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+    await processRaw(raw);
+
+    const where = mockModels.match.findAll.mock.calls[0][0].where;
+    const { Op } = require('sequelize');
+    const fallback = where[Op.or][1].createdAt[Op.between];
+    expect(fallback[1].getTime()).toBe(gameTime + 24 * 60 * 60 * 1000);
   });
 });
 
@@ -275,11 +350,11 @@ describe('ingestGame (무설정 자동 인식)', () => {
   test('정상 저장 + 그룹 자동 판별 + 통계 생성', async () => {
     mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
     mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame)); // Riot ID→LCU puuid 항등
-    // 팀100 5명이 그룹2로 등록됨 → 그룹2 판별
+    // 팀100 5명이 그룹2로 등록됨 → 그룹2 판별. 두 번째 호출은 부캐 승격 조회(없음)
     const team100 = extractPlayers(realGame)
       .filter((p) => p.teamId === 100)
       .map((p) => ({ groupId: 2, puuid: p.puuid }));
-    mockModels.user.findAll.mockResolvedValue(team100);
+    mockModels.user.findAll.mockResolvedValueOnce(team100).mockResolvedValueOnce([]);
     mockModels.lcu_game_raw.create.mockResolvedValue({
       id: 9,
       riotGameKey: 'KR_8294822545',
