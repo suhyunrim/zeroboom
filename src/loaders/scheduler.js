@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { logger } = require('./logger');
 const { updateActiveUsersPositions } = require('../controller/summoner');
 const { syncAllActiveChallenges, initSnapshotSchedulers } = require('../controller/challenge');
+const { retryUnmappedRaws } = require('../controller/lcu-collector');
 const seasonController = require('../controller/season');
 const models = require('../db/models');
 const { getKSTYear, getKSTMonth } = require('../utils/timeUtils');
@@ -48,6 +49,23 @@ module.exports = (app) => {
   });
 
   logger.info('📅 스케줄러 등록: 매일 04:00 챌린지 전적 동기화');
+
+  // 매시 20분에 미매핑 LCU 수집 게임 재매핑 시도
+  // (승패확정이 헬퍼 업로드보다 늦게 이뤄진 판을 회수)
+  cron.schedule('20 * * * *', async () => {
+    try {
+      const { total, mapped } = await retryUnmappedRaws({ withinDays: 14 });
+      if (total > 0) {
+        logger.info(`[스케줄러] LCU 재매핑 - 대상 ${total}건 중 ${mapped}건 매핑`);
+      }
+    } catch (e) {
+      logger.error(`[스케줄러] LCU 재매핑 에러: ${e.message}`);
+    }
+  }, {
+    timezone: 'Asia/Seoul',
+  });
+
+  logger.info('📅 스케줄러 등록: 매시 20분 LCU 수집 게임 재매핑');
 
   // 매일 00:05 KST에 시즌 자동 리셋 체크
   // group.settings.seasonEndMonth (YYYY-MM)가 오늘 이전이면 리셋 실행

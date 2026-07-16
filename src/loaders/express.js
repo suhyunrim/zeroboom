@@ -32,7 +32,8 @@ module.exports = (app) => {
   );
   app.use(cookieParser());
   app.use(methodOverride());
-  app.use(bodyParser.json());
+  // LCU 수집기(collector)가 게임 원본 JSON(수백 KB)을 업로드하므로 기본 100kb로는 부족
+  app.use(bodyParser.json({ limit: '2mb' }));
   app.use(config.api.prefix, routes());
 
   // 라우트 중복 등록 감지 — 같은 method+path가 두 군데서 등록되면 throw.
