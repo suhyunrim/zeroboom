@@ -256,8 +256,10 @@ async function promoteToPrimaryPuuids(groupId, dbByPid) {
 
 const SCRIM_TEAM_MIN_OVERLAP = 4; // 한 팀 5인 중 대회 팀 멤버가 이 이상이면 스크림 (부캐/용병 1명 허용)
 
-// 스크림(대회 팀 연습) 감지: 진행 중(미종료) 대회 팀 로스터와 인게임 팀을 대조.
-// 실측(7차 CK 20게임)에서 4/5 기준으로 전건 정확 분류됨. 반환: { tournamentId } | null
+// 스크림(대회 팀 연습) 감지: 진행 중(미종료) 대회 팀 로스터와 인게임 양 팀을 각각 대조.
+// 실측(7차 CK 20게임)에서 4/5 기준으로 전건 정확 분류됨.
+// 반환: { tournamentId, versus: { blueTeamId, redTeamId } | null } | null
+// versus는 양측이 같은 대회의 서로 다른 팀일 때만 채워짐 (팀vs팀 정식 스크림 → 자동 기록 대상)
 async function detectScrim(groupId, players, dbByPid) {
   const tournaments = await models.tournament.findAll({
     where: { groupId, status: { [Op.ne]: 'finished' } },
@@ -268,20 +270,49 @@ async function detectScrim(groupId, players, dbByPid) {
 
   const teams = await models.tournament_team.findAll({
     where: { tournamentId: { [Op.in]: tournaments.map((t) => t.id) } },
-    attributes: ['tournamentId', 'members'],
+    attributes: ['id', 'tournamentId', 'members'],
     raw: true,
   });
-  for (const teamId of [100, 200]) {
-    const puuids = players.filter((p) => p.teamId === teamId).map((p) => dbByPid.get(p.participantId));
+  const bestBySide = {}; // 100/200 → { teamId, tournamentId, overlap } | null
+  for (const sideId of [100, 200]) {
+    const puuids = players.filter((p) => p.teamId === sideId).map((p) => dbByPid.get(p.participantId));
+    let best = null;
     for (const t of teams) {
       const members = typeof t.members === 'string' ? JSON.parse(t.members) : t.members || [];
       const memberSet = new Set(members.map((m) => m.puuid));
-      if (puuids.filter((p) => memberSet.has(p)).length >= SCRIM_TEAM_MIN_OVERLAP) {
-        return { tournamentId: t.tournamentId };
+      const overlap = puuids.filter((p) => memberSet.has(p)).length;
+      if (overlap >= SCRIM_TEAM_MIN_OVERLAP && (!best || overlap > best.overlap)) {
+        best = { teamId: t.id, tournamentId: t.tournamentId, overlap };
       }
     }
+    bestBySide[sideId] = best;
   }
-  return null;
+
+  const blue = bestBySide[100];
+  const red = bestBySide[200];
+  if (!blue && !red) return null;
+  const versus =
+    blue && red && blue.tournamentId === red.tournamentId && blue.teamId !== red.teamId
+      ? { blueTeamId: blue.teamId, redTeamId: red.teamId }
+      : null;
+  return { tournamentId: (blue || red).tournamentId, versus };
+}
+
+// 팀vs팀 스크림을 tournament_scrims에 자동 기록 (게임당 1행, 승자 1:0).
+// riotGameKey unique로 멱등 — 백필/치유 재처리 시 중복 기록되지 않는다.
+async function recordScrimResult({ raw, game, scrim }) {
+  const existing = await models.tournament_scrim.findOne({ where: { riotGameKey: raw.riotGameKey } });
+  if (existing) return;
+  const blueWin = (game.teams || []).some((t) => t.teamId === 100 && t.win === 'Win');
+  await models.tournament_scrim.create({
+    tournamentId: scrim.tournamentId,
+    team1Id: scrim.versus.blueTeamId,
+    team2Id: scrim.versus.redTeamId,
+    team1Score: blueWin ? 1 : 0,
+    team2Score: blueWin ? 0 : 1,
+    recordedByDiscordId: 'collector', // 수집기 자동 기록 표식
+    riotGameKey: raw.riotGameKey,
+  });
 }
 
 // gameCreation 근접 + puuid 8/10 일치로 봇 생성 내전 match 후보를 찾는다 (없으면 null).
@@ -415,6 +446,15 @@ async function processRaw(raw) {
   await models.match_player_stat.bulkCreate(rows, { ignoreDuplicates: true });
   await models.match_team_stat.bulkCreate(extractTeamRows({ raw, game, match }), { ignoreDuplicates: true });
 
+  // 팀vs팀 스크림이면 대회 스크림 전적(AI 예측·대진표 상대전적)에 자동 반영
+  if (scrim && scrim.versus) {
+    try {
+      await recordScrimResult({ raw, game, scrim });
+    } catch (e) {
+      logger.error(`[collector] 스크림 자동 기록 실패 (${raw.riotGameKey}): ${e.message}`);
+    }
+  }
+
   raw.statsProcessedAt = new Date();
   raw.isScrim = !!scrim;
   raw.scrimTournamentId = scrim ? scrim.tournamentId : null;
@@ -455,6 +495,8 @@ async function remapRaw(raw) {
   raw.isScrim = false;
   raw.scrimTournamentId = null;
   await raw.save();
+  // 스크림으로 잘못 자동 기록됐던 전적도 회수
+  await models.tournament_scrim.destroy({ where: { riotGameKey: raw.riotGameKey } });
 
   return { mapped: true, matchId: match.gameId, winTeam: deriveWinTeam(match, statRows) };
 }
@@ -639,6 +681,7 @@ module.exports = {
   resolveDbPuuids,
   promoteToPrimaryPuuids,
   detectScrim,
+  recordScrimResult,
   // 테스트용 순수 함수
   extractPlayers,
   extractTeamRows,
