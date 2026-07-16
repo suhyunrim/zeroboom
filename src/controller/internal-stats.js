@@ -64,9 +64,12 @@ const dpm = (g) => (g.durationSec > 0 ? Math.round(g.damageToChampions / (g.dura
 /**
  * 유저의 내전 챔피언 통계 + 포지션별 라인전 지표
  */
+// 스크림(대회 팀 연습) 제외 조건 — null(미판정)은 정규 내전으로 취급
+const notScrim = { [Op.or]: [{ isScrim: null }, { isScrim: false }] };
+
 async function getUserInternalStats({ groupId, puuid }) {
   const rows = await models.match_player_stat.findAll({
-    where: { groupId, puuid },
+    where: { groupId, puuid, ...notScrim },
     raw: true,
   });
 
@@ -214,7 +217,7 @@ async function getUserInternalStats({ groupId, puuid }) {
  */
 async function getChampionTierlist({ groupId, position = null, minGames = TIERLIST_MIN_GAMES_DEFAULT }) {
   const allRows = await models.match_player_stat.findAll({
-    where: { groupId },
+    where: { groupId, ...notScrim },
     raw: true,
   });
   const totalGames = new Set(allRows.map((r) => r.riotGameKey)).size;
@@ -222,9 +225,9 @@ async function getChampionTierlist({ groupId, position = null, minGames = TIERLI
     return { totalGames: 0, minGames, champions: [] };
   }
 
-  // 밴 집계 (통계 생성된 raw 전체 — 봇 match 매핑 여부와 무관)
+  // 밴 집계 (통계 생성된 raw 전체 — 봇 match 매핑 여부와 무관, 스크림 제외)
   const rawRows = await models.lcu_game_raw.findAll({
-    where: { groupId, statsProcessedAt: { [Op.ne]: null } },
+    where: { groupId, statsProcessedAt: { [Op.ne]: null }, ...notScrim },
     attributes: ['bansJson'],
     raw: true,
   });

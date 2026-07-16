@@ -6,6 +6,8 @@ const mockModels = {
   match_player_stat: { bulkCreate: jest.fn(), findAll: jest.fn(), update: jest.fn(), destroy: jest.fn() },
   match_team_stat: { bulkCreate: jest.fn(), update: jest.fn(), destroy: jest.fn() },
   summoner_name_history: { findAll: jest.fn() },
+  tournament: { findAll: jest.fn() },
+  tournament_team: { findAll: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -35,6 +37,8 @@ const identitySummoners = (game) =>
 beforeEach(() => {
   jest.clearAllMocks();
   mockModels.summoner_name_history.findAll.mockResolvedValue([]);
+  mockModels.tournament.findAll.mockResolvedValue([]); // 진행 중 대회 없음 (스크림 미판정)
+  mockModels.tournament_team.findAll.mockResolvedValue([]);
 });
 
 describe('extractPlayers', () => {
@@ -361,6 +365,73 @@ describe('processRaw (실데이터 통합)', () => {
     // 맞라인 상대 참조도 승격된 puuid 기준
     const diana = rows.find((r) => r.championId === 131);
     expect(diana.laneOpponentPuuid).toBe('LADAY_DB');
+  });
+
+  test('한 팀 5인 중 4명 이상이 진행 중 대회 팀과 일치하면 스크림 태깅', async () => {
+    const players = extractPlayers(realGame);
+    // 팀100 5명 중 4명이 대회 77의 한 팀 멤버
+    const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]); // 봇 match 없음
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77 }]);
+    mockModels.tournament_team.findAll.mockResolvedValue([
+      { tournamentId: 77, members: team100Puuids.slice(0, 4).map((p) => ({ puuid: p, position: 'top' })) },
+    ]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(true);
+    expect(raw.isScrim).toBe(true);
+    expect(raw.scrimTournamentId).toBe(77);
+    const rows = mockModels.match_player_stat.bulkCreate.mock.calls[0][0];
+    expect(rows.every((r) => r.isScrim === true)).toBe(true);
+  });
+
+  test('봇 match와 매핑되면 스크림 판정 없이 정규 내전', async () => {
+    const players = extractPlayers(realGame);
+    const match = {
+      gameId: 777,
+      seasonId: 3,
+      gameCreation: new Date(realGame.gameCreation),
+      team1: players.filter((p) => p.teamId === 100).map((p) => [p.puuid, '이름', 500, null]),
+      team2: players.filter((p) => p.teamId === 200).map((p) => [p.puuid, '이름', 500, null]),
+    };
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([match]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(false);
+    expect(raw.isScrim).toBe(false);
+    expect(mockModels.tournament.findAll).not.toHaveBeenCalled(); // 매핑 성공 시 판정 생략
+    const rows = mockModels.match_player_stat.bulkCreate.mock.calls[0][0];
+    expect(rows.every((r) => r.isScrim === false)).toBe(true);
   });
 
   test('미확정 match의 createdAt 폴백 창은 게임 시각 +24h', async () => {

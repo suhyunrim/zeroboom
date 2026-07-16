@@ -34,6 +34,8 @@ module.exports = (sequelize, DataTypes) => {
       },
       mappedMatchId: { type: DataTypes.INTEGER, allowNull: true },
       statsProcessedAt: { type: DataTypes.DATE, allowNull: true }, // match_player_stats 생성 완료 시각 (매핑 여부와 별개)
+      isScrim: { type: DataTypes.BOOLEAN, allowNull: true }, // null=미판정, true=대회 팀 스크림
+      scrimTournamentId: { type: DataTypes.INTEGER, allowNull: true },
     },
     {},
   );

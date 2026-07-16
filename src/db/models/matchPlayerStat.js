@@ -49,6 +49,7 @@ module.exports = (sequelize, DataTypes) => {
       wardsPlaced: { type: DataTypes.INTEGER, allowNull: true },
       wardsKilled: { type: DataTypes.INTEGER, allowNull: true },
       controlWardsBought: { type: DataTypes.INTEGER, allowNull: true },
+      isScrim: { type: DataTypes.BOOLEAN, allowNull: true }, // null=미판정, true=대회 팀 스크림 (내전 통계 제외)
     },
     {},
   );
