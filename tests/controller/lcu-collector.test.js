@@ -376,7 +376,7 @@ describe('processRaw (실데이터 통합)', () => {
     mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]); // 봇 match 없음
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
-    mockModels.tournament.findAll.mockResolvedValue([{ id: 77 }]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'in_progress' }]);
     mockModels.tournament_team.findAll.mockResolvedValue([
       { tournamentId: 77, members: team100Puuids.slice(0, 4).map((p) => ({ puuid: p, position: 'top' })) },
     ]);
@@ -411,7 +411,7 @@ describe('processRaw (실데이터 통합)', () => {
     mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
-    mockModels.tournament.findAll.mockResolvedValue([{ id: 77 }]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'in_progress' }]);
     mockModels.tournament_team.findAll.mockResolvedValue([
       { id: 11, tournamentId: 77, members: team100Puuids.map((p) => ({ puuid: p })) },
       { id: 22, tournamentId: 77, members: team200Puuids.map((p) => ({ puuid: p })) },
@@ -444,6 +444,37 @@ describe('processRaw (실데이터 통합)', () => {
     });
   });
 
+  test('preparing 대회 스크림은 태깅만 하고 기록 안 함 (팀 재편 가능성)', async () => {
+    const players = extractPlayers(realGame);
+    const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
+    const team200Puuids = players.filter((p) => p.teamId === 200).map((p) => p.puuid);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'preparing' }]);
+    mockModels.tournament_team.findAll.mockResolvedValue([
+      { id: 11, tournamentId: 77, members: team100Puuids.map((p) => ({ puuid: p })) },
+      { id: 22, tournamentId: 77, members: team200Puuids.map((p) => ({ puuid: p })) },
+    ]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(true); // 태깅(통계 분리)은 유지
+    expect(mockModels.tournament_scrim.create).not.toHaveBeenCalled(); // 기록은 in_progress만
+  });
+
   test('이미 자동 기록된 게임은 재처리해도 중복 기록 안 함 (멱등)', async () => {
     const players = extractPlayers(realGame);
     const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
@@ -452,7 +483,7 @@ describe('processRaw (실데이터 통합)', () => {
     mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]);
     mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
-    mockModels.tournament.findAll.mockResolvedValue([{ id: 77 }]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'in_progress' }]);
     mockModels.tournament_team.findAll.mockResolvedValue([
       { id: 11, tournamentId: 77, members: team100Puuids.map((p) => ({ puuid: p })) },
       { id: 22, tournamentId: 77, members: team200Puuids.map((p) => ({ puuid: p })) },
