@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const models = require('../db/models');
 const { resolveChampionNames } = require('../utils/champion-map');
 
-const TIERLIST_MIN_GAMES_DEFAULT = 5;
+const TIERLIST_MIN_GAMES_DEFAULT = 1; // 데이터 쌓이기 전 확인용 (표본 충분해지면 5로 복원)
 const SCORE_SMOOTHING_GAMES = 5; // 승률 베이지안 보정: 5판 분량을 50%로 간주
 
 const round1 = (v) => Math.round(v * 10) / 10;
