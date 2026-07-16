@@ -46,6 +46,14 @@ module.exports = (app) => {
         source: 'api',
       });
 
+      // 내전 match와 매핑됐고 승리팀이 도출되면, 사용자가 승패 버튼 누른 것과 동일하게 자동 확정
+      // (미확정 매치만 확정하며 이미 확정된 건 내부에서 skip). 응답을 막지 않도록 fire-and-forget.
+      if (result.mapped && result.matchId && result.winTeam && req.app.autoConfirmMatchWin) {
+        req.app
+          .autoConfirmMatchWin({ gameId: result.matchId, winTeam: result.winTeam })
+          .catch((e) => logger.error(`[collector] 자동 승패확정 실패: ${e.message}`));
+      }
+
       return res.status(201).json({
         result: 'created',
         riotGameKey: result.riotGameKey,

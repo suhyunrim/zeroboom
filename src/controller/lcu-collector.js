@@ -219,7 +219,15 @@ async function mapRaw(raw) {
   raw.mappedMatchId = match.gameId;
   await raw.save();
 
-  return { mapped: true, matchId: match.gameId };
+  // 승리한 내전 팀 도출 (승리팀 전원 win=true) → 자동 승패확정에 사용
+  const team1Puuids = new Set(match.team1.map((entry) => entry[0]));
+  const team1Wins = rows.filter((r) => team1Puuids.has(r.puuid) && r.win).length;
+  const team2Wins = rows.filter((r) => !team1Puuids.has(r.puuid) && r.win).length;
+  let winTeam = null;
+  if (team1Wins > team2Wins) winTeam = 1;
+  else if (team2Wins > team1Wins) winTeam = 2;
+
+  return { mapped: true, matchId: match.gameId, winTeam };
 }
 
 const GROUP_RESOLVE_MIN = 4; // 게임 참가자 10명 중 이 그룹 소속으로 등록된 인원이 이 이상이어야 그룹 확정
@@ -297,11 +305,13 @@ async function ingestGame({ uploaderPuuid, game }) {
     groupId,
     mapped: mapResult.mapped,
     matchId: mapResult.matchId || null,
+    winTeam: mapResult.winTeam ?? null,
   };
 }
 
-// 미매핑 raw 재시도 (스케줄러용) — 승패확정이 업로드보다 늦은 경우를 회수
-async function retryUnmappedRaws({ withinDays = 30 } = {}) {
+// 미매핑 raw 재시도 (스케줄러용) — 승패확정이 업로드보다 늦은 경우를 회수.
+// onMapped: 새로 매핑된 건마다 호출 (자동 승패확정 트리거용)
+async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
   const since = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
   const rows = await models.lcu_game_raw.findAll({
     where: { mappedMatchId: null, gameCreation: { [Op.gte]: since } },
@@ -310,7 +320,14 @@ async function retryUnmappedRaws({ withinDays = 30 } = {}) {
   for (const raw of rows) {
     try {
       const result = await mapRaw(raw);
-      if (result.mapped) mapped += 1;
+      if (result.mapped) {
+        mapped += 1;
+        if (onMapped) {
+          await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
+            logger.error(`[collector] 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
+          );
+        }
+      }
     } catch (e) {
       logger.error(`[collector] 재매핑 실패 (${raw.riotGameKey}): ${e.message}`);
     }

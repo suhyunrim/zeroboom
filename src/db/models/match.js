@@ -40,6 +40,14 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      discordChannelId: {
+        type: DataTypes.STRING(32),
+        allowNull: true,
+      },
+      discordMessageId: {
+        type: DataTypes.STRING(32),
+        allowNull: true,
+      },
     },
     {},
   );

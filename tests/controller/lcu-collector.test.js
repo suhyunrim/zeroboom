@@ -139,6 +139,8 @@ describe('mapRaw (실데이터 통합)', () => {
     const result = await mapRaw(raw);
     expect(result.mapped).toBe(true);
     expect(result.matchId).toBe(777);
+    // team200(내전 team2) 전원 승리 → winTeam 2
+    expect(result.winTeam).toBe(2);
     expect(raw.mappedMatchId).toBe(777);
     expect(raw.save).toHaveBeenCalled();
 

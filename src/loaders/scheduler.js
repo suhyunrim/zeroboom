@@ -54,7 +54,12 @@ module.exports = (app) => {
   // (승패확정이 헬퍼 업로드보다 늦게 이뤄진 판을 회수)
   cron.schedule('20 * * * *', async () => {
     try {
-      const { total, mapped } = await retryUnmappedRaws({ withinDays: 14 });
+      // 새로 매핑된 건은 사용자가 승패 버튼 누른 것과 동일하게 자동 확정 (미확정 매치만)
+      const onMapped = app.autoConfirmMatchWin
+        ? ({ gameId, winTeam }) =>
+            winTeam ? app.autoConfirmMatchWin({ gameId, winTeam }) : Promise.resolve()
+        : null;
+      const { total, mapped } = await retryUnmappedRaws({ withinDays: 14, onMapped });
       if (total > 0) {
         logger.info(`[스케줄러] LCU 재매핑 - 대상 ${total}건 중 ${mapped}건 매핑`);
       }

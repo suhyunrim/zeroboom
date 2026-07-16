@@ -113,6 +113,17 @@ function formatHonorResults(results, session) {
   return text;
 }
 
+// 승패 버튼 메시지의 위치를 match에 저장 → 수집기 자동 확정이 같은 메시지를 갱신할 수 있게 한다.
+async function trackMatchMessage(message, gameId) {
+  if (!message || !gameId) return;
+  await models.match
+    .update(
+      { discordChannelId: message.channelId, discordMessageId: message.id },
+      { where: { gameId } },
+    )
+    .catch((e) => logger.error(`매치 메시지 참조 저장 실패: ${e.message}`));
+}
+
 module.exports = async (app) => {
   const client = new Client({
     intents: [
@@ -139,6 +150,123 @@ module.exports = async (app) => {
     if (mode === 'normal' || mode === 'blind') return mode;
     return 'off';
   }
+
+  // 승패 확정 후 MVP(명예) 투표를 시작한다. 수동 버튼 확정과 자동(수집기) 확정이 공유한다.
+  async function startHonorVote({ channel, matchData, groupId }) {
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const team1Data = matchData.team1;
+    const team2Data = matchData.team2;
+    const category = VOTE_CATEGORIES[Math.floor(Math.random() * VOTE_CATEGORIES.length)];
+    const voteSession = {
+      gameId: matchData.gameId,
+      groupId,
+      team1: team1Data.map((p) => ({ puuid: p[0], name: p[1] })),
+      team2: team2Data.map((p) => ({ puuid: p[0], name: p[1] })),
+      voters: new Set(),
+      category,
+    };
+    honorVoteSessions.set(matchData.gameId, voteSession);
+
+    const honorButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`honorVoteStart|${matchData.gameId}`)
+        .setLabel(`${category.emoji} ${category.label} 투표하기`)
+        .setStyle(ButtonStyle.Primary),
+    );
+
+    const honorMessage = await channel.send({
+      content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/${team1Data.length + team2Data.length})`,
+      components: [honorButton],
+    });
+    voteSession.honorMessage = honorMessage;
+
+    // 12시간 후 자동 마감
+    setTimeout(async () => {
+      const session = honorVoteSessions.get(matchData.gameId);
+      if (session) {
+        honorVoteSessions.delete(matchData.gameId);
+        try {
+          const results = await honorController.getVoteResults(matchData.gameId);
+          await honorMessage.edit({ content: formatHonorResults(results, session), components: [] });
+        } catch (e) {
+          logger.error(e);
+        }
+      }
+    }, 12 * 60 * 60 * 1000);
+
+    return honorMessage;
+  }
+
+  // 수집기(elise)가 올린 게임이 내전 match와 매핑되면, 사용자가 승패 버튼을 누른 것과 동일하게
+  // 서버에서 자동으로 승패를 확정한다: 레이팅 반영 + 버튼 교체 + 승리 메시지 + 업적 알림 + 명예 투표.
+  // - 이미 확정된 매치(수동/자동)는 건드리지 않는다. (winTeam != null → skip)
+  // - 승패 메시지 참조(discordChannelId/MessageId)가 없거나 메시지가 사라졌으면 확정하지 않는다.
+  async function autoConfirmMatchWin({ gameId, winTeam }) {
+    if (winTeam !== 1 && winTeam !== 2) return { skip: 'badwin' };
+
+    const match = await models.match.findOne({ where: { gameId } });
+    if (!match) return { skip: 'notfound' };
+    if (match.winTeam != null) return { skip: 'already' };
+    if (!match.discordChannelId || !match.discordMessageId) return { skip: 'nomsg' };
+
+    // Discord 메시지를 갱신할 수 있을 때만 레이팅을 반영한다 (레이팅과 메시지 상태 불일치 방지)
+    const channel = await client.channels.fetch(match.discordChannelId).catch(() => null);
+    const message = channel ? await channel.messages.fetch(match.discordMessageId).catch(() => null) : null;
+    if (!message) return { skip: 'msggone' };
+
+    const locked = await withLock(gameId, async () => {
+      const fresh = await models.match.findOne({ where: { gameId } });
+      if (!fresh || fresh.winTeam != null) return { alreadyConfirmed: true };
+      await fresh.update({ winTeam });
+      const matchResult = await matchController.applyMatchResult(gameId, null);
+      return { matchData: fresh, matchResult, alreadyConfirmed: false };
+    });
+    if (locked.alreadyConfirmed) return { skip: 'already' };
+
+    const { matchData, matchResult } = locked;
+
+    auditLog
+      .log({
+        groupId: matchData.groupId,
+        actorDiscordId: null,
+        actorName: 'auto(collector)',
+        action: 'match.confirm',
+        details: { gameId, winTeam, previousWinTeam: null, source: 'collector' },
+        source: 'api',
+      })
+      .catch((e) => logger.error('감사 로그 오류:', e));
+
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const teamEmoji = winTeam === 1 ? '🐶' : '🐱';
+
+    // 승/패 버튼을 "승/패 변경하기"로 교체 (수동 확정과 동일)
+    const changeButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`changeWinCommand|${gameId}`)
+        .setLabel('승/패 변경하기')
+        .setStyle(ButtonStyle.Secondary),
+    );
+    await message.edit({ components: [changeButton] });
+    await channel.send(
+      `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.\n(🤖 수집 프로그램 자동 확정)`,
+    );
+
+    // 업적 달성 알림
+    if (matchResult.newAchievements?.length > 0) {
+      const { sendAchievementNotification } = require('../services/achievement/notifier');
+      sendAchievementNotification(channel, matchResult.newAchievements, matchData.groupId).catch((e) =>
+        logger.error('업적 알림 오류:', e),
+      );
+    }
+
+    // 명예 투표 시작
+    await startHonorVote({ channel, matchData, groupId: matchData.groupId });
+
+    return { confirmed: true, gameId, winTeam };
+  }
+
+  // 수집기 라우트/스케줄러가 호출할 수 있도록 노출
+  app.autoConfirmMatchWin = autoConfirmMatchWin;
 
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
@@ -548,7 +676,10 @@ module.exports = async (app) => {
           );
 
         await interaction.deferUpdate();
-        await interaction.followUp({ embeds: [embed], components: [buttons] });
+        const winMessage = await interaction.followUp({ embeds: [embed], components: [buttons] });
+
+        // 수집기 자동 승패확정이 이 메시지를 갱신할 수 있도록 위치를 저장
+        await trackMatchMessage(winMessage, matchQueryResult.gameId);
 
         return;
       }
@@ -955,49 +1086,8 @@ module.exports = async (app) => {
         // 원본 메시지의 버튼 변경
         await interaction.message.edit({ components: [changeButton] });
 
-        // 명예 투표 버튼 전송
-        const team1Data = matchData.team1;
-        const team2Data = matchData.team2;
-        const category = VOTE_CATEGORIES[Math.floor(Math.random() * VOTE_CATEGORIES.length)];
-        const voteSession = {
-          gameId: matchData.gameId,
-          groupId: group.id,
-          team1: team1Data.map((p) => ({ puuid: p[0], name: p[1] })),
-          team2: team2Data.map((p) => ({ puuid: p[0], name: p[1] })),
-          voters: new Set(),
-          category,
-        };
-        honorVoteSessions.set(matchData.gameId, voteSession);
-
-        const honorButton = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`honorVoteStart|${matchData.gameId}`)
-            .setLabel(`${category.emoji} ${category.label} 투표하기`)
-            .setStyle(ButtonStyle.Primary),
-        );
-
-        const honorMessage = await interaction.channel.send({
-          content: `**[MVP 투표]**\n**${category.emoji} ${category.label}** - ${category.question}\n💡 전원 투표 시 참가자 모두 명예 +1 보너스!\n0명 투표했습니다! (0/${team1Data.length + team2Data.length})`,
-          components: [honorButton],
-        });
-        voteSession.honorMessage = honorMessage;
-
-        // 12시간 후 자동 마감
-        setTimeout(async () => {
-          const session = honorVoteSessions.get(matchData.gameId);
-          if (session) {
-            honorVoteSessions.delete(matchData.gameId);
-            try {
-              const results = await honorController.getVoteResults(matchData.gameId);
-              await honorMessage.edit({
-                content: formatHonorResults(results, session),
-                components: [],
-              });
-            } catch (e) {
-              logger.error(e);
-            }
-          }
-        }, 12 * 60 * 60 * 1000);
+        // 명예 투표 시작 (수동/자동 확정 공용)
+        await startHonorVote({ channel: interaction.channel, matchData, groupId: group.id });
 
         return;
       }
@@ -1145,6 +1235,7 @@ module.exports = async (app) => {
                 const output = await matchMakeCommand.reactButton(interaction, match);
                 if (output) {
                   await interaction.reply(output);
+                  await trackMatchMessage(await interaction.fetchReply(), output.gameId);
                 }
               }
               return;
@@ -1230,7 +1321,8 @@ module.exports = async (app) => {
                   } else {
                     await interaction.followUp(finalText);
                   }
-                  await interaction.followUp(output);
+                  const sentMatchMsg = await interaction.followUp(output);
+                  await trackMatchMessage(sentMatchMsg, output.gameId);
                 }
               }
               return;
@@ -1252,6 +1344,7 @@ module.exports = async (app) => {
             const output = await matchMakeCommand.reactButton(interaction, match);
             if (output) {
               await interaction.reply(output);
+              await trackMatchMessage(await interaction.fetchReply(), output.gameId);
             }
             return;
           }
