@@ -2144,11 +2144,12 @@ module.exports = async (app) => {
   const commandJsons = commandList.getSlashCommands().map((command) => command.toJSON());
   // Discord는 길드당 하루 200개 명령어 생성 한도가 있고, bulk PUT은 내용이 같아도 개당 생성으로
   // 카운트한다. 배포(재시작)가 잦으면 한도가 소진되므로 등록된 명령어와 다를 때만 PUT한다.
-  // 한도 초과(30034) 시 discord.js 기본 동작은 리셋까지 무기한 대기라 침묵 장애가 되므로,
-  // 1분 이상 대기가 필요한 rate limit은 즉시 에러로 던져 로그에 남긴다.
+  // 한도 초과(30034) 시 discord.js 기본 동작은 무기한 대기라 침묵 장애가 되므로 즉시 에러로
+  // 던져 로그에 남긴다. 30034 응답은 Retry-After 헤더가 없어 retryAfter가 0으로 계산되는 것을
+  // 실측 확인함 — 0(비정상)과 1분 초과(장기 대기)를 모두 걸러야 침묵하지 않는다.
   const rest = new REST({
     version: '10',
-    rejectOnRateLimit: (data) => data.retryAfter > 60 * 1000,
+    rejectOnRateLimit: (data) => data.retryAfter === 0 || data.retryAfter > 60 * 1000,
   }).setToken(process.env.DISCORD_BOT_TOKEN);
 
   const groups = await models.group.findAll({
