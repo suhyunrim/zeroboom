@@ -3,8 +3,9 @@ const mockModels = {
   summoner: { findAll: jest.fn() },
   match: { findAll: jest.fn() },
   lcu_game_raw: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
-  match_player_stat: { bulkCreate: jest.fn(), findAll: jest.fn(), update: jest.fn() },
-  match_team_stat: { bulkCreate: jest.fn(), update: jest.fn() },
+  match_player_stat: { bulkCreate: jest.fn(), findAll: jest.fn(), update: jest.fn(), destroy: jest.fn() },
+  match_team_stat: { bulkCreate: jest.fn(), update: jest.fn(), destroy: jest.fn() },
+  summoner_name_history: { findAll: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -33,6 +34,7 @@ const identitySummoners = (game) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockModels.summoner_name_history.findAll.mockResolvedValue([]);
 });
 
 describe('extractPlayers', () => {
@@ -130,6 +132,80 @@ describe('resolveDbPuuids (Riot ID 브릿지)', () => {
     const map = await resolveDbPuuids(players);
     expect(map.get(hyunsupil.participantId)).toBe('DB_HYUNSUPIL');
     expect(map.get(guest.participantId)).toBe(guest.puuid); // 미등록 → LCU puuid 폴백
+  });
+
+  test('닉변 후 업로드된 옛닉 게임은 닉네임 이력에서 게임 당시 주인으로 해결', async () => {
+    const players = extractPlayers(realGame);
+    const target = players.find((p) => p.gameName === '현수필'); // 옛닉 "현수필#KR6"으로 뛴 판
+    const gameTime = new Date('2026-07-11T16:42:00');
+
+    // 현재 summoners에는 옛닉이 없음 (이미 새 닉으로 갱신됨)
+    mockModels.summoner.findAll.mockResolvedValue([]);
+    // 이력: 게임 이후에 닉변 감지됨 → 게임 당시엔 그 이름의 주인
+    mockModels.summoner_name_history.findAll.mockResolvedValue([
+      { name: '현수필#KR6', puuid: 'DB_HYUNSUPIL', changedAt: new Date('2026-07-12T05:00:00') },
+    ]);
+
+    const map = await resolveDbPuuids(players, gameTime);
+    expect(map.get(target.participantId)).toBe('DB_HYUNSUPIL');
+  });
+
+  test('게임 시각 이전에 버려진 이름은 오연결 방지 위해 매칭 안 함', async () => {
+    const players = extractPlayers(realGame);
+    const target = players.find((p) => p.gameName === '현수필');
+    const gameTime = new Date('2026-07-11T16:42:00');
+
+    mockModels.summoner.findAll.mockResolvedValue([]);
+    // 이력상 이 이름은 게임 훨씬 전에 버려짐 → 게임 당시 주인 불명 (외부인이 쓰던 이름일 수 있음)
+    mockModels.summoner_name_history.findAll.mockResolvedValue([
+      { name: '현수필#KR6', puuid: 'DB_HYUNSUPIL', changedAt: new Date('2026-06-01T05:00:00') },
+    ]);
+
+    const map = await resolveDbPuuids(players, gameTime);
+    expect(map.get(target.participantId)).toBe(target.puuid); // LCU 폴백 유지
+  });
+});
+
+describe('healUnbridgedStats (닉변 치유)', () => {
+  test('폴백 puuid(36자) 행이 있는 raw만 재처리', async () => {
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+    const cleanRaw = { ...raw, id: 2, riotGameKey: 'KR_CLEAN', save: jest.fn() };
+    mockModels.lcu_game_raw.findAll
+      .mockResolvedValueOnce([raw, cleanRaw]) // 치유 대상 조회
+      .mockResolvedValue([]); // 이후 processRaw 내부의 usedRows 조회
+    mockModels.match_player_stat.findAll.mockResolvedValueOnce([
+      { riotGameKey: 'KR_8294822545', puuid: '9a9cf9e6-e43f-52aa-b0b1-000000000000' }, // 폴백 행
+      { riotGameKey: 'KR_CLEAN', puuid: 'X'.repeat(78) }, // 정상 행만 → 재처리 제외
+    ]);
+    mockModels.match_player_stat.destroy.mockResolvedValue(1);
+    mockModels.match_team_stat.destroy.mockResolvedValue(1);
+    // processRaw 내부 의존성
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const { healUnbridgedStats } = require('../../src/controller/lcu-collector');
+    const result = await healUnbridgedStats({ withinDays: 30 });
+
+    expect(result.checked).toBe(1);
+    expect(result.healed).toBe(1);
+    // 폴백 행 있는 게임만 destroy+재처리
+    expect(mockModels.match_player_stat.destroy).toHaveBeenCalledTimes(1);
+    expect(mockModels.match_player_stat.destroy).toHaveBeenCalledWith({
+      where: { riotGameKey: 'KR_8294822545' },
+    });
+    expect(raw.save).toHaveBeenCalled(); // processRaw 수행됨
+    expect(cleanRaw.save).not.toHaveBeenCalled();
   });
 });
 

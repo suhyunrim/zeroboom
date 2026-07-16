@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const { logger } = require('./logger');
 const { updateActiveUsersPositions } = require('../controller/summoner');
 const { syncAllActiveChallenges, initSnapshotSchedulers } = require('../controller/challenge');
-const { retryUnmappedRaws } = require('../controller/lcu-collector');
+const { retryUnmappedRaws, healUnbridgedStats } = require('../controller/lcu-collector');
 const seasonController = require('../controller/season');
 const models = require('../db/models');
 const { getKSTYear, getKSTMonth } = require('../utils/timeUtils');
@@ -71,6 +71,27 @@ module.exports = (app) => {
   });
 
   logger.info('📅 스케줄러 등록: 매시 20분 LCU 수집 게임 재매핑');
+
+  // 매일 05:30 — 새벽 5시 닉네임 갱신 배치 직후, 브릿지 실패(닉변 등)로
+  // LCU 폴백 puuid로 저장된 수집 스탯을 재처리해 정식 puuid로 치유
+  cron.schedule('30 5 * * *', async () => {
+    try {
+      const onMapped = app.autoConfirmMatchWin
+        ? ({ gameId, winTeam }) =>
+            winTeam ? app.autoConfirmMatchWin({ gameId, winTeam }) : Promise.resolve()
+        : null;
+      const { checked, healed } = await healUnbridgedStats({ withinDays: 14, onMapped });
+      if (checked > 0) {
+        logger.info(`[스케줄러] LCU 스탯 치유 - 대상 ${checked}건 중 ${healed}건 재처리`);
+      }
+    } catch (e) {
+      logger.error(`[스케줄러] LCU 스탯 치유 에러: ${e.message}`);
+    }
+  }, {
+    timezone: 'Asia/Seoul',
+  });
+
+  logger.info('📅 스케줄러 등록: 매일 05:30 LCU 수집 스탯 치유');
 
   // 매일 00:05 KST에 시즌 자동 리셋 체크
   // group.settings.seasonEndMonth (YYYY-MM)가 오늘 이전이면 리셋 실행

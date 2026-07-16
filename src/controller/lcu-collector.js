@@ -189,9 +189,11 @@ function pickBestCandidate(rawPuuids, gameCreation, candidates) {
 
 // LCU가 주는 puuid는 UUID 형식(Riot 내부값)이라 우리 DB의 Riot API puuid와 직접 매칭 불가.
 // 참가자의 gameName#tagLine(Riot ID)으로 summoners.name을 조회해 우리 DB puuid로 변환한다.
-// 미등록/이름 불일치 참가자는 LCU puuid를 그대로 폴백 (게스트 행은 멤버 조회에서 자연히 제외됨).
+// 게임 원본엔 "게임 당시" 닉네임이 고정 기록되므로, 닉변 후 업로드된 판은 현재 이름으로
+// 못 찾는다 → 닉네임 이력(summoner_name_histories)에서 게임 시각 당시 소유자를 폴백 조회.
+// 그래도 미해결이면 LCU puuid 그대로 폴백 (게스트 행은 멤버 조회에서 자연히 제외됨).
 // 반환: Map<participantId, dbPuuid>
-async function resolveDbPuuids(players) {
+async function resolveDbPuuids(players, gameTime = null) {
   const byPidRiotId = new Map();
   const riotIds = [];
   for (const p of players) {
@@ -208,6 +210,25 @@ async function resolveDbPuuids(players) {
       })
     : [];
   const puuidByRiotId = new Map(rows.map((r) => [r.name, r.puuid]));
+
+  // 현재 이름으로 못 찾은 Riot ID → 닉네임 이력에서 "게임 당시 그 이름의 주인" 조회.
+  // changedAt(감지 시각)까지 그 이름을 소유했으므로, gameTime보다 뒤에 변경된 것 중 가장 이른 행이 당시 주인.
+  // gameTime 이전에 이미 버려진 이름이면 당시 주인을 알 수 없으므로 매칭하지 않는다(오연결 방지).
+  const unresolved = riotIds.filter((id) => !puuidByRiotId.has(id));
+  if (unresolved.length > 0) {
+    const histRows = await models.summoner_name_history.findAll({
+      where: { name: { [Op.in]: unresolved } },
+      attributes: ['name', 'puuid', 'changedAt'],
+      order: [['changedAt', 'ASC']],
+      raw: true,
+    });
+    const gameMs = gameTime ? new Date(gameTime).getTime() : null;
+    for (const h of histRows) {
+      if (puuidByRiotId.has(h.name)) continue; // 이미 이른 changedAt으로 해결됨
+      if (gameMs !== null && new Date(h.changedAt).getTime() <= gameMs) continue;
+      puuidByRiotId.set(h.name, h.puuid);
+    }
+  }
 
   const result = new Map();
   for (const p of players) {
@@ -350,7 +371,7 @@ async function processRaw(raw) {
     return { statsCreated: false, mapped: false, reason: '참가자 정보 불완전' };
   }
 
-  const resolved = await resolveDbPuuids(players);
+  const resolved = await resolveDbPuuids(players, raw.gameCreation);
   const dbByPid = await promoteToPrimaryPuuids(raw.groupId, resolved);
   const positions = resolvePositions(players);
   const dbPuuids = players.map((p) => dbByPid.get(p.participantId));
@@ -440,7 +461,7 @@ async function ingestGame({ uploaderPuuid, game }) {
 
   // Riot ID(gameName#tagLine)로 우리 DB puuid를 조회한 뒤 그룹 판별
   const players = extractPlayers(game);
-  const dbByPid = await resolveDbPuuids(players);
+  const dbByPid = await resolveDbPuuids(players, game.gameCreation);
   const groupId = await resolveGroupFromPuuids([...dbByPid.values()]);
   if (!groupId) {
     return { status: 'skipped', reason: 'no_group', riotGameKey };
@@ -528,11 +549,53 @@ async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
   return { total: unprocessed.length + unmapped.length, mapped };
 }
 
+// LCU 폴백 puuid(36자)로 저장된 스탯 치유 (스케줄러용).
+// 닉변 직후 업로드돼 브릿지에 실패한 판을, 새벽 배치가 summoners.name/닉네임 이력을 갱신한 뒤
+// 재처리해 정식 puuid로 복구한다. 미등록 부캐/외부 용병 판은 매번 다시 시도되지만
+// 수량이 작아(게임 단위) 비용은 무시 가능.
+async function healUnbridgedStats({ withinDays = 14, onMapped = null } = {}) {
+  const since = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
+  const raws = await models.lcu_game_raw.findAll({
+    where: { statsProcessedAt: { [Op.ne]: null }, gameCreation: { [Op.gte]: since } },
+  });
+  if (raws.length === 0) return { checked: 0, healed: 0 };
+
+  const statRows = await models.match_player_stat.findAll({
+    where: { riotGameKey: { [Op.in]: raws.map((r) => r.riotGameKey) } },
+    attributes: ['riotGameKey', 'puuid'],
+    raw: true,
+  });
+  // LCU puuid는 UUID(36자), 정식 puuid는 78자 — 길이로 폴백 행 식별
+  const unbridgedKeys = new Set(
+    statRows.filter((r) => r.puuid && r.puuid.length < 50).map((r) => r.riotGameKey),
+  );
+
+  let healed = 0;
+  for (const raw of raws) {
+    if (!unbridgedKeys.has(raw.riotGameKey)) continue;
+    try {
+      await models.match_player_stat.destroy({ where: { riotGameKey: raw.riotGameKey } });
+      await models.match_team_stat.destroy({ where: { riotGameKey: raw.riotGameKey } });
+      const result = await processRaw(raw);
+      healed += 1;
+      if (result.mapped && result.winTeam && onMapped) {
+        await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
+          logger.error(`[collector] 치유 후 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
+        );
+      }
+    } catch (e) {
+      logger.error(`[collector] 스탯 치유 실패 (${raw.riotGameKey}): ${e.message}`);
+    }
+  }
+  return { checked: unbridgedKeys.size, healed };
+}
+
 module.exports = {
   ingestGame,
   processRaw,
   remapRaw,
   retryUnmappedRaws,
+  healUnbridgedStats,
   resolveGroupFromPuuids,
   resolveDbPuuids,
   promoteToPrimaryPuuids,
