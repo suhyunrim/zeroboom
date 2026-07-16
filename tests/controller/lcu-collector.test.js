@@ -1,4 +1,5 @@
 const mockModels = {
+  user: { findAll: jest.fn() },
   match: { findAll: jest.fn() },
   lcu_game_raw: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   match_player_stat: { bulkCreate: jest.fn() },
@@ -13,6 +14,8 @@ const {
   resolveTeamPositions,
   pickBestCandidate,
   mapRaw,
+  ingestGame,
+  resolveGroupFromPuuids,
 } = require('../../src/controller/lcu-collector');
 
 // 실제 내전 게임 원본 (현수필 제공, 2026-07-11)
@@ -172,5 +175,84 @@ describe('mapRaw (실데이터 통합)', () => {
     expect(result.mapped).toBe(false);
     expect(raw.save).not.toHaveBeenCalled();
     expect(mockModels.match_player_stat.bulkCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveGroupFromPuuids', () => {
+  test('가장 많이 속한 그룹 선택 (최소 인원 충족)', async () => {
+    mockModels.user.findAll.mockResolvedValue([
+      { groupId: 2, puuid: 'a' },
+      { groupId: 2, puuid: 'b' },
+      { groupId: 2, puuid: 'c' },
+      { groupId: 2, puuid: 'd' },
+      { groupId: 4, puuid: 'e' },
+    ]);
+    const groupId = await resolveGroupFromPuuids(['a', 'b', 'c', 'd', 'e']);
+    expect(groupId).toBe(2);
+  });
+
+  test('등록 인원이 최소치(4) 미만이면 null', async () => {
+    mockModels.user.findAll.mockResolvedValue([
+      { groupId: 2, puuid: 'a' },
+      { groupId: 2, puuid: 'b' },
+      { groupId: 4, puuid: 'e' },
+    ]);
+    const groupId = await resolveGroupFromPuuids(['a', 'b', 'e']);
+    expect(groupId).toBeNull();
+  });
+});
+
+describe('ingestGame (무설정 자동 인식)', () => {
+  const uploader = '65c73467-c454-59fd-a502-9504f4ed8986'; // 현수필 (실데이터 참가자)
+
+  test('업로더가 참가자가 아니면 거부', async () => {
+    const result = await ingestGame({ uploaderPuuid: 'stranger', game: realGame });
+    expect(result.status).toBe('rejected');
+    expect(result.reason).toBe('uploader_not_participant');
+    expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
+  });
+
+  test('그룹 판별 실패 시 skipped (저장 안 함)', async () => {
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
+    mockModels.user.findAll.mockResolvedValue([]); // 아무도 등록 안 됨
+    const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
+    expect(result.status).toBe('skipped');
+    expect(result.reason).toBe('no_group');
+    expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
+  });
+
+  test('이미 있는 게임이면 duplicate', async () => {
+    mockModels.lcu_game_raw.findOne.mockResolvedValue({ id: 1 });
+    const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
+    expect(result.status).toBe('duplicate');
+    expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
+  });
+
+  test('정상 저장 + 그룹 자동 판별', async () => {
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
+    // 팀100 5명이 그룹2로 등록됨 → 그룹2 판별
+    const team100 = extractPlayers(realGame)
+      .filter((p) => p.teamId === 100)
+      .map((p) => ({ groupId: 2, puuid: p.puuid }));
+    mockModels.user.findAll.mockResolvedValue(team100);
+    mockModels.lcu_game_raw.create.mockResolvedValue({
+      id: 9,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    });
+    mockModels.match.findAll.mockResolvedValue([]); // 매핑 대상 없음 (저장만 확인)
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+
+    const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
+    expect(result.status).toBe('created');
+    expect(result.groupId).toBe(2);
+    expect(mockModels.lcu_game_raw.create).toHaveBeenCalled();
+    const createArg = mockModels.lcu_game_raw.create.mock.calls[0][0];
+    expect(createArg.groupId).toBe(2);
+    expect(createArg.bansJson).toHaveLength(10);
   });
 });

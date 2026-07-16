@@ -222,13 +222,49 @@ async function mapRaw(raw) {
   return { mapped: true, matchId: match.gameId };
 }
 
-// 업로드 수신: dedup → raw 저장 → 즉시 매핑 시도
-async function ingestGame({ groupId, uploaderPuuid, game }) {
+const GROUP_RESOLVE_MIN = 4; // 게임 참가자 10명 중 이 그룹 소속으로 등록된 인원이 이 이상이어야 그룹 확정
+
+// 게임 참가자 puuid들이 가장 많이 속한 그룹을 판별 (무설정 자동 인식용)
+async function resolveGroupFromPuuids(puuids) {
+  const users = await models.user.findAll({
+    where: { puuid: { [Op.in]: puuids } },
+    attributes: ['groupId', 'puuid'],
+    raw: true,
+  });
+  const counts = new Map();
+  for (const u of users) counts.set(u.groupId, (counts.get(u.groupId) || 0) + 1);
+  let best = null;
+  let bestCount = 0;
+  for (const [groupId, count] of counts) {
+    if (count > bestCount) {
+      best = groupId;
+      bestCount = count;
+    }
+  }
+  return bestCount >= GROUP_RESOLVE_MIN ? best : null;
+}
+
+// 업로드 수신: 참가자 검증 → 그룹 자동판별 → dedup → raw 저장 → 즉시 매핑
+async function ingestGame({ uploaderPuuid, game }) {
   const riotGameKey = `${game.platformId}_${game.gameId}`;
+
+  const puuids = (game.participantIdentities || [])
+    .map((it) => it.player && it.player.puuid)
+    .filter(Boolean);
+
+  // 업로더가 실제 참가자여야 함 (기본 오용 방지)
+  if (!puuids.includes(uploaderPuuid)) {
+    return { status: 'rejected', reason: 'uploader_not_participant' };
+  }
 
   const existing = await models.lcu_game_raw.findOne({ where: { riotGameKey } });
   if (existing) {
     return { status: 'duplicate', riotGameKey };
+  }
+
+  const groupId = await resolveGroupFromPuuids(puuids);
+  if (!groupId) {
+    return { status: 'skipped', reason: 'no_group', riotGameKey };
   }
 
   const bans = (game.teams || []).flatMap((t) =>
@@ -255,7 +291,13 @@ async function ingestGame({ groupId, uploaderPuuid, game }) {
     logger.error(`[collector] 매핑 실패 (${riotGameKey}): ${e.message}`);
   }
 
-  return { status: 'created', riotGameKey, mapped: mapResult.mapped, matchId: mapResult.matchId || null };
+  return {
+    status: 'created',
+    riotGameKey,
+    groupId,
+    mapped: mapResult.mapped,
+    matchId: mapResult.matchId || null,
+  };
 }
 
 // 미매핑 raw 재시도 (스케줄러용) — 승패확정이 업로드보다 늦은 경우를 회수
@@ -280,6 +322,7 @@ module.exports = {
   ingestGame,
   mapRaw,
   retryUnmappedRaws,
+  resolveGroupFromPuuids,
   // 테스트용 순수 함수
   extractPlayers,
   resolveTeamPositions,
