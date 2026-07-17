@@ -131,12 +131,26 @@ module.exports = (app) => {
         role: 'member',
       });
 
+      // 연결 이전에 수집된 내전 스탯(부캐 puuid로 저장된 판)을 본캐로 즉시 소급 롤업.
+      // 연결 이후 게임은 수집 처리(promoteToPrimaryPuuids)가 맡는다.
+      // 실패해도 부캐 등록 자체는 유효하므로 응답을 막지 않는다.
+      let rolledUpStats = 0;
+      try {
+        const [count] = await models.match_player_stat.update(
+          { puuid: mainPuuid },
+          { where: { puuid: subPuuid } },
+        );
+        rolledUpStats = count;
+      } catch (e) {
+        logger.error(`부캐 스탯 소급 롤업 실패 (${subPuuid} → ${mainPuuid}): ${e.message}`);
+      }
+
       auditLog.log({
         groupId: Number(groupId),
         actorDiscordId: discordId,
         actorName: globalName || username || null,
         action: 'user.sub_account_create',
-        details: { mainPuuid, subPuuid, riotId },
+        details: { mainPuuid, subPuuid, riotId, rolledUpStats },
         source: 'web',
       });
 
