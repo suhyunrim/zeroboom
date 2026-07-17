@@ -1440,6 +1440,19 @@ module.exports = (app) => {
       );
       if (validationError) return res.status(400).json({ result: validationError });
 
+      // 자동 수집 기록이 있는 대회는 수동 등록을 서버에서 차단 (중복 방지 불변식 —
+      // 프론트 버튼 숨김과 같은 조건). 자동이 먼저면 여기서 막히고, 수동이 먼저면
+      // 수집기가 양보하므로(recordScrimResult) 어느 순서로도 중복이 생기지 않는다.
+      const hasCollectorRecord = await models.tournament_scrim.findOne({
+        where: { tournamentId: tournament.id, recordedByDiscordId: 'collector' },
+        attributes: ['id'],
+      });
+      if (hasCollectorRecord) {
+        return res.status(409).json({
+          result: '자동 수집이 활성화된 대회입니다. 팀vs팀 스크림은 자동으로 기록됩니다.',
+        });
+      }
+
       const scrim = await models.tournament_scrim.create({
         tournamentId: tournament.id,
         team1Id,
