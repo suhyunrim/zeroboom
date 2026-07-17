@@ -302,9 +302,34 @@ async function detectScrim(groupId, players, dbByPid) {
 
 // 팀vs팀 스크림을 tournament_scrims에 자동 기록 (게임당 1행, 승자 1:0).
 // riotGameKey unique로 멱등 — 백필/치유 재처리 시 중복 기록되지 않는다.
+const SCRIM_MANUAL_DUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 async function recordScrimResult({ raw, game, scrim }) {
   const existing = await models.tournament_scrim.findOne({ where: { riotGameKey: raw.riotGameKey } });
   if (existing) return;
+  // 같은 팀쌍의 수동 기록이 게임 시각 ±24h 내(입력 시점 기준)에 있으면 팀장이 이미 올린
+  // 세트로 보고 기록하지 않는다 — 수동 기록이 있으면 수동이 정본. 소급 업로드(과거 스크림이
+  // 뒤늦게 수집)돼도 기존 수동 기록과 이중 카운트되지 않게 하는 방어선.
+  const gameTime = new Date(raw.gameCreation).getTime();
+  const manualRows = await models.tournament_scrim.findAll({
+    where: {
+      tournamentId: scrim.tournamentId,
+      recordedByDiscordId: { [Op.ne]: 'collector' },
+      [Op.or]: [
+        { team1Id: scrim.versus.blueTeamId, team2Id: scrim.versus.redTeamId },
+        { team1Id: scrim.versus.redTeamId, team2Id: scrim.versus.blueTeamId },
+      ],
+    },
+  });
+  const manualNearby = manualRows.find(
+    (s) => Math.abs(new Date(s.createdAt).getTime() - gameTime) <= SCRIM_MANUAL_DUP_WINDOW_MS,
+  );
+  if (manualNearby) {
+    logger.info(
+      `[collector] 스크림 자동 기록 생략 (${raw.riotGameKey}): 같은 팀쌍 수동 기록 존재 (scrimId=${manualNearby.id})`,
+    );
+    return;
+  }
   const blueWin = (game.teams || []).some((t) => t.teamId === 100 && t.win === 'Win');
   await models.tournament_scrim.create({
     tournamentId: scrim.tournamentId,

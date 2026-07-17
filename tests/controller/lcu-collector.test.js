@@ -8,7 +8,7 @@ const mockModels = {
   summoner_name_history: { findAll: jest.fn() },
   tournament: { findAll: jest.fn() },
   tournament_team: { findAll: jest.fn() },
-  tournament_scrim: { findOne: jest.fn(), create: jest.fn(), destroy: jest.fn() },
+  tournament_scrim: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn(), destroy: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
 jest.mock('../../src/loaders/logger', () => ({
@@ -40,6 +40,7 @@ beforeEach(() => {
   mockModels.summoner_name_history.findAll.mockResolvedValue([]);
   mockModels.tournament.findAll.mockResolvedValue([]); // 진행 중 대회 없음 (스크림 미판정)
   mockModels.tournament_team.findAll.mockResolvedValue([]);
+  mockModels.tournament_scrim.findAll.mockResolvedValue([]); // 수동 기록 없음 (중복 가드 미발동)
 });
 
 describe('extractPlayers', () => {
@@ -442,6 +443,49 @@ describe('processRaw (실데이터 통합)', () => {
       recordedByDiscordId: 'collector',
       riotGameKey: 'KR_8294822545',
     });
+  });
+
+  test('같은 팀쌍 수동 기록이 게임 시각 ±24h 내에 있으면 자동 기록 생략 (수동이 정본)', async () => {
+    const players = extractPlayers(realGame);
+    const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
+    const team200Puuids = players.filter((p) => p.teamId === 200).map((p) => p.puuid);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'in_progress' }]);
+    mockModels.tournament_team.findAll.mockResolvedValue([
+      { id: 11, tournamentId: 77, members: team100Puuids.map((p) => ({ puuid: p })) },
+      { id: 22, tournamentId: 77, members: team200Puuids.map((p) => ({ puuid: p })) },
+    ]);
+    const gameTime = new Date(realGame.gameCreation).getTime();
+    mockModels.tournament_scrim.findOne.mockResolvedValue(null); // riotGameKey 멱등 체크: 없음
+    // 게임 당일 저녁에 팀장이 수동으로 올린 세트
+    mockModels.tournament_scrim.findAll.mockResolvedValue([
+      {
+        id: 9,
+        recordedByDiscordId: '12345',
+        team1Id: 11,
+        team2Id: 22,
+        createdAt: new Date(gameTime + 3 * 60 * 60 * 1000),
+      },
+    ]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const raw = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 4,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    };
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(true); // 태깅은 유지
+    expect(mockModels.tournament_scrim.create).not.toHaveBeenCalled(); // 기록은 생략
   });
 
   test('preparing 대회 스크림은 태깅만 하고 기록 안 함 (팀 재편 가능성)', async () => {
