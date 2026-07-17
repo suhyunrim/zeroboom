@@ -62,6 +62,24 @@ class CommandList {
 	}
 }
 
+// 등록 여부 비교용 정규화: Discord GET 응답과 빌더 toJSON 양쪽을 같은 형태로 축약.
+// Discord는 required/autocomplete가 false면 필드를 생략하므로 !!로 통일하고,
+// 응답에만 붙는 부가 필드(id/version/localizations 등)는 비교에서 제외한다.
+const normalizeCommands = (commandJsons) =>
+	[...commandJsons]
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.map((cmd) => ({
+			name: cmd.name,
+			description: cmd.description,
+			options: (cmd.options || []).map((o) => ({
+				type: o.type,
+				name: o.name,
+				description: o.description,
+				required: !!o.required,
+				autocomplete: !!o.autocomplete,
+			})),
+		}));
+
 let commandList;
 module.exports = async () => {
 	if (commandList) {
@@ -83,3 +101,5 @@ module.exports = async () => {
 	}
 	return commandList;
 }
+
+module.exports.normalizeCommands = normalizeCommands;

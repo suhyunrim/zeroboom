@@ -35,6 +35,10 @@ services:
       REDIS_HOST: zeroboom-redis
       REDIS_PORT: 6379
       REDIS_DB: 1
+      ELISE_UPDATES_DIR: /data/elise-updates
+    volumes:
+      # elise 자동 업데이트 피드 (latest.yml + setup exe) — 호스트에 파일만 올리면 배포와 무관하게 유지
+      - /home/ubuntu/elise-updates-test:/data/elise-updates:ro
     networks:
       - live_network
 

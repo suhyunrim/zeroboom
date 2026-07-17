@@ -1,3 +1,4 @@
+const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
@@ -32,7 +33,21 @@ module.exports = (app) => {
   );
   app.use(cookieParser());
   app.use(methodOverride());
-  app.use(bodyParser.json());
+  // LCU 수집기(collector)가 게임 원본 JSON(수백 KB)을 업로드하므로 기본 100kb로는 부족
+  app.use(bodyParser.json({ limit: '2mb' }));
+
+  // elise 데스크톱 앱 자동 업데이트 피드 (latest.yml + setup exe) — 볼륨 마운트된 환경에서만.
+  // nginx가 /를 앱으로 프록시하므로 별도 nginx 설정 없이 <호스트>/elise/latest.yml 로 서빙된다.
+  if (process.env.ELISE_UPDATES_DIR) {
+    app.use(
+      '/elise',
+      express.static(process.env.ELISE_UPDATES_DIR, {
+        index: false,
+        maxAge: 0, // latest.yml은 항상 재검증 (업데이트 감지 지연 방지)
+      }),
+    );
+  }
+
   app.use(config.api.prefix, routes());
 
   // 라우트 중복 등록 감지 — 같은 method+path가 두 군데서 등록되면 throw.

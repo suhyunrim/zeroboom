@@ -1986,3 +1986,108 @@ describe('undoAuctionBid', () => {
     expect(result.error).toContain('후보');
   });
 });
+
+describe('groupCollectorScrims (수집기 단판 기록 세트 그룹핑)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const base = new Date('2026-07-12T20:00:00Z').getTime();
+  const mkCollector = (id, team1Id, team2Id, team1Score, team2Score, gameKey, createdAt) => ({
+    id, tournamentId: 30, team1Id, team2Id, team1Score, team2Score,
+    recordedByDiscordId: 'collector', riotGameKey: gameKey,
+    createdAt: new Date(createdAt),
+  });
+  const mkManual = (id, team1Id, team2Id, team1Score, team2Score, createdAt) => ({
+    id, tournamentId: 30, team1Id, team2Id, team1Score, team2Score,
+    recordedByDiscordId: '12345', riotGameKey: null, createdAt: new Date(createdAt),
+  });
+
+  test('같은 팀쌍 6시간 내 연속 게임은 한 세트로 합산', () => {
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', base),
+      mkCollector(2, 80, 82, 0, 1, 'KR_2', base),
+      mkCollector(3, 80, 82, 1, 0, 'KR_3', base),
+    ];
+    const creation = { KR_1: new Date(base), KR_2: new Date(base + HOUR), KR_3: new Date(base + 2 * HOUR) };
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, creation);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ team1Id: 80, team2Id: 82, team1Score: 2, team2Score: 1, gameCount: 3 });
+    expect(result[0].ids).toEqual([1, 2, 3]);
+    // 표시 날짜 = 기록(업로드) 시점이 아니라 첫 게임 시각
+    expect(new Date(result[0].createdAt).getTime()).toBe(base);
+  });
+
+  test('소급 업로드(기록 시점≠게임 시각)여도 게임 한 날로 표시·정렬', () => {
+    const uploadedAt = base + 100 * HOUR; // 4일 뒤에 업로드됨
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', uploadedAt),
+      mkManual(9, 80, 85, 2, 1, base + 50 * HOUR), // 그 사이의 수동 기록
+    ];
+    const creation = { KR_1: new Date(base) }; // 실제 게임은 base 시각
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, creation);
+    expect(new Date(result[0].createdAt).getTime()).toBe(base + 50 * HOUR); // 수동(더 최근)이 먼저
+    expect(new Date(result[1].createdAt).getTime()).toBe(base); // 수집 세트는 게임 날짜로
+  });
+
+  test('간격이 6시간을 넘으면 세트 분리', () => {
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', base),
+      mkCollector(2, 80, 82, 1, 0, 'KR_2', base + HOUR),
+      mkCollector(3, 80, 82, 0, 1, 'KR_3', base + 26 * HOUR),
+    ];
+    const creation = { KR_1: new Date(base), KR_2: new Date(base + HOUR), KR_3: new Date(base + 26 * HOUR) };
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, creation);
+    expect(result).toHaveLength(2);
+    const [later, earlier] = result; // createdAt DESC
+    expect(later).toMatchObject({ team1Score: 0, team2Score: 1, gameCount: 1 });
+    expect(earlier).toMatchObject({ team1Score: 2, team2Score: 0, gameCount: 2 });
+  });
+
+  test('팀 방향이 뒤집힌 행도 첫 행 기준으로 정규화 합산', () => {
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', base),
+      mkCollector(2, 82, 80, 1, 0, 'KR_2', base + HOUR), // 82 승 → 80 관점 0:1
+    ];
+    const creation = { KR_1: new Date(base), KR_2: new Date(base + HOUR) };
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, creation);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ team1Id: 80, team2Id: 82, team1Score: 1, team2Score: 1 });
+  });
+
+  test('수동 기록은 그대로 통과하고 수집기 기록과 섞이지 않음', () => {
+    const scrims = [
+      mkManual(9, 80, 82, 2, 1, base),
+      mkCollector(10, 80, 82, 1, 0, 'KR_1', base + HOUR),
+    ];
+    const creation = { KR_1: new Date(base + HOUR) };
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, creation);
+    expect(result).toHaveLength(2);
+    const manual = result.find((s) => s.id === 9);
+    expect(manual.team1Score).toBe(2);
+    expect(manual.gameCount).toBeUndefined();
+  });
+
+  test('gameCreation이 없으면 createdAt으로 폴백해 그룹핑', () => {
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', base),
+      mkCollector(2, 80, 82, 1, 0, 'KR_2', base + HOUR),
+    ];
+    const result = require('../../src/controller/tournament').groupCollectorScrims(scrims, {});
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ team1Score: 2, team2Score: 0, gameCount: 2 });
+  });
+
+  test('그룹핑 전후 승패 합산이 동일 (computeTeamScrimRecord 대조)', () => {
+    const ctrl = require('../../src/controller/tournament');
+    const scrims = [
+      mkCollector(1, 80, 82, 1, 0, 'KR_1', base),
+      mkCollector(2, 82, 80, 1, 0, 'KR_2', base + HOUR),
+      mkCollector(3, 80, 82, 1, 0, 'KR_3', base + 30 * HOUR),
+      mkManual(9, 80, 85, 2, 1, base),
+    ];
+    const creation = { KR_1: new Date(base), KR_2: new Date(base + HOUR), KR_3: new Date(base + 30 * HOUR) };
+    const before = ctrl.computeTeamScrimRecord(80, scrims);
+    const after = ctrl.computeTeamScrimRecord(80, ctrl.groupCollectorScrims(scrims, creation));
+    expect(after.won).toBe(before.won);
+    expect(after.lost).toBe(before.lost);
+    expect(after.played).toBe(3); // 세트 수: 수집기 2세트 + 수동 1세트
+  });
+});

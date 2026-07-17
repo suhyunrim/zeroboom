@@ -31,6 +31,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: false,
       },
+      riotGameKey: {
+        type: DataTypes.STRING(32),
+        allowNull: true, // 수집 게임 기반 자동 기록만 채움 (null=수동 기록)
+      },
     },
     {},
   );

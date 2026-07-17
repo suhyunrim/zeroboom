@@ -222,6 +222,19 @@ module.exports.getPositions = async (name, options = {}) => {
       }
       found.set(liveData);
       await found.save();
+
+      // 닉변 시 옛 닉네임 이력 보존 — LCU 수집 게임(게임 당시 닉네임 고정)의 브릿지 폴백에 사용
+      if (updatedName && previousName) {
+        try {
+          await models.summoner_name_history.create({
+            puuid: found.puuid,
+            name: previousName,
+            changedAt: new Date(),
+          });
+        } catch (e) {
+          logger.warn(`[${name}] 닉네임 이력 기록 실패: ${e.message}`);
+        }
+      }
     }
 
     const nameChange = updatedName ? { puuid: found.puuid, from: previousName, to: updatedName } : null;

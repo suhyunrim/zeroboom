@@ -249,6 +249,72 @@ const computeHeadToHeadScrim = (team1Id, team2Id, scrims) => {
   };
 };
 
+// 수집기 자동 스크림 기록(게임당 1행)을 표시용 세트로 묶는다 — DB는 게임당 1행 유지(읽기 시점 그룹핑).
+// 기준: 같은 팀쌍의 게임을 시간순 정렬해 인접 간격이 gapMs 이내면 같은 세트.
+// 시간은 lcu_game_raws.gameCreation 기준(소급 업로드돼도 게임 시각으로 묶임), 없으면 createdAt 폴백.
+// 수동 기록은 그대로 통과. 점수는 게임 단위 합산이라 승률·AI 예측 수치는 그룹핑 전후 동일하고,
+// played(맞대결 횟수)만 게임 수 → 세트 수로 복원된다.
+const SCRIM_GROUP_GAP_MS = 6 * 60 * 60 * 1000;
+
+const groupCollectorScrims = (scrims, creationByGameKey = {}, gapMs = SCRIM_GROUP_GAP_MS) => {
+  const manual = [];
+  const collectorByPair = new Map();
+  for (const s of scrims) {
+    if (s.recordedByDiscordId !== 'collector') {
+      manual.push(s);
+      continue;
+    }
+    const pairKey =
+      s.team1Id < s.team2Id ? `${s.team1Id}-${s.team2Id}` : `${s.team2Id}-${s.team1Id}`;
+    if (!collectorByPair.has(pairKey)) collectorByPair.set(pairKey, []);
+    collectorByPair.get(pairKey).push(s);
+  }
+
+  const timeOf = (s) => {
+    const creation = s.riotGameKey && creationByGameKey[s.riotGameKey];
+    return new Date(creation || s.createdAt).getTime();
+  };
+
+  const grouped = [];
+  for (const rows of collectorByPair.values()) {
+    rows.sort((a, b) => timeOf(a) - timeOf(b));
+    let cur = null;
+    let lastTime = 0;
+    for (const s of rows) {
+      const t = timeOf(s);
+      if (!cur || t - lastTime > gapMs) {
+        cur = {
+          id: s.id,
+          tournamentId: s.tournamentId,
+          team1Id: s.team1Id,
+          team2Id: s.team2Id,
+          team1Score: 0,
+          team2Score: 0,
+          recordedByDiscordId: 'collector',
+          // 소급 업로드돼도 "스크림을 한 날"이 표시·정렬 기준이 되도록 첫 게임 시각을 쓴다
+          createdAt: new Date(t),
+          gameCount: 0,
+          ids: [],
+        };
+        grouped.push(cur);
+      }
+      // 세트 기준(첫 행)의 team1 관점으로 방향 정규화해 합산
+      if (s.team1Id === cur.team1Id) {
+        cur.team1Score += s.team1Score;
+        cur.team2Score += s.team2Score;
+      } else {
+        cur.team1Score += s.team2Score;
+        cur.team2Score += s.team1Score;
+      }
+      cur.gameCount += 1;
+      cur.ids.push(s.id);
+      lastTime = t;
+    }
+  }
+
+  return [...manual, ...grouped].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+};
+
 const validateSlotMapping = (slotMapping, teams, bracketSize, teamCount) => {
   if (!Array.isArray(slotMapping) || slotMapping.length !== bracketSize) {
     return `slotMapping은 길이 ${bracketSize}의 배열이어야 합니다.`;
@@ -1077,6 +1143,7 @@ module.exports = {
   computeTeamAvgRating,
   computeTeamScrimRecord,
   computeHeadToHeadScrim,
+  groupCollectorScrims,
   isMatchStarted,
   isMatchPredictable,
   isTournamentLocked,

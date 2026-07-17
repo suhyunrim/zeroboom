@@ -309,6 +309,7 @@ exports.reactButton = async (interaction, match) => {
     embeds: [formatMatchWithRating(label, teams[0], teamRatings[0], teams[1], teamRatings[1], team1WinRate)],
     components: [buttons],
     teamDiscordIds,
+    gameId: matchQueryResult.gameId, // 수집기 자동 승패확정용 메시지 참조 저장에 사용
   };
   return output;
 };
