@@ -182,6 +182,21 @@ const buildDetail = async (tournament) => {
     }),
   ]);
 
+  // 수집기 자동 기록(게임당 1행)을 표시·집계용 세트로 그룹핑 (게임 시각 기준, 수동 기록은 그대로)
+  const scrimGameKeys = scrims.filter((s) => s.riotGameKey).map((s) => s.riotGameKey);
+  const scrimRaws = scrimGameKeys.length
+    ? await models.lcu_game_raw.findAll({
+        where: { riotGameKey: scrimGameKeys },
+        attributes: ['riotGameKey', 'gameCreation'],
+        raw: true,
+      })
+    : [];
+  const creationByGameKey = {};
+  scrimRaws.forEach((r) => {
+    creationByGameKey[r.riotGameKey] = r.gameCreation;
+  });
+  const scrimSets = tournamentController.groupCollectorScrims(scrims, creationByGameKey);
+
   const teamMemberPuuids = new Set();
   teamsRaw.forEach((t) => (t.members || []).forEach((m) => teamMemberPuuids.add(m.puuid)));
   const summonerPuuids = new Set(teamMemberPuuids);
@@ -198,7 +213,7 @@ const buildDetail = async (tournament) => {
     summonerByPuuid[s.puuid] = s;
   });
   const teams = enrichTeamsWithMemberInfo(
-    enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrims),
+    enrichTeamsWithScrimRecord(enrichTeamsWithRating(teamsRaw, ratingByPuuid), scrimSets),
     summonerByPuuid,
     ratingByPuuid,
   );
@@ -218,7 +233,7 @@ const buildDetail = async (tournament) => {
   predictions.push(...aiPrediction.toPredictionEntries(aiPredictionRows));
   const matchesEnriched = enrichMatchesWithHeadToHead(
     enrichMatchesWithWinProb(matchesRaw, avgRatingByTeamId),
-    scrims,
+    scrimSets,
   );
   const { predictionMode } = tournament;
   const matches = tournamentController.enrichMatchesWithPredictions(matchesEnriched, predictions, predictionMode);
@@ -229,7 +244,7 @@ const buildDetail = async (tournament) => {
   const leaderboard = tournamentController.buildLeaderboard(matchesRaw, predictions, predictionMode);
   const roundLabels = tournamentController.computeRoundLabels(tournament.bracketSize, tournament.teamCount);
   const currentCandidate = await buildCandidateDetail(tournament, tournament.currentAuctionPuuid);
-  return { tournament, teams, matches, scrims, roundLabels, predictionsLocked, leaderboard, currentCandidate };
+  return { tournament, teams, matches, scrims: scrimSets, roundLabels, predictionsLocked, leaderboard, currentCandidate };
 };
 
 const loadTournamentForAdmin = async (req, res, { requireStatus, statusError } = {}) => {
