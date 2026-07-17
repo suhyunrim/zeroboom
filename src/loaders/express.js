@@ -39,6 +39,20 @@ module.exports = (app) => {
   // elise 데스크톱 앱 자동 업데이트 피드 (latest.yml + setup exe) — 볼륨 마운트된 환경에서만.
   // nginx가 /를 앱으로 프록시하므로 별도 nginx 설정 없이 <호스트>/elise/latest.yml 로 서빙된다.
   if (process.env.ELISE_UPDATES_DIR) {
+    // 버전과 무관한 고정 다운로드 URL — latest.yml의 path(최신 setup exe 파일명)로 리다이렉트.
+    // 배포 공지에는 이 주소 하나만 쓰면 되고, 버전업해도 계속 유효하다.
+    app.get('/elise/download', (req, res) => {
+      const fs = require('fs');
+      const path = require('path');
+      try {
+        const yml = fs.readFileSync(path.join(process.env.ELISE_UPDATES_DIR, 'latest.yml'), 'utf8');
+        const match = yml.match(/^path:\s*(.+)$/m);
+        if (!match) return res.status(404).send('릴리스 정보를 찾을 수 없습니다.');
+        return res.redirect(`/elise/${match[1].trim()}`);
+      } catch (e) {
+        return res.status(404).send('아직 릴리스가 없습니다.');
+      }
+    });
     app.use(
       '/elise',
       express.static(process.env.ELISE_UPDATES_DIR, {
