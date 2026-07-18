@@ -23,6 +23,8 @@ const {
   resolveDbPuuids,
   ingestGame,
   resolveGroupFromPuuids,
+  verifyLive,
+  verifyChampSelect,
 } = require('../../src/controller/lcu-collector');
 
 // 실제 내전 게임 원본 (현수필 제공, 2026-07-11)
@@ -692,8 +694,92 @@ describe('resolveGroupFromPuuids', () => {
   });
 });
 
+// 실시간 수집 페이로드 (elise v0.2.5 계약) — 실데이터 픽스처의 명단/puuid로 구성
+const riotIds = (realGame.participantIdentities || []).map(
+  (it) => `${it.player.gameName}#${it.player.tagLine}`,
+);
+const lcuPuuids = (realGame.participantIdentities || []).map((it) => it.player.puuid);
+
+const buildLive = (overrides = {}) => ({
+  capturedAt: 1752800000000,
+  durationSec: 1930,
+  partial: false,
+  gameMode: 'CLASSIC',
+  mapNumber: 11,
+  mapTerrain: 'Default',
+  roster: riotIds,
+  static: [{ riotId: riotIds[0], champion: 'Graves', team: 'ORDER', position: 'JUNGLE' }],
+  ticks: [{ t: 60, p: [[6, 70, 3, 1, 2, 5, 0, [1011, 3006]]] }],
+  events: [{ EventID: 0, EventName: 'GameStart', EventTime: 0.017 }],
+  self: [{ t: 60, gold: 500, abilities: { Q: 1, W: 1, E: 1, R: 0 } }],
+  selfRiotId: riotIds[0],
+  ...overrides,
+});
+
+const buildChampSelect = (overrides = {}) => ({
+  capturedAt: 1752799000000,
+  type: 'champSelect',
+  puuids: lcuPuuids.slice(0, 5), // 상대 팀이 가려진 경우를 가정 (내 팀 5명)
+  cells: [{ cellId: 0, puuid: lcuPuuids[0], championId: 64, assignedPosition: 'jungle', team: 'my' }],
+  actions: [{ id: 1, actorCellId: 0, championId: 114, type: 'ban', completed: true }],
+  ...overrides,
+});
+
+describe('verifyLive / verifyChampSelect (실시간 데이터 검증)', () => {
+  test('명단이 게임 참가자와 일치하면 통과', () => {
+    expect(verifyLive(buildLive(), realGame)).not.toBeNull();
+  });
+
+  test('명단이 어긋나면 저장하지 않는다 (다른 판의 기록 차단)', () => {
+    const other = buildLive({ roster: ['남#KR1', '의#KR1', '판#KR1', '입#KR1'] });
+    expect(verifyLive(other, realGame)).toBeNull();
+  });
+
+  test('페이로드가 비정상이면 저장하지 않는다', () => {
+    expect(verifyLive(null, realGame)).toBeNull();
+    expect(verifyLive(buildLive({ ticks: 'not-array' }), realGame)).toBeNull();
+    expect(verifyLive(buildLive({ events: null }), realGame)).toBeNull();
+    expect(verifyLive(buildLive({ ticks: new Array(501).fill({ t: 0, p: [] }) }), realGame)).toBeNull();
+  });
+
+  test('챔프 셀렉트는 puuid 4명 이상 겹쳐야 통과', () => {
+    expect(verifyChampSelect(buildChampSelect(), realGame)).not.toBeNull();
+    // 상대 팀이 가려져도 내 팀 4명이면 인정, 3명이면 다른 판으로 보고 버림
+    expect(verifyChampSelect(buildChampSelect({ puuids: lcuPuuids.slice(0, 4) }), realGame)).not.toBeNull();
+    expect(verifyChampSelect(buildChampSelect({ puuids: lcuPuuids.slice(0, 3) }), realGame)).toBeNull();
+  });
+
+  test('챔프 셀렉트 액션이 비었으면 저장하지 않는다', () => {
+    expect(verifyChampSelect(buildChampSelect({ actions: [] }), realGame)).toBeNull();
+    expect(verifyChampSelect(null, realGame)).toBeNull();
+  });
+});
+
 describe('ingestGame (무설정 자동 인식)', () => {
   const uploader = '65c73467-c454-59fd-a502-9504f4ed8986'; // 현수필 (실데이터 참가자)
+
+  // 정상 저장 경로에 필요한 최소 모킹 (그룹2 판별 + 봇 match 없음)
+  const setupIngestMocks = () => {
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(null);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    const team100 = extractPlayers(realGame)
+      .filter((p) => p.teamId === 100)
+      .map((p) => ({ groupId: 2, puuid: p.puuid }));
+    mockModels.user.findAll.mockResolvedValueOnce(team100).mockResolvedValueOnce([]);
+    mockModels.lcu_game_raw.create.mockResolvedValue({
+      id: 9,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    });
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+  };
 
   test('업로더가 참가자가 아니면 거부', async () => {
     const result = await ingestGame({ uploaderPuuid: 'stranger', game: realGame });
@@ -752,5 +838,46 @@ describe('ingestGame (무설정 자동 인식)', () => {
     // 봇 match 없어도 10행 생성
     expect(mockModels.match_player_stat.bulkCreate).toHaveBeenCalled();
     expect(mockModels.match_player_stat.bulkCreate.mock.calls[0][0]).toHaveLength(10);
+  });
+
+  test('실시간 데이터가 없는 판(대부분)은 세 컬럼이 모두 null', async () => {
+    setupIngestMocks();
+    await ingestGame({ uploaderPuuid: uploader, game: realGame });
+    const arg = mockModels.lcu_game_raw.create.mock.calls[0][0];
+    expect(arg.liveEventsJson).toBeNull();
+    expect(arg.liveTimelineJson).toBeNull();
+    expect(arg.champSelectJson).toBeNull();
+  });
+
+  test('검증을 통과한 실시간 데이터는 이벤트/타임라인/챔프셀렉트로 나눠 저장', async () => {
+    setupIngestMocks();
+    await ingestGame({
+      uploaderPuuid: uploader,
+      game: realGame,
+      live: buildLive(),
+      champSelect: buildChampSelect(),
+    });
+    const arg = mockModels.lcu_game_raw.create.mock.calls[0][0];
+    expect(arg.liveEventsJson).toHaveLength(1);
+    expect(arg.liveTimelineJson.ticks).toHaveLength(1);
+    expect(arg.liveTimelineJson.partial).toBe(false);
+    expect(arg.liveTimelineJson.mapTerrain).toBe('Default');
+    expect(arg.liveTimelineJson.selfRiotId).toBe(riotIds[0]);
+    expect(arg.champSelectJson.actions).toHaveLength(1);
+  });
+
+  test('검증에 실패한 실시간 데이터는 저장하지 않되 업로드 자체는 성공', async () => {
+    setupIngestMocks();
+    const result = await ingestGame({
+      uploaderPuuid: uploader,
+      game: realGame,
+      live: buildLive({ roster: ['남#KR1', '의#KR1', '판#KR1'] }), // 명단 불일치
+      champSelect: buildChampSelect({ actions: [] }),
+    });
+    expect(result.status).toBe('created');
+    const arg = mockModels.lcu_game_raw.create.mock.calls[0][0];
+    expect(arg.liveEventsJson).toBeNull();
+    expect(arg.liveTimelineJson).toBeNull();
+    expect(arg.champSelectJson).toBeNull();
   });
 });

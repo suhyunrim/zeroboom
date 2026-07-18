@@ -16,7 +16,8 @@ module.exports = (app) => {
    */
   route.post('/games', async (req, res) => {
     try {
-      const { uploaderPuuid, game } = req.body || {};
+      // live/champSelect: 게임 도중 elise가 켜져 있던 판에만 실려 오는 선택 필드
+      const { uploaderPuuid, game, live, champSelect } = req.body || {};
       if (!uploaderPuuid || !game || !game.gameId || !game.platformId) {
         return res.status(400).json({ result: 'uploaderPuuid와 game(gameId, platformId 포함)이 필요합니다.' });
       }
@@ -24,7 +25,12 @@ module.exports = (app) => {
         return res.status(400).json({ result: '커스텀 게임만 업로드할 수 있습니다.' });
       }
 
-      const result = await lcuCollector.ingestGame({ uploaderPuuid, game });
+      const result = await lcuCollector.ingestGame({
+        uploaderPuuid,
+        game,
+        live: live || null,
+        champSelect: champSelect || null,
+      });
 
       // dedup / 판별 실패 / 참가자 아님 → 재업로드 방지 위해 2xx로 응답 (elise가 완료 처리)
       if (result.status === 'duplicate') {

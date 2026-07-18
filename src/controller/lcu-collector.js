@@ -571,8 +571,37 @@ async function resolveGroupFromPuuids(puuids) {
   return bestCount >= GROUP_RESOLVE_MIN ? best : null;
 }
 
+// 실시간 수집(elise) 페이로드 검증 — 헬퍼가 명단·시각으로 대조해 보내지만 서버도 독립 확인한다.
+// 엉뚱한 판의 기록이 붙으면 되돌리기 어려우므로, 애매하면 저장하지 않는다(null).
+const LIVE_MAX_TICKS = 500; // 30초 간격 → 정상 게임이면 100개 미만
+const LIVE_MIN_ROSTER_OVERLAP = 8; // 10명 중
+// 챔프 셀렉트는 상대 팀 puuid가 가려질 수 있어(커스텀에서 실제 가려지는지는 미확인) 내 팀 5명 기준으로 느슨하게
+const CHAMP_SELECT_MIN_OVERLAP = 4;
+
+function verifyLive(live, game) {
+  if (!live || !Array.isArray(live.ticks) || !Array.isArray(live.events)) return null;
+  if (live.ticks.length > LIVE_MAX_TICKS) return null;
+  const gameRiotIds = new Set(
+    (game.participantIdentities || [])
+      .map((it) => it.player && `${it.player.gameName}#${it.player.tagLine}`)
+      .filter(Boolean),
+  );
+  const overlap = (live.roster || []).filter((name) => gameRiotIds.has(name)).length;
+  return overlap >= LIVE_MIN_ROSTER_OVERLAP ? live : null;
+}
+
+function verifyChampSelect(champSelect, game) {
+  if (!champSelect || !Array.isArray(champSelect.actions) || champSelect.actions.length === 0) return null;
+  const gamePuuids = new Set(
+    (game.participantIdentities || []).map((it) => it.player && it.player.puuid).filter(Boolean),
+  );
+  const overlap = (champSelect.puuids || []).filter((p) => gamePuuids.has(p)).length;
+  return overlap >= CHAMP_SELECT_MIN_OVERLAP ? champSelect : null;
+}
+
 // 업로드 수신: 참가자 검증 → Riot ID로 그룹 자동판별 → dedup → raw 저장 → 통계 생성(+매핑)
-async function ingestGame({ uploaderPuuid, game }) {
+// live/champSelect는 게임 도중 elise가 켜져 있던 판에만 실려 온다 (대부분 null).
+async function ingestGame({ uploaderPuuid, game, live = null, champSelect = null }) {
   const riotGameKey = `${game.platformId}_${game.gameId}`;
 
   // 업로더가 실제 참가자여야 함 (LCU puuid 공간에서 비교, 기본 오용 방지)
@@ -600,6 +629,14 @@ async function ingestGame({ uploaderPuuid, game }) {
     (t.bans || []).map((b) => ({ championId: b.championId, teamId: t.teamId, pickTurn: b.pickTurn })),
   );
 
+  // 실시간 수집 원본은 검증을 통과한 것만 보관 (실패해도 업로드 자체는 성공 — 게임 원본이 본체)
+  const verifiedLive = verifyLive(live, game);
+  const verifiedChampSelect = verifyChampSelect(champSelect, game);
+  if (live && !verifiedLive) logger.info(`[collector] 실시간 데이터 검증 실패로 미저장 (${riotGameKey})`);
+  if (champSelect && !verifiedChampSelect) {
+    logger.info(`[collector] 챔프 셀렉트 검증 실패로 미저장 (${riotGameKey})`);
+  }
+
   const raw = await models.lcu_game_raw.create({
     riotGameKey,
     groupId,
@@ -611,6 +648,23 @@ async function ingestGame({ uploaderPuuid, game }) {
     queueId: game.queueId || null,
     bansJson: bans,
     rawJson: game,
+    liveEventsJson: verifiedLive ? verifiedLive.events : null,
+    liveTimelineJson: verifiedLive
+      ? {
+          capturedAt: verifiedLive.capturedAt,
+          durationSec: verifiedLive.durationSec,
+          partial: verifiedLive.partial, // 게임 도중 켜져 곡선이 반쪽인 판
+          gameMode: verifiedLive.gameMode,
+          mapTerrain: verifiedLive.mapTerrain, // 용 영혼 지형
+          static: verifiedLive.static,
+          ticks: verifiedLive.ticks,
+          // self(골드·스킬레벨)는 Live API가 본인 것만 주는 비대칭 데이터 —
+          // 켠 사람만 기록이 생기므로 통계·표시에 쓰지 말고 보관만 한다.
+          self: verifiedLive.self,
+          selfRiotId: verifiedLive.selfRiotId,
+        }
+      : null,
+    champSelectJson: verifiedChampSelect,
   });
 
   let result = { statsCreated: false, mapped: false };
@@ -742,4 +796,6 @@ module.exports = {
   extractPlayers,
   resolveTeamPositions,
   pickBestCandidate,
+  verifyLive,
+  verifyChampSelect,
 };
