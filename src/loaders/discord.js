@@ -197,6 +197,34 @@ module.exports = async (app) => {
     return honorMessage;
   }
 
+  // 승패확정 공통 후처리: 감사 로그 → 업적 알림 → 승리 안내 → 버튼 교체 → 명예 투표.
+  // 수동 버튼(winCommand)과 자동(수집기) 확정이 공유하고, 승리 안내 발송 방법만 호출부가 정한다.
+  async function finishWinConfirm({ channel, buttonMessage, matchData, matchResult, winTeam, audit, sendVictory }) {
+    auditLog.log(audit).catch((e) => logger.error('감사 로그 오류:', e));
+
+    // 업적 달성 알림
+    if (matchResult.newAchievements?.length > 0) {
+      const { sendAchievementNotification } = require('../services/achievement/notifier');
+      sendAchievementNotification(channel, matchResult.newAchievements, matchData.groupId).catch((e) =>
+        logger.error('업적 알림 오류:', e),
+      );
+    }
+
+    // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const changeButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`changeWinCommand|${matchData.gameId}`)
+        .setLabel('승/패 변경하기')
+        .setStyle(ButtonStyle.Secondary),
+    );
+    const teamEmoji = winTeam === 1 ? '🐶' : '🐱';
+    await sendVictory(`${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.`);
+    await buttonMessage.edit({ components: [changeButton] });
+
+    await startHonorVote({ channel, matchData, groupId: matchData.groupId });
+  }
+
   // 수집기(elise)가 올린 게임이 내전 match와 매핑되면, 사용자가 승패 버튼을 누른 것과 동일하게
   // 서버에서 자동으로 승패를 확정한다: 레이팅 반영 + 버튼 교체 + 승리 메시지 + 업적 알림 + 명예 투표.
   // - 이미 확정된 매치(수동/자동)는 건드리지 않는다. (winTeam != null → skip)
@@ -225,42 +253,22 @@ module.exports = async (app) => {
 
     const { matchData, matchResult } = locked;
 
-    auditLog
-      .log({
+    await finishWinConfirm({
+      channel,
+      buttonMessage: message,
+      matchData,
+      matchResult,
+      winTeam,
+      audit: {
         groupId: matchData.groupId,
         actorDiscordId: null,
         actorName: 'auto(collector)',
         action: 'match.confirm',
         details: { gameId, winTeam, previousWinTeam: null, source: 'collector' },
         source: 'api',
-      })
-      .catch((e) => logger.error('감사 로그 오류:', e));
-
-    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-    const teamEmoji = winTeam === 1 ? '🐶' : '🐱';
-
-    // 승/패 버튼을 "승/패 변경하기"로 교체 (수동 확정과 동일)
-    const changeButton = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`changeWinCommand|${gameId}`)
-        .setLabel('승/패 변경하기')
-        .setStyle(ButtonStyle.Secondary),
-    );
-    await message.edit({ components: [changeButton] });
-    await channel.send(
-      `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.\n(🤖 수집 프로그램 자동 확정)`,
-    );
-
-    // 업적 달성 알림
-    if (matchResult.newAchievements?.length > 0) {
-      const { sendAchievementNotification } = require('../services/achievement/notifier');
-      sendAchievementNotification(channel, matchResult.newAchievements, matchData.groupId).catch((e) =>
-        logger.error('업적 알림 오류:', e),
-      );
-    }
-
-    // 명예 투표 시작
-    await startHonorVote({ channel, matchData, groupId: matchData.groupId });
+      },
+      sendVictory: (text) => channel.send(`${text}\n(🤖 수집 프로그램 자동 확정)`),
+    });
 
     return { confirmed: true, gameId, winTeam };
   }
@@ -1024,7 +1032,6 @@ module.exports = async (app) => {
 
       // winCommand 버튼 체크
       if (split[0] === 'winCommand') {
-        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const group = await models.group.findOne({
           where: { discordGuildId: interaction.guildId },
         });
@@ -1050,44 +1057,23 @@ module.exports = async (app) => {
         }
 
         const { matchData, previousWinTeam, matchResult } = locked;
-        const teamEmoji = winTeam == 1 ? '🐶' : '🐱';
 
-        auditLog
-          .log({
+        await finishWinConfirm({
+          channel: interaction.channel,
+          buttonMessage: interaction.message,
+          matchData,
+          matchResult,
+          winTeam,
+          audit: {
             groupId: group.id,
             actorDiscordId: interaction.user.id,
             actorName: interaction.member.nickname,
             action: 'match.confirm',
             details: { gameId: matchData.gameId, winTeam, previousWinTeam },
             source: 'discord',
-          })
-          .catch((e) => logger.error('감사 로그 오류:', e));
-
-        // 업적 달성 알림
-        if (matchResult.newAchievements?.length > 0) {
-          const { sendAchievementNotification } = require('../services/achievement/notifier');
-          sendAchievementNotification(interaction.channel, matchResult.newAchievements, matchData.groupId).catch((e) =>
-            logger.error('업적 알림 오류:', e),
-          );
-        }
-
-        // 승/패 버튼을 "승/패 변경하기" 버튼으로 교체
-        const changeButton = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`changeWinCommand|${split[1]}`)
-            .setLabel('승/패 변경하기')
-            .setStyle(ButtonStyle.Secondary),
-        );
-
-        // 먼저 reply로 응답
-        await interaction.reply(
-          `${teamEmoji}팀이 **승리**하였습니다! 레이팅에 반영 되었습니다.\n(by ${interaction.member.nickname})`,
-        );
-        // 원본 메시지의 버튼 변경
-        await interaction.message.edit({ components: [changeButton] });
-
-        // 명예 투표 시작 (수동/자동 확정 공용)
-        await startHonorVote({ channel: interaction.channel, matchData, groupId: group.id });
+          },
+          sendVictory: (text) => interaction.reply(`${text}\n(by ${interaction.member.nickname})`),
+        });
 
         return;
       }

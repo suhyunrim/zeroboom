@@ -185,7 +185,8 @@ describe('healUnbridgedStats (닉변 치유)', () => {
     };
     const cleanRaw = { ...raw, id: 2, riotGameKey: 'KR_CLEAN', save: jest.fn() };
     mockModels.lcu_game_raw.findAll
-      .mockResolvedValueOnce([raw, cleanRaw]) // 치유 대상 조회
+      .mockResolvedValueOnce([{ riotGameKey: raw.riotGameKey }, { riotGameKey: cleanRaw.riotGameKey }]) // 1차: 키만
+      .mockResolvedValueOnce([raw]) // 2차: 폴백 행 있는 raw만 로드
       .mockResolvedValue([]); // 이후 processRaw 내부의 usedRows 조회
     mockModels.match_player_stat.findAll.mockResolvedValueOnce([
       { riotGameKey: 'KR_8294822545', puuid: '9a9cf9e6-e43f-52aa-b0b1-000000000000' }, // 폴백 행

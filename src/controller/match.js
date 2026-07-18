@@ -843,23 +843,17 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       raw: true,
     });
     if (statRows.length > 0) {
+      // raw:true를 쓰지 않아 bansJson은 모델 getter가 파싱한다 (매치당 2행이라 인스턴스 부담 없음)
       const teamRows = await models.match_team_stat.findAll({
         where: { groupId: group.id, matchId: { [Op.in]: pageMatchIds } },
-        raw: true,
       });
       const teamRowsByMatch = new Map(); // matchId → rows[]
       for (const row of teamRows) {
         if (!teamRowsByMatch.has(row.matchId)) teamRowsByMatch.set(row.matchId, []);
         teamRowsByMatch.get(row.matchId).push(row);
       }
-      // 팀 오브젝트 응답 형태 (raw:true라 bansJson getter 미적용 → 직접 파싱)
+      // 팀 오브젝트 응답 형태
       const formatTeamStat = (row) => {
-        let bans = [];
-        try {
-          bans = JSON.parse(row.bansJson) || [];
-        } catch (e) {
-          /* bansJson 파싱 실패 무시 */
-        }
         return {
           baronKills: row.baronKills,
           dragonKills: row.dragonKills,
@@ -872,7 +866,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
           firstDragon: !!row.firstDragon,
           firstBaron: !!row.firstBaron,
           firstInhibitor: !!row.firstInhibitor,
-          bans,
+          bans: row.bansJson,
         };
       };
 

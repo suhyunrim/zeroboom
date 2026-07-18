@@ -77,6 +77,17 @@ function extractPlayers(game) {
   });
 }
 
+// extractPlayers가 뽑는 상세 지표 중 match_player_stats 컬럼과 이름이 1:1인 필드.
+// buildStatRows가 이 목록으로 전개하므로, 지표를 추가할 땐 extractPlayers와 여기만 맞추면 된다.
+const DETAIL_STAT_FIELDS = [
+  'item0', 'item1', 'item2', 'item3', 'item4', 'item5', 'item6',
+  'spell1Id', 'spell2Id',
+  'runeKeystoneId', 'runePrimaryStyleId', 'runeSubStyleId',
+  'champLevel',
+  'doubleKills', 'tripleKills', 'quadraKills', 'pentaKills', 'largestMultiKill', 'largestKillingSpree',
+  'firstBloodKill', 'wardsPlaced', 'wardsKilled', 'controlWardsBought',
+];
+
 // 팀 오브젝트 스탯 추출 (game.teams[] → match_team_stats 2행)
 // LCU 원본의 firstDargon 오타를 firstDragon으로 정정해 저장한다.
 function extractTeamRows({ raw, game, match }) {
@@ -421,31 +432,9 @@ function buildStatRows({ raw, players, dbByPid, positions, match, isScrim = fals
       csDiff: opponent ? p.cs - opponent.cs : null,
       goldDiff: opponent ? p.goldEarned - opponent.goldEarned : null,
       damageDiff: opponent ? p.damageToChampions - opponent.damageToChampions : null,
-      // 상세 지표
+      // 상세 지표 (extractPlayers 출력 필드명 = DB 컬럼명 1:1)
       teamNo: p.teamId === 100 ? 1 : 2,
-      item0: p.item0,
-      item1: p.item1,
-      item2: p.item2,
-      item3: p.item3,
-      item4: p.item4,
-      item5: p.item5,
-      item6: p.item6,
-      spell1Id: p.spell1Id,
-      spell2Id: p.spell2Id,
-      runeKeystoneId: p.runeKeystoneId,
-      runePrimaryStyleId: p.runePrimaryStyleId,
-      runeSubStyleId: p.runeSubStyleId,
-      champLevel: p.champLevel,
-      doubleKills: p.doubleKills,
-      tripleKills: p.tripleKills,
-      quadraKills: p.quadraKills,
-      pentaKills: p.pentaKills,
-      largestMultiKill: p.largestMultiKill,
-      largestKillingSpree: p.largestKillingSpree,
-      firstBloodKill: p.firstBloodKill,
-      wardsPlaced: p.wardsPlaced,
-      wardsKilled: p.wardsKilled,
-      controlWardsBought: p.controlWardsBought,
+      ...Object.fromEntries(DETAIL_STAT_FIELDS.map((f) => [f, p[f]])),
       isScrim,
     };
   });
@@ -611,21 +600,24 @@ async function ingestGame({ uploaderPuuid, game }) {
   };
 }
 
+// 매핑 성공 시 자동 승패확정 콜백 발화. 실패는 로그만 남기고 배치를 계속한다.
+// (winTeam 검증은 콜백(autoConfirmMatchWin)이 담당 — 호출부에서 중복 검사하지 않는다)
+async function fireOnMapped(onMapped, result) {
+  if (!result.mapped) return false;
+  if (onMapped) {
+    await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
+      logger.error(`[collector] 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
+    );
+  }
+  return true;
+}
+
 // 미처리/미매핑 raw 재시도 (스케줄러용).
 // (1) 통계 미생성 raw → 생성 재시도, (2) 통계는 있으나 봇 match 미매핑 raw → 매핑만 재시도
 //     (승패확정이 헬퍼 업로드보다 늦게 이뤄진 판을 회수)
 // onMapped: 새로 매핑된 건마다 호출 (자동 승패확정 트리거용)
 async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
   const since = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
-  const fireMapped = async (result) => {
-    if (!result.mapped) return false;
-    if (onMapped) {
-      await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
-        logger.error(`[collector] 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
-      );
-    }
-    return true;
-  };
 
   let mapped = 0;
 
@@ -634,22 +626,24 @@ async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
   });
   for (const raw of unprocessed) {
     try {
-      if (await fireMapped(await processRaw(raw))) mapped += 1;
+      if (await fireOnMapped(onMapped, await processRaw(raw))) mapped += 1;
     } catch (e) {
       logger.error(`[collector] 통계 생성 재시도 실패 (${raw.riotGameKey}): ${e.message}`);
     }
   }
 
+  // remapRaw는 rawJson(게임당 수백 KB)을 쓰지 않으므로 제외하고 로드
   const unmapped = await models.lcu_game_raw.findAll({
     where: {
       statsProcessedAt: { [Op.ne]: null },
       mappedMatchId: null,
       gameCreation: { [Op.gte]: since },
     },
+    attributes: { exclude: ['rawJson'] },
   });
   for (const raw of unmapped) {
     try {
-      if (await fireMapped(await remapRaw(raw))) mapped += 1;
+      if (await fireOnMapped(onMapped, await remapRaw(raw))) mapped += 1;
     } catch (e) {
       logger.error(`[collector] 재매핑 실패 (${raw.riotGameKey}): ${e.message}`);
     }
@@ -664,13 +658,16 @@ async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
 // 수량이 작아(게임 단위) 비용은 무시 가능.
 async function healUnbridgedStats({ withinDays = 14, onMapped = null } = {}) {
   const since = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
-  const raws = await models.lcu_game_raw.findAll({
+  // rawJson(게임당 수백 KB)은 실제 재처리 대상에만 필요하므로, 키만 먼저 훑어 대상을 좁힌다
+  const rawKeys = await models.lcu_game_raw.findAll({
     where: { statsProcessedAt: { [Op.ne]: null }, gameCreation: { [Op.gte]: since } },
+    attributes: ['riotGameKey'],
+    raw: true,
   });
-  if (raws.length === 0) return { checked: 0, healed: 0 };
+  if (rawKeys.length === 0) return { checked: 0, healed: 0 };
 
   const statRows = await models.match_player_stat.findAll({
-    where: { riotGameKey: { [Op.in]: raws.map((r) => r.riotGameKey) } },
+    where: { riotGameKey: { [Op.in]: rawKeys.map((r) => r.riotGameKey) } },
     attributes: ['riotGameKey', 'puuid'],
     raw: true,
   });
@@ -678,20 +675,20 @@ async function healUnbridgedStats({ withinDays = 14, onMapped = null } = {}) {
   const unbridgedKeys = new Set(
     statRows.filter((r) => r.puuid && r.puuid.length < 50).map((r) => r.riotGameKey),
   );
+  if (unbridgedKeys.size === 0) return { checked: 0, healed: 0 };
+
+  const raws = await models.lcu_game_raw.findAll({
+    where: { riotGameKey: { [Op.in]: [...unbridgedKeys] } },
+  });
 
   let healed = 0;
   for (const raw of raws) {
-    if (!unbridgedKeys.has(raw.riotGameKey)) continue;
     try {
       await models.match_player_stat.destroy({ where: { riotGameKey: raw.riotGameKey } });
       await models.match_team_stat.destroy({ where: { riotGameKey: raw.riotGameKey } });
       const result = await processRaw(raw);
       healed += 1;
-      if (result.mapped && result.winTeam && onMapped) {
-        await onMapped({ gameId: result.matchId, winTeam: result.winTeam }).catch((e) =>
-          logger.error(`[collector] 치유 후 자동 승패확정 실패 (${result.matchId}): ${e.message}`),
-        );
-      }
+      await fireOnMapped(onMapped, result);
     } catch (e) {
       logger.error(`[collector] 스탯 치유 실패 (${raw.riotGameKey}): ${e.message}`);
     }
@@ -702,20 +699,12 @@ async function healUnbridgedStats({ withinDays = 14, onMapped = null } = {}) {
 module.exports = {
   ingestGame,
   processRaw,
-  remapRaw,
   retryUnmappedRaws,
   healUnbridgedStats,
   resolveGroupFromPuuids,
   resolveDbPuuids,
-  promoteToPrimaryPuuids,
-  detectScrim,
-  recordScrimResult,
   // 테스트용 순수 함수
   extractPlayers,
-  extractTeamRows,
   resolveTeamPositions,
-  resolvePositions,
   pickBestCandidate,
-  deriveWinTeam,
-  QUEST_ITEM_POSITIONS,
 };
