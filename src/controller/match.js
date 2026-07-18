@@ -748,11 +748,13 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
   // 전체 매치 수 조회
   const total = await models.match.count({ where: whereCondition });
 
-  // 페이지네이션 적용 (최신순)
+  // 페이지네이션 적용 (최신순). 정렬 키는 프론트 표시 기준과 같아야 한다 —
+  // createdAt(플랜 생성)으로 정렬하면 사후 기록 판이 페이지 경계에서 순서가 역전돼 보이고,
+  // 서버 페이지네이션이라 프론트가 페이지 밖으로 옮길 수 없다.
   const offset = (page - 1) * limit;
   const matches = await models.match.findAll({
     where: whereCondition,
-    order: [['createdAt', 'DESC']],
+    order: [[models.sequelize.literal('COALESCE(gameCreation, createdAt)'), 'DESC']],
     limit,
     offset,
   });
