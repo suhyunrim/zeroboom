@@ -54,12 +54,11 @@ module.exports = (app) => {
   // (승패확정이 헬퍼 업로드보다 늦게 이뤄진 판을 회수)
   cron.schedule('20 * * * *', async () => {
     try {
-      // 새로 매핑된 건은 사용자가 승패 버튼 누른 것과 동일하게 자동 확정 (미확정 매치만)
-      const onMapped = app.autoConfirmMatchWin
-        ? ({ gameId, winTeam }) =>
-            winTeam ? app.autoConfirmMatchWin({ gameId, winTeam }) : Promise.resolve()
-        : null;
-      const { total, mapped } = await retryUnmappedRaws({ withinDays: 14, onMapped });
+      // 새로 매핑된 건은 사용자가 승패 버튼 누른 것과 동일하게 자동 확정 (검증은 콜백이 담당)
+      const { total, mapped } = await retryUnmappedRaws({
+        withinDays: 14,
+        onMapped: app.autoConfirmMatchWin || null,
+      });
       if (total > 0) {
         logger.info(`[스케줄러] LCU 재매핑 - 대상 ${total}건 중 ${mapped}건 매핑`);
       }
@@ -76,11 +75,10 @@ module.exports = (app) => {
   // LCU 폴백 puuid로 저장된 수집 스탯을 재처리해 정식 puuid로 치유
   cron.schedule('30 5 * * *', async () => {
     try {
-      const onMapped = app.autoConfirmMatchWin
-        ? ({ gameId, winTeam }) =>
-            winTeam ? app.autoConfirmMatchWin({ gameId, winTeam }) : Promise.resolve()
-        : null;
-      const { checked, healed } = await healUnbridgedStats({ withinDays: 14, onMapped });
+      const { checked, healed } = await healUnbridgedStats({
+        withinDays: 14,
+        onMapped: app.autoConfirmMatchWin || null,
+      });
       if (checked > 0) {
         logger.info(`[스케줄러] LCU 스탯 치유 - 대상 ${checked}건 중 ${healed}건 재처리`);
       }

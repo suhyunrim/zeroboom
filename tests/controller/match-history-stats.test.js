@@ -87,7 +87,8 @@ const teamRow = (matchId, teamNo, overrides = {}) => ({
   firstDragon: teamNo === 1,
   firstBaron: false,
   firstInhibitor: false,
-  bansJson: JSON.stringify([{ championId: 266, pickTurn: 1 }]),
+  // 모델 인스턴스의 bansJson getter가 파싱된 배열을 반환하는 형태
+  bansJson: [{ championId: 266, pickTurn: 1 }],
   gameVersion: '15.13.695.9598',
   ...overrides,
 });

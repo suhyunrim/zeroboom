@@ -169,7 +169,8 @@ const buildCandidateDetail = async (tournament, puuid) => {
 };
 
 const buildDetail = async (tournament) => {
-  const [teamsRaw, matchesRaw, scrims, predictionsRaw, aiPredictionRows] = await Promise.all([
+  // autoScrimEnabled: 수집 활성 그룹이면 스크림은 자동 기록 → 프론트가 수동 등록 UI를 숨기는 기준
+  const [teamsRaw, matchesRaw, scrims, predictionsRaw, aiPredictionRows, autoScrimEnabled] = await Promise.all([
     models.tournament_team.findAll({
       where: { tournamentId: tournament.id },
       order: [['id', 'ASC']],
@@ -195,10 +196,8 @@ const buildDetail = async (tournament) => {
       where: { tournamentId: tournament.id },
       raw: true,
     }),
+    isCollectionActive(tournament.groupId),
   ]);
-
-  // 수집 활성 그룹이면 스크림은 자동 기록 → 프론트가 수동 등록 UI를 숨기는 기준
-  const autoScrimEnabled = await isCollectionActive(tournament.groupId);
 
   // 수집기 자동 기록(게임당 1행)을 표시·집계용 세트로 그룹핑 (게임 시각 기준, 수동 기록은 그대로)
   const scrimGameKeys = scrims.filter((s) => s.riotGameKey).map((s) => s.riotGameKey);

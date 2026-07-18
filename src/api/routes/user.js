@@ -136,9 +136,10 @@ module.exports = (app) => {
       // 실패해도 부캐 등록 자체는 유효하므로 응답을 막지 않는다.
       let rolledUpStats = 0;
       try {
+        // 그룹 스코프 필수 — 같은 소환사가 다른 그룹에도 있으면 그쪽 스탯까지 바뀌는 사고 방지
         const [count] = await models.match_player_stat.update(
           { puuid: mainPuuid },
-          { where: { puuid: subPuuid } },
+          { where: { puuid: subPuuid, groupId: Number(groupId) } },
         );
         rolledUpStats = count;
       } catch (e) {

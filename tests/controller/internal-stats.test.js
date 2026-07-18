@@ -146,9 +146,10 @@ describe('getChampionTierlist', () => {
       row({ riotGameKey: 'KR_3', puuid: 'b', championId: 1, win: false }),
       row({ riotGameKey: 'KR_3', puuid: 'c', championId: 2, win: true }),
     ]);
+    // 모델 인스턴스의 bansJson getter가 파싱된 배열을 반환하는 형태를 흉내낸다
     mockModels.lcu_game_raw.findAll.mockResolvedValue([
-      { bansJson: JSON.stringify([{ championId: 1, teamId: 100, pickTurn: 1 }]) },
-      { bansJson: JSON.stringify([{ championId: 9, teamId: 200, pickTurn: 2 }]) },
+      { bansJson: [{ championId: 1, teamId: 100, pickTurn: 1 }] },
+      { bansJson: [{ championId: 9, teamId: 200, pickTurn: 2 }] },
     ]);
 
     const result = await getChampionTierlist({ groupId: 2, minGames: 2 });

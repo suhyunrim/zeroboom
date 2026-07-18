@@ -107,6 +107,8 @@ describe('pickBestCandidate', () => {
     team1: list.slice(0, 5).map((p) => [p, '이름', 500, null]),
     team2: list.slice(5).map((p) => [p, '이름', 500, null]),
   });
+  // 인게임 편성: 앞 5명이 블루(100), 뒤 5명이 레드(200)
+  const sides = new Map(puuids.map((p, i) => [p, i < 5 ? 100 : 200]));
   const T0 = new Date('2026-07-11T16:42:00Z');
 
   test('8명 이상 일치하는 match 선택, 7명 이하는 거부', () => {
@@ -116,14 +118,67 @@ describe('pickBestCandidate', () => {
       gameCreation: T0,
       ...asTeams(['a', 'b', 'c', 'x', 'y', 'z', 'w', 'v', 'u', 't']),
     };
-    expect(pickBestCandidate(puuids, T0, [partial, full]).gameId).toBe(1);
-    expect(pickBestCandidate(puuids, T0, [partial])).toBeNull();
+    expect(pickBestCandidate(sides, T0, [partial, full]).gameId).toBe(1);
+    expect(pickBestCandidate(sides, T0, [partial])).toBeNull();
   });
 
-  test('같은 10인 연속 2판이면 시간이 가까운 match 선택', () => {
+  test('같은 10인이라도 세션이 다르면 시간이 가까운 match 선택', () => {
     const earlier = { gameId: 1, gameCreation: new Date('2026-07-11T16:00:00Z'), ...asTeams(puuids) };
     const closer = { gameId: 2, gameCreation: new Date('2026-07-11T16:40:00Z'), ...asTeams(puuids) };
-    expect(pickBestCandidate(puuids, T0, [earlier, closer]).gameId).toBe(2);
+    expect(pickBestCandidate(sides, T0, [earlier, closer]).gameId).toBe(2);
+  });
+
+  test('연속 판을 미리 만들어둔 플랜은 생성 순서대로 (첫 게임 → 먼저 만든 플랜)', () => {
+    // 3판 2선승: 같은 편성 플랜 2개를 8초 간격으로 생성 → 시간 근접도로는 구분되지 않는다
+    const first = { gameId: 2108, gameCreation: new Date('2026-07-11T16:30:10Z'), ...asTeams(puuids) };
+    const second = { gameId: 2109, gameCreation: new Date('2026-07-11T16:30:18Z'), ...asTeams(puuids) };
+    expect(pickBestCandidate(sides, T0, [first, second]).gameId).toBe(2108);
+    expect(pickBestCandidate(sides, T0, [second, first]).gameId).toBe(2108);
+  });
+
+  test('먼저 만들었어도 뚜렷이 앞선 플랜(버려지고 다시 만든 경우)은 선택하지 않는다', () => {
+    // 20:05 플랜을 버리고 20:06에 2연전 플랜을 다시 만든 실측 케이스 (게임은 20:18)
+    const T = new Date('2026-07-16T20:18:00Z');
+    const discarded = { gameId: 2103, gameCreation: new Date('2026-07-16T20:05:02Z'), ...asTeams(puuids) };
+    const game1 = { gameId: 2104, gameCreation: new Date('2026-07-16T20:06:09Z'), ...asTeams(puuids) };
+    const game2 = { gameId: 2105, gameCreation: new Date('2026-07-16T20:06:13Z'), ...asTeams(puuids) };
+    expect(pickBestCandidate(sides, T, [discarded, game1, game2]).gameId).toBe(2104);
+  });
+
+  test('1승 1패 후 3판째 플랜을 새로 만들어도, 앞선 게임은 이미 있던 플랜에 붙는다', () => {
+    // 3판 2선승: 플랜 2개를 먼저 만들고 → 1승 1패 → 3판째 플랜 추가 생성.
+    // 수집이 늦어져 세 판이 한꺼번에 올라와도 각 게임은 "그 시점에 존재하던 플랜"에 붙어야 한다.
+    const planA = { gameId: 100, createdAt: new Date('2026-07-11T21:00:00Z'), ...asTeams(puuids) };
+    const planB = { gameId: 101, createdAt: new Date('2026-07-11T21:00:05Z'), ...asTeams(puuids) };
+    const planC = { gameId: 102, createdAt: new Date('2026-07-11T22:30:00Z'), ...asTeams(puuids) };
+    const all = [planA, planB, planC];
+
+    const game1 = new Date('2026-07-11T21:10:00Z');
+    const game2 = new Date('2026-07-11T21:50:00Z');
+    const game3 = new Date('2026-07-11T22:35:00Z');
+
+    // 1판: 세 플랜 모두 후보지만 C는 아직 존재하지 않았음 → 먼저 만든 A
+    expect(pickBestCandidate(sides, game1, all).gameId).toBe(100);
+    // 2판: A는 이미 매핑됨. C는 이 시점에 없었으므로 시간이 더 가까워도 B가 맞다
+    expect(pickBestCandidate(sides, game2, [planB, planC]).gameId).toBe(101);
+    // 3판: 남은 C
+    expect(pickBestCandidate(sides, game3, [planC]).gameId).toBe(102);
+  });
+
+  test('게임 후에 만든 매치도 다른 후보가 훨씬 멀면 사후 기록으로 인정한다', () => {
+    // 실측(7/16): 21:34 게임을 하고 22:05에 매치를 만들어 기록. 89분 전 버려진 플랜보다 이쪽이 맞다
+    const T = new Date('2026-07-16T21:34:00Z');
+    const discarded = { gameId: 2103, createdAt: new Date('2026-07-16T20:05:02Z'), ...asTeams(puuids) };
+    const postGame = { gameId: 2106, createdAt: new Date('2026-07-16T22:05:51Z'), ...asTeams(puuids) };
+    expect(pickBestCandidate(sides, T, [discarded, postGame]).gameId).toBe(2106);
+  });
+
+  test('같은 10인이라도 팀 편성이 다른 플랜(버려진 플랜)은 선택하지 않는다', () => {
+    // 2명을 맞바꾼 다른 플랜이 먼저 만들어졌어도, 실제 편성과 맞는 플랜이 우선
+    const swapped = ['a', 'b', 'c', 'i', 'j', 'f', 'g', 'h', 'd', 'e'];
+    const discarded = { gameId: 2107, gameCreation: new Date('2026-07-11T16:29:00Z'), ...asTeams(swapped) };
+    const played = { gameId: 2108, gameCreation: new Date('2026-07-11T16:30:10Z'), ...asTeams(puuids) };
+    expect(pickBestCandidate(sides, T0, [discarded, played]).gameId).toBe(2108);
   });
 });
 
@@ -185,7 +240,8 @@ describe('healUnbridgedStats (닉변 치유)', () => {
     };
     const cleanRaw = { ...raw, id: 2, riotGameKey: 'KR_CLEAN', save: jest.fn() };
     mockModels.lcu_game_raw.findAll
-      .mockResolvedValueOnce([raw, cleanRaw]) // 치유 대상 조회
+      .mockResolvedValueOnce([{ riotGameKey: raw.riotGameKey }, { riotGameKey: cleanRaw.riotGameKey }]) // 1차: 키만
+      .mockResolvedValueOnce([raw]) // 2차: 폴백 행 있는 raw만 로드
       .mockResolvedValue([]); // 이후 processRaw 내부의 usedRows 조회
     mockModels.match_player_stat.findAll.mockResolvedValueOnce([
       { riotGameKey: 'KR_8294822545', puuid: '9a9cf9e6-e43f-52aa-b0b1-000000000000' }, // 폴백 행

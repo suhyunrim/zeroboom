@@ -67,9 +67,18 @@ const dpm = (g) => (g.durationSec > 0 ? Math.round(g.damageToChampions / (g.dura
 // 스크림(대회 팀 연습) 제외 조건 — null(미판정)은 정규 내전으로 취급
 const notScrim = { [Op.or]: [{ isScrim: null }, { isScrim: false }] };
 
+// 집계에 실제로 쓰는 컬럼만 조회 (아이템/스펠/룬/와드 등 상세 컬럼 ~25개 제외)
+const AGGREGATE_ATTRS = [
+  'riotGameKey', 'championId', 'position', 'win', 'teamNo',
+  'kills', 'deaths', 'assists', 'cs', 'gameDurationSec',
+  'damageToChampions', 'visionScore', 'goldEarned',
+  'csDiff', 'goldDiff', 'damageDiff',
+];
+
 async function getUserInternalStats({ groupId, puuid }) {
   const rows = await models.match_player_stat.findAll({
     where: { groupId, puuid, ...notScrim },
+    attributes: AGGREGATE_ATTRS,
     raw: true,
   });
 
@@ -78,12 +87,20 @@ async function getUserInternalStats({ groupId, puuid }) {
   }
 
   // 팀 단위 분모 집계: 같은 게임에서 win 값이 같은 행 = 같은 팀 (총킬=킬관여, 총딜=딜비중)
+  // 팀 오브젝트(에픽 몬스터) — 게임 길이에 무관한 획득률(내 팀 / 양팀 합) 계산용
   const gameKeys = [...new Set(rows.map((r) => r.riotGameKey))];
-  const teamRows = await models.match_player_stat.findAll({
-    where: { riotGameKey: { [Op.in]: gameKeys } },
-    attributes: ['riotGameKey', 'win', 'kills', 'damageToChampions'],
-    raw: true,
-  });
+  const [teamRows, teamStatRows] = await Promise.all([
+    models.match_player_stat.findAll({
+      where: { riotGameKey: { [Op.in]: gameKeys } },
+      attributes: ['riotGameKey', 'win', 'kills', 'damageToChampions'],
+      raw: true,
+    }),
+    models.match_team_stat.findAll({
+      where: { riotGameKey: { [Op.in]: gameKeys } },
+      attributes: ['riotGameKey', 'teamNo', 'baronKills', 'dragonKills', 'riftHeraldKills', 'hordeKills'],
+      raw: true,
+    }),
+  ]);
   const teamKillsByGame = new Map(); // `${gameKey}:${win}` → 팀 총킬
   const teamDamageByGame = new Map(); // `${gameKey}:${win}` → 팀 총딜
   for (const r of teamRows) {
@@ -91,13 +108,6 @@ async function getUserInternalStats({ groupId, puuid }) {
     teamKillsByGame.set(key, (teamKillsByGame.get(key) || 0) + r.kills);
     teamDamageByGame.set(key, (teamDamageByGame.get(key) || 0) + r.damageToChampions);
   }
-
-  // 팀 오브젝트(에픽 몬스터) — 게임 길이에 무관한 획득률(내 팀 / 양팀 합) 계산용
-  const teamStatRows = await models.match_team_stat.findAll({
-    where: { riotGameKey: { [Op.in]: gameKeys } },
-    attributes: ['riotGameKey', 'teamNo', 'baronKills', 'dragonKills', 'riftHeraldKills', 'hordeKills'],
-    raw: true,
-  });
   const epicMonsters = (t) => t.baronKills + t.dragonKills + t.riftHeraldKills + t.hordeKills;
   const teamObjByGame = new Map(); // `${gameKey}:${teamNo}` → 에픽 몬스터 수
   for (const t of teamStatRows) {
@@ -218,6 +228,7 @@ async function getUserInternalStats({ groupId, puuid }) {
 async function getChampionTierlist({ groupId, position = null, minGames = TIERLIST_MIN_GAMES_DEFAULT }) {
   const allRows = await models.match_player_stat.findAll({
     where: { groupId, ...notScrim },
+    attributes: AGGREGATE_ATTRS,
     raw: true,
   });
   const totalGames = new Set(allRows.map((r) => r.riotGameKey)).size;
@@ -226,20 +237,14 @@ async function getChampionTierlist({ groupId, position = null, minGames = TIERLI
   }
 
   // 밴 집계 (통계 생성된 raw 전체 — 봇 match 매핑 여부와 무관, 스크림 제외)
+  // raw:true를 쓰지 않아 bansJson은 모델 getter가 파싱한다
   const rawRows = await models.lcu_game_raw.findAll({
     where: { groupId, statsProcessedAt: { [Op.ne]: null }, ...notScrim },
     attributes: ['bansJson'],
-    raw: true,
   });
   const banCounts = new Map();
   for (const row of rawRows) {
-    let bans = [];
-    try {
-      bans = JSON.parse(row.bansJson) || [];
-    } catch (e) {
-      /* bansJson 파싱 실패 무시 */
-    }
-    for (const ban of bans) {
+    for (const ban of row.bansJson) {
       if (ban.championId > 0) banCounts.set(ban.championId, (banCounts.get(ban.championId) || 0) + 1);
     }
   }
