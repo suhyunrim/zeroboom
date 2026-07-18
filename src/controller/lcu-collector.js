@@ -25,6 +25,10 @@ const MIN_PUUID_OVERLAP = 8; // 10명 중 8명 이상 일치해야 같은 판으
 // 연속 판(3판 2선승 등)을 미리 만들어둔 플랜은 생성 시각이 몇 초밖에 차이나지 않는다(실측 2~8초).
 // 이 차이 안의 후보들은 시간 근접도로 우열을 가리지 않고 생성 순서로 판정한다.
 const PLAN_TIE_WINDOW_MS = 30 * 1000;
+// 게임이 시작된 뒤에 만들어진 플랜은 그 게임의 플랜일 수 없다(플랜 → 게임 순서).
+// 다만 게임을 먼저 하고 사후에 기록하는 경우가 있어 제외하지는 않고, 한 판 길이만큼 불이익을 준다.
+// 이 값이 있어야 "1승 1패 후 추가한 3판째 플랜"이 앞선 게임을 가져가지 않는다.
+const POST_GAME_PLAN_PENALTY_MS = 30 * 60 * 1000;
 
 // raw 게임 JSON에서 참가자 10명의 필요한 필드만 추출
 function extractPlayers(game) {
@@ -203,11 +207,13 @@ function pickBestCandidate(sideByPuuid, gameCreation, candidates) {
     const overlap = matchPuuids.filter((puuid) => sideByPuuid.has(puuid)).length;
     if (overlap < MIN_PUUID_OVERLAP) continue;
     const matchTime = new Date(match.gameCreation || match.createdAt).getTime();
+    // 게임 시작 후에 만들어진 플랜은 사후 기록 가능성만 남기고 뒤로 미룬다
+    const createdAfterGame = new Date(match.createdAt).getTime() > gameTime;
     scored.push({
       match,
       overlap,
       agreement: teamAgreement(match, sideByPuuid),
-      timeDiff: Math.abs(matchTime - gameTime),
+      timeDiff: Math.abs(matchTime - gameTime) + (createdAfterGame ? POST_GAME_PLAN_PENALTY_MS : 0),
     });
   }
   if (scored.length === 0) return null;
@@ -218,7 +224,7 @@ function pickBestCandidate(sideByPuuid, gameCreation, candidates) {
   const bestAgreement = Math.max(...pool.map((s) => s.agreement));
   pool = pool.filter((s) => s.agreement === bestAgreement);
 
-  // 가장 가까운 플랜과 사실상 동시에 만들어진 후보끼리는 시간으로 우열을 가릴 수 없으므로
+  // 가장 가까운 플랜과 사실상 동시에 만들어진 것들끼리는 시간으로 우열을 가릴 수 없으므로
   // 생성 순서를 따른다 (먼저 만든 플랜 = 먼저 한 게임).
   const minDiff = Math.min(...pool.map((s) => s.timeDiff));
   const tied = pool.filter((s) => s.timeDiff - minDiff <= PLAN_TIE_WINDOW_MS);
@@ -651,8 +657,11 @@ async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
 
   let mapped = 0;
 
+  // 게임 시각 순으로 처리해야 연속 판이 플랜 생성 순서대로 배정된다
+  // (업로드 순서는 헬퍼가 스캔한 순서라 게임 순서와 다를 수 있다)
   const unprocessed = await models.lcu_game_raw.findAll({
     where: { statsProcessedAt: null, gameCreation: { [Op.gte]: since } },
+    order: [['gameCreation', 'ASC']],
   });
   for (const raw of unprocessed) {
     try {
@@ -670,6 +679,7 @@ async function retryUnmappedRaws({ withinDays = 30, onMapped = null } = {}) {
       gameCreation: { [Op.gte]: since },
     },
     attributes: { exclude: ['rawJson'] },
+    order: [['gameCreation', 'ASC']],
   });
   for (const raw of unmapped) {
     try {

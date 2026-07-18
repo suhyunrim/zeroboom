@@ -145,6 +145,34 @@ describe('pickBestCandidate', () => {
     expect(pickBestCandidate(sides, T, [discarded, game1, game2]).gameId).toBe(2104);
   });
 
+  test('1승 1패 후 3판째 플랜을 새로 만들어도, 앞선 게임은 이미 있던 플랜에 붙는다', () => {
+    // 3판 2선승: 플랜 2개를 먼저 만들고 → 1승 1패 → 3판째 플랜 추가 생성.
+    // 수집이 늦어져 세 판이 한꺼번에 올라와도 각 게임은 "그 시점에 존재하던 플랜"에 붙어야 한다.
+    const planA = { gameId: 100, createdAt: new Date('2026-07-11T21:00:00Z'), ...asTeams(puuids) };
+    const planB = { gameId: 101, createdAt: new Date('2026-07-11T21:00:05Z'), ...asTeams(puuids) };
+    const planC = { gameId: 102, createdAt: new Date('2026-07-11T22:30:00Z'), ...asTeams(puuids) };
+    const all = [planA, planB, planC];
+
+    const game1 = new Date('2026-07-11T21:10:00Z');
+    const game2 = new Date('2026-07-11T21:50:00Z');
+    const game3 = new Date('2026-07-11T22:35:00Z');
+
+    // 1판: 세 플랜 모두 후보지만 C는 아직 존재하지 않았음 → 먼저 만든 A
+    expect(pickBestCandidate(sides, game1, all).gameId).toBe(100);
+    // 2판: A는 이미 매핑됨. C는 이 시점에 없었으므로 시간이 더 가까워도 B가 맞다
+    expect(pickBestCandidate(sides, game2, [planB, planC]).gameId).toBe(101);
+    // 3판: 남은 C
+    expect(pickBestCandidate(sides, game3, [planC]).gameId).toBe(102);
+  });
+
+  test('게임 후에 만든 매치도 다른 후보가 훨씬 멀면 사후 기록으로 인정한다', () => {
+    // 실측(7/16): 21:34 게임을 하고 22:05에 매치를 만들어 기록. 89분 전 버려진 플랜보다 이쪽이 맞다
+    const T = new Date('2026-07-16T21:34:00Z');
+    const discarded = { gameId: 2103, createdAt: new Date('2026-07-16T20:05:02Z'), ...asTeams(puuids) };
+    const postGame = { gameId: 2106, createdAt: new Date('2026-07-16T22:05:51Z'), ...asTeams(puuids) };
+    expect(pickBestCandidate(sides, T, [discarded, postGame]).gameId).toBe(2106);
+  });
+
   test('같은 10인이라도 팀 편성이 다른 플랜(버려진 플랜)은 선택하지 않는다', () => {
     // 2명을 맞바꾼 다른 플랜이 먼저 만들어졌어도, 실제 편성과 맞는 플랜이 우선
     const swapped = ['a', 'b', 'c', 'i', 'j', 'f', 'g', 'h', 'd', 'e'];
