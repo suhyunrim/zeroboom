@@ -642,7 +642,7 @@ describe('processRaw (실데이터 통합)', () => {
     expect(rows.every((r) => r.isScrim === false)).toBe(true);
   });
 
-  test('gameCreation 없는 match의 createdAt 폴백 창도 게임 시각 ±3h', async () => {
+  test('gameCreation 없는 match의 createdAt 폴백 창은 게임 시각 +24h (사후 기록 수용)', async () => {
     mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
     mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]);
@@ -664,9 +664,45 @@ describe('processRaw (실데이터 통합)', () => {
     const where = mockModels.match.findAll.mock.calls[0][0].where;
     const { Op } = require('sequelize');
     const fallback = where[Op.or][1].createdAt[Op.between];
-    const THREE_HOURS = 3 * 60 * 60 * 1000;
-    expect(fallback[0].getTime()).toBe(gameTime - THREE_HOURS);
-    expect(fallback[1].getTime()).toBe(gameTime + THREE_HOURS);
+    expect(fallback[0].getTime()).toBe(gameTime - 3 * 60 * 60 * 1000);
+    expect(fallback[1].getTime()).toBe(gameTime + 24 * 60 * 60 * 1000);
+  });
+
+  test('매핑되면 match에 실제 게임 시각을 기록한다 (이미 있으면 유지)', async () => {
+    const players = extractPlayers(realGame);
+    const mkMatch = (gameCreation) => ({
+      gameId: 777,
+      seasonId: 3,
+      gameCreation,
+      createdAt: new Date(realGame.gameCreation),
+      team1: players.filter((p) => p.teamId === 100).map((p) => [p.puuid, '이름', 500, null]),
+      team2: players.filter((p) => p.teamId === 200).map((p) => [p.puuid, '이름', 500, null]),
+      update: jest.fn(),
+    });
+    const mkRaw = () => ({
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      gameCreation: new Date(realGame.gameCreation),
+      gameDuration: realGame.gameDuration,
+      rawJson: realGame,
+      save: jest.fn(),
+    });
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+
+    const empty = mkMatch(null);
+    mockModels.match.findAll.mockResolvedValue([empty]);
+    await processRaw(mkRaw());
+    expect(empty.update).toHaveBeenCalledWith({ gameCreation: new Date(realGame.gameCreation) });
+
+    const already = mkMatch(new Date('2026-01-01T00:00:00Z'));
+    mockModels.match.findAll.mockResolvedValue([already]);
+    await processRaw(mkRaw());
+    expect(already.update).not.toHaveBeenCalled();
   });
 });
 

@@ -16,10 +16,12 @@ const QUEST_ITEM_POSITIONS = {
 const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 const SMITE_SPELL_ID = 11;
 
-// 내전 match 기록과 게임 시작 시각 허용 오차. gameCreation이 없는 match는 createdAt으로 비교하며
-// 같은 창을 쓴다. 이전에는 +24h까지 열어뒀으나, 실측상 match가 게임보다 늦게 만들어진 경우는
-// 최대 33분이었고(라이브 43건), 넓은 창이 오히려 14시간 전 게임을 엉뚱한 match에 붙였다.
-const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000;
+const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000; // 내전 match 기록과 게임 시작 시각 허용 오차
+// gameCreation이 아직 없는 match(플랜만 만들어진 상태)는 createdAt으로 비교하되, 게임을 먼저 하고
+// 나중에 match를 만들어 기록하는 사후 등록이 있어 +쪽을 넓게 잡는다(실측 최대 14.7시간).
+// 넓혀도 오탐이 낮은 근거: 서로 다른 세션에서 같은 10명이 같은 5:5로 다시 나뉜 사례가
+// 그룹4 1005판 중 4건뿐이고 그중 24시간 안은 1건이며, 그마저 사후 생성 플랜 페널티가 거른다.
+const FALLBACK_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MIN_PUUID_OVERLAP = 8; // 10명 중 8명 이상 일치해야 같은 판으로 인정
 // 연속 판(3판 2선승 등)을 미리 만들어둔 플랜은 생성 시각이 몇 초밖에 차이나지 않는다(실측 2~8초).
 // 이 차이 안의 후보들은 시간 근접도로 우열을 가리지 않고 생성 순서로 판정한다.
@@ -396,7 +398,10 @@ async function findBotMatch(raw, sideByPuuid) {
       groupId: raw.groupId,
       [Op.or]: [
         { gameCreation: { [Op.between]: [windowStart, windowEnd] } },
-        { gameCreation: null, createdAt: { [Op.between]: [windowStart, windowEnd] } },
+        {
+          gameCreation: null,
+          createdAt: { [Op.between]: [windowStart, new Date(gameTime + FALLBACK_CONFIRM_WINDOW_MS)] },
+        },
       ],
     },
   });
@@ -414,6 +419,14 @@ async function findBotMatch(raw, sideByPuuid) {
   const available = candidates.filter((m) => !usedMatchIds.has(m.gameId));
 
   return pickBestCandidate(sideByPuuid, raw.gameCreation, available);
+}
+
+// 매핑된 match에 실제 게임 시각을 남긴다. match는 플랜 생성 시각(createdAt)만 갖고 있어
+// 2연전이 같은 시각으로 뭉치거나 사후 기록이 엉뚱한 시점에 표시되는데, 수집으로 알게 된
+// 진짜 시각을 채워 표시와 이후 매핑 판정을 함께 바로잡는다. 이미 있으면 덮어쓰지 않는다.
+async function stampGameCreation(match, raw) {
+  if (match.gameCreation) return;
+  await match.update({ gameCreation: raw.gameCreation });
 }
 
 // 승리한 내전 팀 도출 → 자동 승패확정에 사용.
@@ -510,6 +523,7 @@ async function processRaw(raw) {
   if (match) {
     raw.mappedMatchId = match.gameId;
     winTeam = deriveWinTeam(match, rows);
+    await stampGameCreation(match, raw);
   }
   await raw.save();
 
@@ -542,6 +556,7 @@ async function remapRaw(raw) {
   raw.mappedMatchId = match.gameId;
   raw.isScrim = false;
   raw.scrimTournamentId = null;
+  await stampGameCreation(match, raw);
   await raw.save();
   // 스크림으로 잘못 자동 기록됐던 전적도 회수
   await models.tournament_scrim.destroy({ where: { riotGameKey: raw.riotGameKey } });

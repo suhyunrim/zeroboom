@@ -806,6 +806,8 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       matchSnapshots.push({
         gameId: match.gameId,
         createdAt: match.createdAt,
+        // 수집으로 확인된 실제 게임 시각 (미수집 판은 null → 프론트는 createdAt으로 폴백)
+        gameCreation: match.gameCreation || null,
         winTeam: match.winTeam,
         team1: { players: team1.players, avgRating: team1.avgRating, ratingChange: Math.round(team1RatingChange) },
         team2: { players: team2.players, avgRating: team2.avgRating, ratingChange: Math.round(team2RatingChange) },
@@ -828,6 +830,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
       matchSnapshots.push({
         gameId: match.gameId,
         createdAt: match.createdAt,
+        gameCreation: match.gameCreation || null,
         winTeam: match.winTeam,
         team1: { players: team1.players, avgRating: null, ratingChange: null },
         team2: { players: team2.players, avgRating: null, ratingChange: null },
