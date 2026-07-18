@@ -1,7 +1,9 @@
 const { Router } = require('express');
 const { logger } = require('../../loaders/logger');
 const lcuCollector = require('../../controller/lcu-collector');
+const collectorTelemetry = require('../../controller/collector-telemetry');
 const auditLog = require('../../controller/audit-log');
+const { verifyToken } = require('../middlewares/auth');
 
 const route = Router();
 
@@ -70,6 +72,57 @@ module.exports = (app) => {
       });
     } catch (e) {
       logger.error(`[collector] 업로드 처리 실패: ${e.message}`);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  /**
+   * POST /api/collector/telemetry
+   * elise 수집기의 생존/종료/크래시 신호. 게임 업로드와 달리 신원이 없을 때도 와야 하므로
+   * 클라가 만든 installId로 식별한다 (LCU를 본 적 있으면 riotId/puuid가 함께 온다).
+   * Body: { installId, version, platform, riotId, puuid, events: [{ type, reason, message, occurredAt, ... }] }
+   */
+  route.post('/telemetry', async (req, res) => {
+    try {
+      const { installId, version, platform, riotId, puuid, events } = req.body || {};
+      const result = await collectorTelemetry.recordEvents({
+        installId,
+        version,
+        platform,
+        riotId,
+        puuid,
+        events,
+      });
+      if (result.status === 'rejected') {
+        return res.status(400).json({ result: 'installId가 필요합니다.' });
+      }
+      return res.status(200).json({ result: 'ok', accepted: result.accepted });
+    } catch (e) {
+      logger.error(`[collector] 텔레메트리 처리 실패: ${e.message}`);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  /** GET /api/collector/installs — 설치별 수집기 상태 (running|quit|crashed|stale) */
+  route.get('/installs', verifyToken, async (req, res) => {
+    try {
+      return res.json({ installs: await collectorTelemetry.listInstalls() });
+    } catch (e) {
+      logger.error(`[collector] 설치 상태 조회 실패: ${e.message}`);
+      return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  /** GET /api/collector/telemetry/events?installId=&limit= — 이벤트 이력 */
+  route.get('/telemetry/events', verifyToken, async (req, res) => {
+    try {
+      const events = await collectorTelemetry.listEvents({
+        installId: req.query.installId,
+        limit: req.query.limit,
+      });
+      return res.json({ events });
+    } catch (e) {
+      logger.error(`[collector] 텔레메트리 이력 조회 실패: ${e.message}`);
       return res.status(500).json({ result: '서버 오류가 발생했습니다.' });
     }
   });
