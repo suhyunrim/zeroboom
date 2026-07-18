@@ -640,7 +640,7 @@ describe('processRaw (실데이터 통합)', () => {
     expect(rows.every((r) => r.isScrim === false)).toBe(true);
   });
 
-  test('미확정 match의 createdAt 폴백 창은 게임 시각 +24h', async () => {
+  test('gameCreation 없는 match의 createdAt 폴백 창도 게임 시각 ±3h', async () => {
     mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
     mockModels.user.findAll.mockResolvedValue([]);
     mockModels.match.findAll.mockResolvedValue([]);
@@ -662,7 +662,9 @@ describe('processRaw (실데이터 통합)', () => {
     const where = mockModels.match.findAll.mock.calls[0][0].where;
     const { Op } = require('sequelize');
     const fallback = where[Op.or][1].createdAt[Op.between];
-    expect(fallback[1].getTime()).toBe(gameTime + 24 * 60 * 60 * 1000);
+    const THREE_HOURS = 3 * 60 * 60 * 1000;
+    expect(fallback[0].getTime()).toBe(gameTime - THREE_HOURS);
+    expect(fallback[1].getTime()).toBe(gameTime + THREE_HOURS);
   });
 });
 

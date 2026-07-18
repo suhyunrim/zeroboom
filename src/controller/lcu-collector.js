@@ -16,11 +16,10 @@ const QUEST_ITEM_POSITIONS = {
 const POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 const SMITE_SPELL_ID = 11;
 
-const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000; // 내전 match 기록과 게임 시작 시각 허용 오차
-// 미확정 match(gameCreation null)의 createdAt 폴백 상한. 게임 몇 판을 몰아서 밤에
-// 승패확정하는 운영 패턴이 실재해(그룹4 실측) 게임 시각 +24h까지 허용한다.
-// puuid 8/10 일치가 강한 신호라 창을 넓혀도 오탐 위험은 낮다.
-const FALLBACK_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
+// 내전 match 기록과 게임 시작 시각 허용 오차. gameCreation이 없는 match는 createdAt으로 비교하며
+// 같은 창을 쓴다. 이전에는 +24h까지 열어뒀으나, 실측상 match가 게임보다 늦게 만들어진 경우는
+// 최대 33분이었고(라이브 43건), 넓은 창이 오히려 14시간 전 게임을 엉뚱한 match에 붙였다.
+const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000;
 const MIN_PUUID_OVERLAP = 8; // 10명 중 8명 이상 일치해야 같은 판으로 인정
 // 연속 판(3판 2선승 등)을 미리 만들어둔 플랜은 생성 시각이 몇 초밖에 차이나지 않는다(실측 2~8초).
 // 이 차이 안의 후보들은 시간 근접도로 우열을 가리지 않고 생성 순서로 판정한다.
@@ -392,16 +391,12 @@ async function findBotMatch(raw, sideByPuuid) {
   const gameTime = new Date(raw.gameCreation).getTime();
   const windowStart = new Date(gameTime - MATCH_TIME_WINDOW_MS);
   const windowEnd = new Date(gameTime + MATCH_TIME_WINDOW_MS);
-  // 승패확정(gameCreation 기록)이 게임 종료보다 늦을 수 있어 createdAt 폴백은 +쪽을 넓게 잡음
   const candidates = await models.match.findAll({
     where: {
       groupId: raw.groupId,
       [Op.or]: [
         { gameCreation: { [Op.between]: [windowStart, windowEnd] } },
-        {
-          gameCreation: null,
-          createdAt: { [Op.between]: [windowStart, new Date(gameTime + FALLBACK_CONFIRM_WINDOW_MS)] },
-        },
+        { gameCreation: null, createdAt: { [Op.between]: [windowStart, windowEnd] } },
       ],
     },
   });
