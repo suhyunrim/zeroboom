@@ -1,6 +1,6 @@
 const models = require('../db/models');
 const moment = require('moment');
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 
 const summonerController = require('../controller/summoner');
 const honorController = require('../controller/honor');
@@ -754,7 +754,7 @@ module.exports.getMatchHistoryByGroupId = async (groupId, page = 1, limit = 20, 
   const offset = (page - 1) * limit;
   const matches = await models.match.findAll({
     where: whereCondition,
-    order: [[models.sequelize.literal('COALESCE(gameCreation, createdAt)'), 'DESC']],
+    order: [[literal('COALESCE(gameCreation, createdAt)'), 'DESC']],
     limit,
     offset,
   });
