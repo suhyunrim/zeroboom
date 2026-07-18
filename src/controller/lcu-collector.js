@@ -22,6 +22,9 @@ const MATCH_TIME_WINDOW_MS = 3 * 60 * 60 * 1000; // 내전 match 기록과 게�
 // puuid 8/10 일치가 강한 신호라 창을 넓혀도 오탐 위험은 낮다.
 const FALLBACK_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MIN_PUUID_OVERLAP = 8; // 10명 중 8명 이상 일치해야 같은 판으로 인정
+// 연속 판(3판 2선승 등)을 미리 만들어둔 플랜은 생성 시각이 몇 초밖에 차이나지 않는다(실측 2~8초).
+// 이 차이 안의 후보들은 시간 근접도로 우열을 가리지 않고 생성 순서로 판정한다.
+const PLAN_TIE_WINDOW_MS = 30 * 1000;
 
 // raw 게임 JSON에서 참가자 10명의 필요한 필드만 추출
 function extractPlayers(game) {
@@ -177,25 +180,49 @@ function resolvePositions(players) {
   return result;
 }
 
-// 후보 내전 match 중 최적 매칭 선택 (puuid 8/10 이상 일치, 시간 근접순)
-function pickBestCandidate(rawPuuids, gameCreation, candidates) {
-  const rawSet = new Set(rawPuuids);
+// 매치 플랜의 팀 편성이 실제 인게임 편성과 얼마나 일치하는지 (일치한 인원 수).
+// 같은 10명으로 만든 다른 플랜(선택되지 않고 버려진 플랜 등)을 구분하는 데 쓴다.
+function teamAgreement(match, sideByPuuid) {
+  const sidesOf = (entries) => entries.map((e) => sideByPuuid.get(e[0])).filter((s) => s != null);
+  const t1 = sidesOf(match.team1);
+  const t2 = sidesOf(match.team2);
+  const sides = [...new Set([...t1, ...t2])];
+  if (sides.length < 2) return 0; // 한 진영만 매핑됨 → 편성 비교 불가
+  const [a, b] = sides;
+  const agree = (x, y) => t1.filter((s) => s === x).length + t2.filter((s) => s === y).length;
+  return Math.max(agree(a, b), agree(b, a)); // team1↔블루/레드 두 방향 중 잘 맞는 쪽
+}
+
+// 후보 내전 match 중 최적 매칭 선택.
+// sideByPuuid: Map<우리 DB puuid, 인게임 진영> — 참가자 일치(8/10)와 팀 편성 일치를 함께 본다.
+function pickBestCandidate(sideByPuuid, gameCreation, candidates) {
   const gameTime = new Date(gameCreation).getTime();
-  let best = null;
-  let bestScore = null;
+  const scored = [];
   for (const match of candidates) {
     const matchPuuids = [...match.team1, ...match.team2].map((entry) => entry[0]);
-    const overlap = matchPuuids.filter((puuid) => rawSet.has(puuid)).length;
+    const overlap = matchPuuids.filter((puuid) => sideByPuuid.has(puuid)).length;
     if (overlap < MIN_PUUID_OVERLAP) continue;
     const matchTime = new Date(match.gameCreation || match.createdAt).getTime();
-    const timeDiff = Math.abs(matchTime - gameTime);
-    // 일치 수 우선, 동률이면 시간 근접순
-    if (!best || overlap > bestScore.overlap || (overlap === bestScore.overlap && timeDiff < bestScore.timeDiff)) {
-      best = match;
-      bestScore = { overlap, timeDiff };
-    }
+    scored.push({
+      match,
+      overlap,
+      agreement: teamAgreement(match, sideByPuuid),
+      timeDiff: Math.abs(matchTime - gameTime),
+    });
   }
-  return best;
+  if (scored.length === 0) return null;
+
+  // 참가자 일치 → 팀 편성 일치 순으로 최선만 남긴다 (편성이 다른 플랜 = 선택되지 않고 버려진 플랜)
+  const bestOverlap = Math.max(...scored.map((s) => s.overlap));
+  let pool = scored.filter((s) => s.overlap === bestOverlap);
+  const bestAgreement = Math.max(...pool.map((s) => s.agreement));
+  pool = pool.filter((s) => s.agreement === bestAgreement);
+
+  // 가장 가까운 플랜과 사실상 동시에 만들어진 후보끼리는 시간으로 우열을 가릴 수 없으므로
+  // 생성 순서를 따른다 (먼저 만든 플랜 = 먼저 한 게임).
+  const minDiff = Math.min(...pool.map((s) => s.timeDiff));
+  const tied = pool.filter((s) => s.timeDiff - minDiff <= PLAN_TIE_WINDOW_MS);
+  return tied.reduce((a, b) => (a.match.gameId <= b.match.gameId ? a : b)).match;
 }
 
 // LCU가 주는 puuid는 UUID 형식(Riot 내부값)이라 우리 DB의 Riot API puuid와 직접 매칭 불가.
@@ -354,7 +381,8 @@ async function recordScrimResult({ raw, game, scrim }) {
 }
 
 // gameCreation 근접 + puuid 8/10 일치로 봇 생성 내전 match 후보를 찾는다 (없으면 null).
-async function findBotMatch(raw, dbPuuids) {
+// sideByPuuid: Map<우리 DB puuid, 인게임 진영>
+async function findBotMatch(raw, sideByPuuid) {
   const gameTime = new Date(raw.gameCreation).getTime();
   const windowStart = new Date(gameTime - MATCH_TIME_WINDOW_MS);
   const windowEnd = new Date(gameTime + MATCH_TIME_WINDOW_MS);
@@ -384,16 +412,18 @@ async function findBotMatch(raw, dbPuuids) {
   const usedMatchIds = new Set(usedRows.map((r) => r.mappedMatchId));
   const available = candidates.filter((m) => !usedMatchIds.has(m.gameId));
 
-  return pickBestCandidate(dbPuuids, raw.gameCreation, available);
+  return pickBestCandidate(sideByPuuid, raw.gameCreation, available);
 }
 
-// 승리한 내전 팀 도출 (승리팀 전원 win=true) → 자동 승패확정에 사용
+// 승리한 내전 팀 도출 → 자동 승패확정에 사용.
+// 승자가 양 팀에 걸쳐 있으면 플랜과 실제 편성이 다른 것이므로 판정하지 않는다(수동 확정에 맡김).
 function deriveWinTeam(match, rows) {
   const team1Puuids = new Set(match.team1.map((entry) => entry[0]));
   const team1Wins = rows.filter((r) => team1Puuids.has(r.puuid) && r.win).length;
   const team2Wins = rows.filter((r) => !team1Puuids.has(r.puuid) && r.win).length;
-  if (team1Wins > team2Wins) return 1;
-  if (team2Wins > team1Wins) return 2;
+  if (team1Wins > 0 && team2Wins > 0) return null;
+  if (team1Wins > 0) return 1;
+  if (team2Wins > 0) return 2;
   return null;
 }
 
@@ -452,8 +482,8 @@ async function processRaw(raw) {
   const resolved = await resolveDbPuuids(players, raw.gameCreation);
   const dbByPid = await promoteToPrimaryPuuids(raw.groupId, resolved);
   const positions = resolvePositions(players);
-  const dbPuuids = players.map((p) => dbByPid.get(p.participantId));
-  const match = await findBotMatch(raw, dbPuuids);
+  const sideByPuuid = new Map(players.map((p) => [dbByPid.get(p.participantId), p.teamId]));
+  const match = await findBotMatch(raw, sideByPuuid);
 
   // 봇 match와 매핑되면 정규 내전, 아니면 스크림(대회 팀 연습) 여부 판정
   const scrim = match ? null : await detectScrim(raw.groupId, players, dbByPid);
@@ -491,12 +521,12 @@ async function remapRaw(raw) {
   if (raw.mappedMatchId) return { mapped: false };
   const statRows = await models.match_player_stat.findAll({
     where: { riotGameKey: raw.riotGameKey },
-    attributes: ['puuid', 'win'],
+    attributes: ['puuid', 'win', 'teamNo'],
     raw: true,
   });
   if (statRows.length === 0) return { mapped: false };
 
-  const match = await findBotMatch(raw, statRows.map((r) => r.puuid));
+  const match = await findBotMatch(raw, new Map(statRows.map((r) => [r.puuid, r.teamNo])));
   if (!match) return { mapped: false };
 
   // 뒤늦게 봇 match와 매핑됨 = 매칭생성 거친 정규 내전 → 스크림 태그 해제
