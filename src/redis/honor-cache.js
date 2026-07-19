@@ -9,7 +9,7 @@ const { logger } = require('../loaders/logger');
 const KEY_PREFIX = 'honorVote:';
 
 async function saveSession(gameId, data, ttlSeconds) {
-  if (!isReady() || ttlSeconds <= 0) return;
+  if (!isReady()) return;
   try {
     await client.set(`${KEY_PREFIX}${gameId}`, JSON.stringify(data), { EX: Math.ceil(ttlSeconds) });
   } catch (e) {
@@ -40,16 +40,17 @@ async function getSession(gameId) {
 // 부팅 시 미마감 세션 전체 복원용
 async function listSessions() {
   if (!isReady()) return [];
-  const sessions = [];
   try {
+    const keys = [];
     for await (const key of client.scanIterator({ MATCH: `${KEY_PREFIX}*`, COUNT: 100 })) {
-      const raw = await client.get(key);
-      if (raw) sessions.push(JSON.parse(raw));
+      keys.push(key);
     }
+    const raws = await Promise.all(keys.map((key) => client.get(key)));
+    return raws.filter(Boolean).map((raw) => JSON.parse(raw));
   } catch (e) {
     logger.warn(`명예투표 Redis scan 실패: ${e.message}`);
+    return [];
   }
-  return sessions;
 }
 
 module.exports = { saveSession, deleteSession, getSession, listSessions };

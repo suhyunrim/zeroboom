@@ -48,4 +48,21 @@ async function connect() {
   }
 }
 
-module.exports = { client, connect, isReady: () => ready };
+// 연결될 때까지 대기(최대 timeoutMs). REDIS_HOST 미설정이면 즉시 반환.
+// 부팅 복원처럼 "연결돼 있으면 쓰고 싶다"는 호출부용 — 시간 내 못 붙어도 예외 없이 반환한다(best-effort 원칙).
+async function waitUntilReady(timeoutMs) {
+  if (!process.env.REDIS_HOST || ready) return;
+  await new Promise((resolve) => {
+    const onReady = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      client.off('ready', onReady);
+      resolve();
+    }, timeoutMs);
+    client.once('ready', onReady);
+  });
+}
+
+module.exports = { client, connect, waitUntilReady, isReady: () => ready };

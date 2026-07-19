@@ -175,6 +175,20 @@ module.exports = async (app) => {
     else setTimeout(fire, delay);
   }
 
+  // Redis 백스토어에 넣는 직렬화 형태. 살아있는 객체는 넣지 않는다 —
+  // 메시지는 {channelId, messageId} 참조로, voters는 honor_votes 테이블이 정본이라 제외.
+  // 이 형태를 되읽는 쪽이 rehydrateHonorSession이므로 필드를 바꾸면 두 함수를 같이 본다.
+  const serializeHonorSession = (session) => ({
+    gameId: session.gameId,
+    groupId: session.groupId,
+    team1: session.team1,
+    team2: session.team2,
+    category: session.category,
+    channelId: session.honorMessage.channelId,
+    messageId: session.honorMessage.id,
+    expiresAt: session.expiresAt,
+  });
+
   // 재시작으로 Map이 비어도 Redis 백스토어에서 세션을 되살린다.
   // voters는 백스토어에 없다 — honor_votes 테이블이 정본이라 거기서 재구성한다.
   async function rehydrateHonorSession(stored) {
@@ -241,20 +255,11 @@ module.exports = async (app) => {
     });
     voteSession.honorMessage = honorMessage;
 
-    // 재시작 생존용 백스토어 (메시지는 {channelId, messageId} 참조로, voters는 DB가 정본이라 제외)
+    // 재시작 생존용 백스토어. TTL은 expiresAt에서 파생 — 같은 12시간을 두 기준으로 들지 않는다.
     await honorCache.saveSession(
       matchData.gameId,
-      {
-        gameId: matchData.gameId,
-        groupId,
-        team1: voteSession.team1,
-        team2: voteSession.team2,
-        category,
-        channelId: honorMessage.channelId,
-        messageId: honorMessage.id,
-        expiresAt: voteSession.expiresAt,
-      },
-      HONOR_VOTE_DURATION_MS / 1000,
+      serializeHonorSession(voteSession),
+      Math.ceil((voteSession.expiresAt - Date.now()) / 1000),
     );
 
     scheduleHonorVoteClose(matchData.gameId, voteSession.expiresAt);
@@ -2052,14 +2057,10 @@ module.exports = async (app) => {
     // (lazy 복원(getHonorSession)만으로는 아무도 안 누른 세션의 마감 타이머가 영영 안 돈다)
     try {
       // redis connect()는 부팅 초기에 fire-and-forget이라 이 시점에 연결이 안 끝났을 수 있다
-      // (REDIS_HOST 미설정 환경에서는 영영 ready가 안 되므로 기다리지 않는다)
-      for (let i = 0; process.env.REDIS_HOST && i < 20 && !redisClient.isReady(); i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
+      await redisClient.waitUntilReady(10000);
       const stored = await honorCache.listSessions();
-      for (const s of stored) {
-        if (!honorVoteSessions.has(s.gameId)) await rehydrateHonorSession(s);
-      }
+      const missing = stored.filter((s) => !honorVoteSessions.has(s.gameId));
+      await Promise.all(missing.map((s) => rehydrateHonorSession(s)));
       if (stored.length) logger.info(`명예투표 세션 ${stored.length}건 복원`);
     } catch (e) {
       logger.error('명예투표 세션 복원 오류:', e);

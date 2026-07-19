@@ -142,8 +142,7 @@ module.exports.createMatchTeamChannels = async ({
   };
   await Promise.all([cleanup(team1Channel), cleanup(team2Channel)]);
 
-  const moved = results.filter((r) => r.status === 'moved');
-  const skipped = results.filter((r) => r.status !== 'moved');
+  const { moved, skipped } = partitionMoveResults(results);
   logger.info(
     `내전 팀 채널 생성: ${team1Channel.id}, ${team2Channel.id} — 이동 ${moved.length}/${results.length}` +
       (skipped.length
@@ -152,6 +151,11 @@ module.exports.createMatchTeamChannels = async ({
   );
   return { team1Channel, team2Channel, results };
 };
+
+const partitionMoveResults = (results) => ({
+  moved: results.filter((r) => r.status === 'moved'),
+  skipped: results.filter((r) => r.status !== 'moved'),
+});
 
 // 스킵 사유를 사용자가 읽을 수 있는 문구로. 본인이 직접 원인을 알 수 있어야 문의가 줄어든다.
 const SKIP_REASON_TEXT = {
@@ -163,8 +167,7 @@ const SKIP_REASON_TEXT = {
 };
 
 module.exports.summarizeMoveResults = (results) => {
-  const moved = results.filter((r) => r.status === 'moved');
-  const skipped = results.filter((r) => r.status !== 'moved');
+  const { moved, skipped } = partitionMoveResults(results);
   if (!skipped.length) return `🔊 팀 보이스 채널로 이동했습니다! (${moved.length}명)`;
 
   const byReason = {};

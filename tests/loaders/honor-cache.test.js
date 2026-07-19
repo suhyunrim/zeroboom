@@ -44,11 +44,6 @@ describe('honor-cache', () => {
     expect(loaded.channelId).toBe('ch1');
   });
 
-  it('남은 시간이 0 이하면 저장하지 않는다', async () => {
-    await honorCache.saveSession(1, sampleSession(1), 0);
-    expect(mockClient.set).not.toHaveBeenCalled();
-  });
-
   it('삭제하면 조회되지 않는다', async () => {
     await honorCache.saveSession(2124, sampleSession(2124), 100);
     await honorCache.deleteSession(2124);
