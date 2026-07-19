@@ -102,20 +102,35 @@ module.exports.createMatchTeamChannels = async ({
   await ensureTempRecord(team1Channel.id);
   await ensureTempRecord(team2Channel.id);
 
-  // 멤버 이동
+  // 멤버 이동.
+  // 스킵 사유를 반환한다 — 예전에는 모든 실패 경로가 조용히 return이라
+  // "누가 왜 안 옮겨졌는지"를 사후에 알 방법이 없었다.
   const moveMember = async (discordId, targetChannel) => {
+    if (!discordId) return { discordId, status: 'no_discord_id' };
+
     const member = await guild.members.fetch(discordId).catch(() => null);
-    if (member && member.voice && member.voice.channelId) {
-      // 같은 카테고리에 있는 멤버만 이동 (다른 카테고리에 있는 사람은 납치하지 않음)
-      const currentChannel = guild.channels.cache.get(member.voice.channelId);
-      if (currentChannel && currentChannel.parentId !== categoryId) return;
-      return member.voice.setChannel(targetChannel).catch(() => {});
+    if (!member) return { discordId, status: 'not_in_guild' };
+
+    const name = member.displayName;
+    if (!member.voice || !member.voice.channelId) return { discordId, name, status: 'not_in_voice' };
+
+    // 같은 카테고리에 있는 멤버만 이동 (다른 카테고리에 있는 사람은 납치하지 않음)
+    const currentChannel = guild.channels.cache.get(member.voice.channelId);
+    if (currentChannel && currentChannel.parentId !== categoryId) {
+      return { discordId, name, status: 'other_category', detail: currentChannel.name };
+    }
+
+    try {
+      await member.voice.setChannel(targetChannel);
+      return { discordId, name, status: 'moved' };
+    } catch (e) {
+      return { discordId, name, status: 'move_failed', detail: e.message };
     }
   };
 
-  await Promise.all([
-    ...team1DiscordIds.filter(Boolean).map((id) => moveMember(id, team1Channel)),
-    ...team2DiscordIds.filter(Boolean).map((id) => moveMember(id, team2Channel)),
+  const results = await Promise.all([
+    ...team1DiscordIds.map((id) => moveMember(id, team1Channel)),
+    ...team2DiscordIds.map((id) => moveMember(id, team2Channel)),
   ]);
 
   // 이동 후 빈 채널 즉시 정리
@@ -127,8 +142,37 @@ module.exports.createMatchTeamChannels = async ({
   };
   await Promise.all([cleanup(team1Channel), cleanup(team2Channel)]);
 
-  logger.info(`내전 팀 채널 생성: ${team1Channel.id}, ${team2Channel.id}`);
-  return { team1Channel, team2Channel };
+  const moved = results.filter((r) => r.status === 'moved');
+  const skipped = results.filter((r) => r.status !== 'moved');
+  logger.info(
+    `내전 팀 채널 생성: ${team1Channel.id}, ${team2Channel.id} — 이동 ${moved.length}/${results.length}` +
+      (skipped.length
+        ? ` / 스킵: ${skipped.map((r) => `${r.name || r.discordId}(${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ')}`
+        : ''),
+  );
+  return { team1Channel, team2Channel, results };
+};
+
+// 스킵 사유를 사용자가 읽을 수 있는 문구로. 본인이 직접 원인을 알 수 있어야 문의가 줄어든다.
+const SKIP_REASON_TEXT = {
+  no_discord_id: '디스코드 계정 미연동',
+  not_in_guild: '서버에서 찾을 수 없음',
+  not_in_voice: '음성 채널 미접속',
+  other_category: '다른 카테고리 음성 채널에 있음',
+  move_failed: '이동 실패(권한 확인 필요)',
+};
+
+module.exports.summarizeMoveResults = (results) => {
+  const moved = results.filter((r) => r.status === 'moved');
+  const skipped = results.filter((r) => r.status !== 'moved');
+  if (!skipped.length) return `🔊 팀 보이스 채널로 이동했습니다! (${moved.length}명)`;
+
+  const byReason = {};
+  skipped.forEach((r) => { (byReason[r.status] ||= []).push(r.name || r.discordId); });
+  const lines = Object.entries(byReason).map(
+    ([status, names]) => `• ${SKIP_REASON_TEXT[status] || status}: ${names.join(', ')}`,
+  );
+  return `🔊 팀 보이스 채널로 이동했습니다! (${moved.length}/${results.length}명)\n이동하지 못한 인원:\n${lines.join('\n')}`;
 };
 
 // 봇 재시작 시 정합성 처리: DB에 있지만 실제로 없는 채널 정리

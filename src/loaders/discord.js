@@ -1014,7 +1014,7 @@ module.exports = async (app) => {
             getDiscordIds(matchData.team2),
           ]);
 
-          await tempVoiceController.createMatchTeamChannels({
+          const { results } = await tempVoiceController.createMatchTeamChannels({
             guild: interaction.guild,
             categoryId: voiceChannel.parentId,
             ownerDiscordId: interaction.user.id,
@@ -1022,7 +1022,7 @@ module.exports = async (app) => {
             team2DiscordIds,
             channelName: interaction.channel ? interaction.channel.name : null,
           });
-          await interaction.editReply({ content: '🔊 팀 보이스 채널로 이동했습니다!' });
+          await interaction.editReply({ content: tempVoiceController.summarizeMoveResults(results) });
         } catch (e) {
           logger.error('팀 채널 생성/이동 오류:', e);
           await interaction.editReply({ content: '보이스 채널 이동 중 오류가 발생했습니다.' });
