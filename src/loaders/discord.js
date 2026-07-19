@@ -35,6 +35,7 @@ const {
 const { initEmojis } = require('../discord/emoji-manager');
 const { isDiscordAdmin } = require('../discord/adminSync');
 const matchCache = require('../redis/match-cache');
+const honorCache = require('../redis/honor-cache');
 const redisClient = require('../redis/redis');
 
 const ADMINISTRATOR = BigInt(0x8);
@@ -151,6 +152,65 @@ module.exports = async (app) => {
     return 'off';
   }
 
+  const HONOR_VOTE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+  // 자동 마감. 세션이 이미 지워졌으면 no-op이므로 삭제 경로에서 타이머를 따로 정리할 필요 없다.
+  function scheduleHonorVoteClose(gameId, expiresAt) {
+    const fire = async () => {
+      const session = honorVoteSessions.get(gameId);
+      if (!session) return;
+      honorVoteSessions.delete(gameId);
+      honorCache.deleteSession(gameId);
+      try {
+        const results = await honorController.getVoteResults(gameId);
+        if (session.honorMessage) {
+          await session.honorMessage.edit({ content: formatHonorResults(results, session), components: [] });
+        }
+      } catch (e) {
+        logger.error(e);
+      }
+    };
+    const delay = expiresAt - Date.now();
+    if (delay <= 0) fire();
+    else setTimeout(fire, delay);
+  }
+
+  // 재시작으로 Map이 비어도 Redis 백스토어에서 세션을 되살린다.
+  // voters는 백스토어에 없다 — honor_votes 테이블이 정본이라 거기서 재구성한다.
+  async function rehydrateHonorSession(stored) {
+    const session = {
+      gameId: stored.gameId,
+      groupId: stored.groupId,
+      team1: stored.team1,
+      team2: stored.team2,
+      category: stored.category,
+      expiresAt: stored.expiresAt,
+      voters: new Set(),
+    };
+    const votes = await models.honor_vote.findAll({ where: { gameId: stored.gameId }, raw: true });
+    votes.forEach((v) => session.voters.add(v.voterPuuid));
+    try {
+      const voteChannel = await client.channels.fetch(stored.channelId);
+      session.honorMessage = await voteChannel.messages.fetch(stored.messageId);
+    } catch (e) {
+      // 메시지가 지워졌어도 투표는 계속 받는다 — 현황 갱신만 생략됨
+      session.honorMessage = null;
+      logger.warn(`명예투표 메시지 복원 실패(${stored.gameId}): ${e.message}`);
+    }
+    honorVoteSessions.set(session.gameId, session);
+    scheduleHonorVoteClose(session.gameId, session.expiresAt);
+    return session;
+  }
+
+  // 버튼/셀렉트 핸들러 공용 조회: Map miss면 Redis에서 복원
+  async function getHonorSession(gameId) {
+    const existing = honorVoteSessions.get(gameId);
+    if (existing) return existing;
+    const stored = await honorCache.getSession(gameId);
+    if (!stored) return null;
+    return rehydrateHonorSession(stored);
+  }
+
   // 승패 확정 후 MVP(명예) 투표를 시작한다. 수동 버튼 확정과 자동(수집기) 확정이 공유한다.
   async function startHonorVote({ channel, matchData, groupId }) {
     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -164,6 +224,7 @@ module.exports = async (app) => {
       team2: team2Data.map((p) => ({ puuid: p[0], name: p[1] })),
       voters: new Set(),
       category,
+      expiresAt: Date.now() + HONOR_VOTE_DURATION_MS,
     };
     honorVoteSessions.set(matchData.gameId, voteSession);
 
@@ -180,20 +241,23 @@ module.exports = async (app) => {
     });
     voteSession.honorMessage = honorMessage;
 
-    // 12시간 후 자동 마감
-    setTimeout(async () => {
-      const session = honorVoteSessions.get(matchData.gameId);
-      if (session) {
-        honorVoteSessions.delete(matchData.gameId);
-        try {
-          const results = await honorController.getVoteResults(matchData.gameId);
-          await honorMessage.edit({ content: formatHonorResults(results, session), components: [] });
-        } catch (e) {
-          logger.error(e);
-        }
-      }
-    }, 12 * 60 * 60 * 1000);
+    // 재시작 생존용 백스토어 (메시지는 {channelId, messageId} 참조로, voters는 DB가 정본이라 제외)
+    await honorCache.saveSession(
+      matchData.gameId,
+      {
+        gameId: matchData.gameId,
+        groupId,
+        team1: voteSession.team1,
+        team2: voteSession.team2,
+        category,
+        channelId: honorMessage.channelId,
+        messageId: honorMessage.id,
+        expiresAt: voteSession.expiresAt,
+      },
+      HONOR_VOTE_DURATION_MS / 1000,
+    );
 
+    scheduleHonorVoteClose(matchData.gameId, voteSession.expiresAt);
     return honorMessage;
   }
 
@@ -921,6 +985,7 @@ module.exports = async (app) => {
 
           // 투표 세션 및 DB 데이터 삭제
           honorVoteSessions.delete(gameId);
+          honorCache.deleteSession(gameId);
           await Promise.all([honorController.deleteVotesByGameId(gameId), matchData.update({ winTeam: null })]);
           await matchController.applyMatchResult(gameId, previousWinTeam);
           return { previousWinTeam };
@@ -1082,7 +1147,7 @@ module.exports = async (app) => {
       if (split[0] === 'honorVoteStart') {
         const { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
         const gameId = Number(split[1]);
-        const session = honorVoteSessions.get(gameId);
+        const session = await getHonorSession(gameId);
 
         if (!session) {
           await interaction.reply({ content: '투표가 이미 마감되었습니다.', ephemeral: true });
@@ -1143,6 +1208,7 @@ module.exports = async (app) => {
 
         // 기존 투표 세션 및 DB 데이터 삭제
         honorVoteSessions.delete(Number(gameId));
+        honorCache.deleteSession(Number(gameId));
         await honorController.deleteVotesByGameId(Number(gameId));
 
         // 다시 승/패 버튼 표시 (취소 버튼 포함)
@@ -1369,7 +1435,7 @@ module.exports = async (app) => {
         const gameId = Number(split[1]);
         const teamNumber = Number(split[2]);
         const selectedPuuid = interaction.values[0];
-        const session = honorVoteSessions.get(gameId);
+        const session = await getHonorSession(gameId);
 
         if (!session) {
           await interaction.update({ content: '투표가 이미 마감되었습니다.', components: [] });
@@ -1410,6 +1476,7 @@ module.exports = async (app) => {
               // 전원 투표 보너스 지급
               await honorController.grantFullVoteBonus(gameId, session.groupId, allPlayers);
               honorVoteSessions.delete(gameId);
+              honorCache.deleteSession(gameId);
             }
             const results = await honorController.getVoteResults(gameId);
             await session.honorMessage.edit({
@@ -1979,6 +2046,23 @@ module.exports = async (app) => {
       logger.info('임시 음성 채널 정합성 확인 완료');
     } catch (e) {
       logger.error('임시 음성 채널 정합성 확인 오류:', e);
+    }
+
+    // 재시작으로 끊긴 명예투표 세션 복원 — 버튼을 다시 살리고 자동 마감 타이머를 남은 시간만큼 재설정.
+    // (lazy 복원(getHonorSession)만으로는 아무도 안 누른 세션의 마감 타이머가 영영 안 돈다)
+    try {
+      // redis connect()는 부팅 초기에 fire-and-forget이라 이 시점에 연결이 안 끝났을 수 있다
+      // (REDIS_HOST 미설정 환경에서는 영영 ready가 안 되므로 기다리지 않는다)
+      for (let i = 0; process.env.REDIS_HOST && i < 20 && !redisClient.isReady(); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const stored = await honorCache.listSessions();
+      for (const s of stored) {
+        if (!honorVoteSessions.has(s.gameId)) await rehydrateHonorSession(s);
+      }
+      if (stored.length) logger.info(`명예투표 세션 ${stored.length}건 복원`);
+    } catch (e) {
+      logger.error('명예투표 세션 복원 오류:', e);
     }
 
     // 서버 멤버 탈퇴 + 관리자 권한 동기화 (guild.members.fetch 1회로 통합)
