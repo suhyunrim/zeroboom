@@ -8,6 +8,7 @@ const mockModels = {
   summoner_name_history: { findAll: jest.fn() },
   tournament: { findAll: jest.fn() },
   tournament_team: { findAll: jest.fn() },
+  tournament_match: { findAll: jest.fn() },
   tournament_scrim: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn(), destroy: jest.fn() },
 };
 jest.mock('../../src/db/models', () => mockModels);
@@ -42,6 +43,7 @@ beforeEach(() => {
   mockModels.summoner_name_history.findAll.mockResolvedValue([]);
   mockModels.tournament.findAll.mockResolvedValue([]); // 진행 중 대회 없음 (스크림 미판정)
   mockModels.tournament_team.findAll.mockResolvedValue([]);
+  mockModels.tournament_match.findAll.mockResolvedValue([]); // 대진표에 같은 팀쌍 없음 (본선 가드 미발동)
   mockModels.tournament_scrim.findAll.mockResolvedValue([]); // 수동 기록 없음 (중복 가드 미발동)
 });
 
@@ -501,6 +503,71 @@ describe('processRaw (실데이터 통합)', () => {
       recordedByDiscordId: 'collector',
       riotGameKey: 'KR_8294822545',
     });
+  });
+
+  // 본선 경기 오인 방지 (대진표 팀쌍 + scheduledAt 분기) — 셋업 공유
+  const setupVersusScrim = () => {
+    const players = extractPlayers(realGame);
+    const team100Puuids = players.filter((p) => p.teamId === 100).map((p) => p.puuid);
+    const team200Puuids = players.filter((p) => p.teamId === 200).map((p) => p.puuid);
+    mockModels.summoner.findAll.mockResolvedValue(identitySummoners(realGame));
+    mockModels.user.findAll.mockResolvedValue([]);
+    mockModels.match.findAll.mockResolvedValue([]);
+    mockModels.lcu_game_raw.findAll.mockResolvedValue([]);
+    mockModels.tournament.findAll.mockResolvedValue([{ id: 77, status: 'in_progress' }]);
+    mockModels.tournament_team.findAll.mockResolvedValue([
+      { id: 11, tournamentId: 77, members: team100Puuids.map((p) => ({ puuid: p })) },
+      { id: 22, tournamentId: 77, members: team200Puuids.map((p) => ({ puuid: p })) },
+    ]);
+    mockModels.tournament_scrim.findOne.mockResolvedValue(null);
+    mockModels.match_player_stat.bulkCreate.mockResolvedValue([]);
+    mockModels.match_team_stat.bulkCreate.mockResolvedValue([]);
+    return {
+      raw: {
+        id: 1,
+        riotGameKey: 'KR_8294822545',
+        groupId: 4,
+        gameCreation: new Date(realGame.gameCreation),
+        gameDuration: realGame.gameDuration,
+        rawJson: realGame,
+        save: jest.fn(),
+      },
+      gameTime: new Date(realGame.gameCreation).getTime(),
+    };
+  };
+
+  test('대진표 팀쌍 + 예정 시각 ±6h 이내면 본선 경기 — 스크림 기록 생략', async () => {
+    const { raw, gameTime } = setupVersusScrim();
+    mockModels.tournament_match.findAll.mockResolvedValue([
+      { id: 40, tournamentId: 77, team1Id: 11, team2Id: 22, scheduledAt: new Date(gameTime - 30 * 60 * 1000) },
+    ]);
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(true); // 집계 제외 태깅은 유지
+    expect(mockModels.tournament_scrim.create).not.toHaveBeenCalled();
+  });
+
+  test('대진표 팀쌍이라도 예정 시각에서 멀면 상대팀끼리의 연습 — 스크림으로 기록', async () => {
+    const { raw, gameTime } = setupVersusScrim();
+    mockModels.tournament_match.findAll.mockResolvedValue([
+      { id: 40, tournamentId: 77, team1Id: 22, team2Id: 11, scheduledAt: new Date(gameTime + 3 * 24 * 60 * 60 * 1000) },
+    ]);
+
+    await processRaw(raw);
+    expect(mockModels.tournament_scrim.create).toHaveBeenCalledWith(
+      expect.objectContaining({ tournamentId: 77, riotGameKey: 'KR_8294822545' }),
+    );
+  });
+
+  test('대진표 팀쌍인데 예정 시각 미설정이면 구분 불가 — 기록 생략', async () => {
+    const { raw } = setupVersusScrim();
+    mockModels.tournament_match.findAll.mockResolvedValue([
+      { id: 43, tournamentId: 77, team1Id: 11, team2Id: 22, scheduledAt: null },
+    ]);
+
+    const result = await processRaw(raw);
+    expect(result.isScrim).toBe(true);
+    expect(mockModels.tournament_scrim.create).not.toHaveBeenCalled();
   });
 
   test('같은 팀쌍 수동 기록이 게임 시각 ±24h 내에 있으면 자동 기록 생략 (수동이 정본)', async () => {

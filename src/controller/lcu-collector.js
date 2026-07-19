@@ -348,14 +348,48 @@ async function detectScrim(groupId, players, dbByPid) {
 // 팀vs팀 스크림을 tournament_scrims에 자동 기록 (게임당 1행, 승자 1:0).
 // riotGameKey unique로 멱등 — 백필/치유 재처리 시 중복 기록되지 않는다.
 const SCRIM_MANUAL_DUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+// 대진표 매치 예정 시각 ±이 범위 안의 게임은 본선 경기로 본다 (Bo3 최대 ~3h + 시작 지연 여유)
+const BRACKET_MATCH_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 async function recordScrimResult({ raw, game, scrim }) {
   const existing = await models.tournament_scrim.findOne({ where: { riotGameKey: raw.riotGameKey } });
   if (existing) return;
+  const gameTime = new Date(raw.gameCreation).getTime();
+
+  // 본선 경기 오인 방지: 감지된 팀 쌍이 대진표에 있으면 경기 예정 시각으로 본선/스크림을 가른다.
+  // 실측(7차 CK): 본선 4게임이 스크림으로 오기록돼 AI 예측 팩터를 오염시켰고, 대회는 대진표를
+  // 며칠에 걸쳐 소화(rolling)하므로 heldAt은 기준이 못 된다 — 매치별 scheduledAt이 정답.
+  // - 예정 시각 ±6h 이내 → 본선 (기록 안 함)
+  // - 예정 시각이 전부 있고 전부 멀다 → 상대팀끼리의 연습 → 스크림 (기록)
+  // - 예정 시각 없는 매치가 있다 → 구분 불가 → 틀린 기록보다 빈 기록이 낫다 (생략)
+  const bracketPairs = await models.tournament_match.findAll({
+    where: {
+      tournamentId: scrim.tournamentId,
+      [Op.or]: [
+        { team1Id: scrim.versus.blueTeamId, team2Id: scrim.versus.redTeamId },
+        { team1Id: scrim.versus.redTeamId, team2Id: scrim.versus.blueTeamId },
+      ],
+    },
+    raw: true,
+  });
+  if (bracketPairs.length > 0) {
+    const nearSchedule = bracketPairs.some(
+      (m) => m.scheduledAt && Math.abs(new Date(m.scheduledAt).getTime() - gameTime) <= BRACKET_MATCH_WINDOW_MS,
+    );
+    const allScheduled = bracketPairs.every((m) => m.scheduledAt);
+    if (nearSchedule || !allScheduled) {
+      logger.info(
+        `[collector] 스크림 자동 기록 생략 (${raw.riotGameKey}): 대진표 팀쌍 — ${
+          nearSchedule ? '예정 시각 근접(본선 경기)' : '예정 시각 미설정(구분 불가)'
+        }`,
+      );
+      return;
+    }
+  }
+
   // 같은 팀쌍의 수동 기록이 게임 시각 ±24h 내(입력 시점 기준)에 있으면 팀장이 이미 올린
   // 세트로 보고 기록하지 않는다 — 수동 기록이 있으면 수동이 정본. 소급 업로드(과거 스크림이
   // 뒤늦게 수집)돼도 기존 수동 기록과 이중 카운트되지 않게 하는 방어선.
-  const gameTime = new Date(raw.gameCreation).getTime();
   const manualRows = await models.tournament_scrim.findAll({
     where: {
       tournamentId: scrim.tournamentId,
