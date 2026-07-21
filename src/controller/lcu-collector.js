@@ -648,6 +648,48 @@ function verifyChampSelect(champSelect, game) {
   return overlap >= CHAMP_SELECT_MIN_OVERLAP ? champSelect : null;
 }
 
+function buildLiveTimelinePayload(verifiedLive) {
+  return {
+    capturedAt: verifiedLive.capturedAt,
+    durationSec: verifiedLive.durationSec,
+    partial: verifiedLive.partial, // 게임 도중 켜져 곡선이 반쪽인 판
+    gameMode: verifiedLive.gameMode,
+    mapTerrain: verifiedLive.mapTerrain, // 용 영혼 지형
+    static: verifiedLive.static,
+    ticks: verifiedLive.ticks,
+    // self(골드·스킬레벨)는 Live API가 본인 것만 주는 비대칭 데이터 —
+    // 켠 사람만 기록이 생기므로 통계·표시에 쓰지 말고 보관만 한다.
+    self: verifiedLive.self,
+    selfRiotId: verifiedLive.selfRiotId,
+  };
+}
+
+// 중복 업로드에서 기존 raw의 빈 실시간 필드만 채운다 (덮어쓰지 않음).
+// 먼저 올린 참가자에게 live가 없고 뒤에 올린 참가자에게 있는 경우의 유실 방지.
+async function backfillLiveData(existing, { live, champSelect, game }) {
+  const merged = [];
+  if (!existing.liveEventsJson && !existing.liveTimelineJson) {
+    const verifiedLive = verifyLive(live, game);
+    if (verifiedLive) {
+      existing.liveEventsJson = verifiedLive.events;
+      existing.liveTimelineJson = buildLiveTimelinePayload(verifiedLive);
+      merged.push('live');
+    }
+  }
+  if (!existing.champSelectJson) {
+    const verifiedChampSelect = verifyChampSelect(champSelect, game);
+    if (verifiedChampSelect) {
+      existing.champSelectJson = verifiedChampSelect;
+      merged.push('champSelect');
+    }
+  }
+  if (merged.length) {
+    await existing.save();
+    logger.info(`[collector] 중복 업로드에서 실시간 데이터 보강 (${existing.riotGameKey}: ${merged.join(', ')})`);
+  }
+  return merged;
+}
+
 // 업로드 수신: 참가자 검증 → Riot ID로 그룹 자동판별 → dedup → raw 저장 → 통계 생성(+매핑)
 // live/champSelect는 게임 도중 elise가 켜져 있던 판에만 실려 온다 (대부분 null).
 async function ingestGame({ uploaderPuuid, game, live = null, champSelect = null }) {
@@ -663,7 +705,8 @@ async function ingestGame({ uploaderPuuid, game, live = null, champSelect = null
 
   const existing = await models.lcu_game_raw.findOne({ where: { riotGameKey } });
   if (existing) {
-    return { status: 'duplicate', riotGameKey };
+    const merged = await backfillLiveData(existing, { live, champSelect, game });
+    return { status: 'duplicate', riotGameKey, groupId: existing.groupId, merged };
   }
 
   // Riot ID(gameName#tagLine)로 우리 DB puuid를 조회한 뒤 그룹 판별
@@ -698,21 +741,7 @@ async function ingestGame({ uploaderPuuid, game, live = null, champSelect = null
     bansJson: bans,
     rawJson: game,
     liveEventsJson: verifiedLive ? verifiedLive.events : null,
-    liveTimelineJson: verifiedLive
-      ? {
-          capturedAt: verifiedLive.capturedAt,
-          durationSec: verifiedLive.durationSec,
-          partial: verifiedLive.partial, // 게임 도중 켜져 곡선이 반쪽인 판
-          gameMode: verifiedLive.gameMode,
-          mapTerrain: verifiedLive.mapTerrain, // 용 영혼 지형
-          static: verifiedLive.static,
-          ticks: verifiedLive.ticks,
-          // self(골드·스킬레벨)는 Live API가 본인 것만 주는 비대칭 데이터 —
-          // 켠 사람만 기록이 생기므로 통계·표시에 쓰지 말고 보관만 한다.
-          self: verifiedLive.self,
-          selfRiotId: verifiedLive.selfRiotId,
-        }
-      : null,
+    liveTimelineJson: verifiedLive ? buildLiveTimelinePayload(verifiedLive) : null,
     champSelectJson: verifiedChampSelect,
   });
 

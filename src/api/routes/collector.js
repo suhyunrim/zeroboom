@@ -36,7 +36,18 @@ module.exports = (app) => {
 
       // dedup / 판별 실패 / 참가자 아님 → 재업로드 방지 위해 2xx로 응답 (elise가 완료 처리)
       if (result.status === 'duplicate') {
-        return res.status(200).json({ result: 'duplicate', riotGameKey: result.riotGameKey });
+        // 중복이라도 기존 raw의 빈 live/champSelect를 채웠으면 기록을 남긴다
+        if (result.merged && result.merged.length) {
+          auditLog.log({
+            groupId: result.groupId,
+            actorDiscordId: null,
+            actorName: `collector(${uploaderPuuid})`,
+            action: 'collector.live_backfill',
+            details: { riotGameKey: result.riotGameKey, uploaderPuuid, merged: result.merged },
+            source: 'api',
+          });
+        }
+        return res.status(200).json({ result: 'duplicate', riotGameKey: result.riotGameKey, merged: result.merged || [] });
       }
       if (result.status === 'skipped') {
         return res.status(200).json({ result: 'skipped', reason: result.reason, riotGameKey: result.riotGameKey });

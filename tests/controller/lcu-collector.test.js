@@ -905,7 +905,80 @@ describe('ingestGame (무설정 자동 인식)', () => {
     mockModels.lcu_game_raw.findOne.mockResolvedValue({ id: 1 });
     const result = await ingestGame({ uploaderPuuid: uploader, game: realGame });
     expect(result.status).toBe('duplicate');
+    expect(result.merged).toEqual([]);
     expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
+  });
+
+  test('중복 업로드에 실시간 데이터가 있으면 기존 raw의 빈 필드를 채운다', async () => {
+    const existing = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      liveEventsJson: null,
+      liveTimelineJson: null,
+      champSelectJson: null,
+      save: jest.fn(),
+    };
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(existing);
+    const result = await ingestGame({
+      uploaderPuuid: uploader,
+      game: realGame,
+      live: buildLive(),
+      champSelect: buildChampSelect(),
+    });
+    expect(result.status).toBe('duplicate');
+    expect(result.groupId).toBe(2);
+    expect(result.merged).toEqual(['live', 'champSelect']);
+    expect(existing.liveEventsJson).toHaveLength(1);
+    expect(existing.liveTimelineJson.ticks).toHaveLength(1);
+    expect(existing.liveTimelineJson.selfRiotId).toBe(riotIds[0]);
+    expect(existing.champSelectJson.actions).toHaveLength(1);
+    expect(existing.save).toHaveBeenCalled();
+    expect(mockModels.lcu_game_raw.create).not.toHaveBeenCalled();
+  });
+
+  test('기존 raw에 이미 실시간 데이터가 있으면 덮어쓰지 않는다', async () => {
+    const existing = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      liveEventsJson: [{ EventName: 'GameStart' }],
+      liveTimelineJson: { ticks: [] },
+      champSelectJson: { actions: [{ id: 99 }] },
+      save: jest.fn(),
+    };
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(existing);
+    const result = await ingestGame({
+      uploaderPuuid: uploader,
+      game: realGame,
+      live: buildLive(),
+      champSelect: buildChampSelect(),
+    });
+    expect(result.merged).toEqual([]);
+    expect(existing.champSelectJson.actions[0].id).toBe(99);
+    expect(existing.save).not.toHaveBeenCalled();
+  });
+
+  test('중복 업로드의 실시간 데이터도 검증 실패 시 채우지 않는다', async () => {
+    const existing = {
+      id: 1,
+      riotGameKey: 'KR_8294822545',
+      groupId: 2,
+      liveEventsJson: null,
+      liveTimelineJson: null,
+      champSelectJson: null,
+      save: jest.fn(),
+    };
+    mockModels.lcu_game_raw.findOne.mockResolvedValue(existing);
+    const result = await ingestGame({
+      uploaderPuuid: uploader,
+      game: realGame,
+      live: buildLive({ roster: ['남#KR1', '의#KR1', '판#KR1'] }), // 명단 불일치
+      champSelect: buildChampSelect({ actions: [] }),
+    });
+    expect(result.merged).toEqual([]);
+    expect(existing.liveEventsJson).toBeNull();
+    expect(existing.save).not.toHaveBeenCalled();
   });
 
   test('정상 저장 + 그룹 자동 판별 + 통계 생성', async () => {
